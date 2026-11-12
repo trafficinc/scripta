@@ -1,0 +1,49 @@
+<?scr
+// A non-overwriting directory copy, not an archive or metadata-preserving backup.
+function canonicalDirectory($path: string): string {
+    $previous = Dir::current();
+    Dir::change($path);
+    $result = Dir::current();
+    Dir::change($previous);
+    return $result;
+}
+function copyDirectory($source: string, $destination: string, $apply: bool): void {
+    if ($apply) {
+        Dir::create($destination);
+    }
+    foreach (Dir::files($source) as $file) {
+        $target = Path::join($destination, $file->name);
+        echo "Copy " . $file->path . " -> " . $target . "\n";
+        if ($apply) {
+            File::copy($file->path, $target);
+        }
+    }
+    foreach (Dir::directories($source) as $directory) {
+        copyDirectory($directory->path, Path::join($destination, $directory->name), $apply);
+    }
+}
+$source = Cli::arg(0);
+$destination = Cli::arg(1);
+if ($source === null || $destination === null) {
+    echo "Usage: scr directory-backup.scr SOURCE NEW_DESTINATION [--apply]\n";
+    exit(2);
+}
+$source = canonicalDirectory($source);
+$destination = Path::absolute($destination);
+$parent = canonicalDirectory(Path::parent($destination));
+$destination = Path::join($parent, Path::filename($destination));
+if (Dir::exists($destination) || File::exists($destination)) {
+    throw "backup destination must be new";
+}
+$ancestor = $parent;
+while (true) {
+    if ($ancestor === $source) {
+        throw "backup destination must be outside the source tree";
+    }
+    $parent = Path::parent($ancestor);
+    if ($parent === $ancestor || $parent === "") {
+        break;
+    }
+    $ancestor = $parent;
+}
+copyDirectory($source, $destination, Cli::has("apply"));

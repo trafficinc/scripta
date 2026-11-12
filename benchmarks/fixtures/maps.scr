@@ -1,0 +1,1 @@
+<?scr $map=["seed"=>0]; for ($i=0;$i<128;$i+=1) { $map[str($i)]=$i; } $sum=0; for ($i=0;$i<8000;$i+=1) { $sum += $map["64"]; } echo str($sum) . "\n";

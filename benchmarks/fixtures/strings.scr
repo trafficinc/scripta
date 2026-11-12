@@ -1,0 +1,1 @@
+<?scr $text=""; for ($i=0;$i<12000;$i+=1) { $text .= "abcdefgh"; } echo str(len($text)) . "\n";

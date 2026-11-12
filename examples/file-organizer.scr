@@ -1,0 +1,22 @@
+<?scr
+// Preview by default. --apply moves regular files; collisions are errors.
+$source = Cli::arg(0);
+$destination = Cli::arg(1);
+if ($source === null || $destination === null) {
+    echo "Usage: scr file-organizer.scr SOURCE DESTINATION [--apply]\n";
+    exit(2);
+}
+$apply = Cli::has("apply");
+foreach (Dir::files($source) as $file) {
+    $extension = $file->extension;
+    if ($extension === "") {
+        $extension = "other";
+    }
+    $folder = Path::join($destination, $extension);
+    $target = Path::join($folder, $file->name);
+    echo "Move " . $file->path . " -> " . $target . "\n";
+    if ($apply) {
+        Dir::createAll($folder);
+        File::move($file->path, $target);
+    }
+}

@@ -1,0 +1,25 @@
+<?scr
+// Preview by default. Selects only shallow regular .log files older than --days.
+$directory = Cli::arg(0);
+if ($directory === null) {
+    echo "Usage: scr log-cleaner.scr DIRECTORY [--days=30] [--apply]\n";
+    exit(2);
+}
+$days = 30;
+$value = Cli::option("days");
+if ($value !== null) {
+    $days = int($value);
+}
+if ($days < 0) {
+    throw "days must be nonnegative";
+}
+$cutoff = Date::now() / 1000 - $days * 86400;
+$apply = Cli::has("apply");
+foreach (Dir::files($directory) as $file) {
+    if ($file->extension === "log" && $file->modified < $cutoff) {
+        echo "Delete " . $file->path . "\n";
+        if ($apply) {
+            File::delete($file->path);
+        }
+    }
+}

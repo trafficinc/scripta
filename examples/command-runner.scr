@@ -1,0 +1,18 @@
+<?scr
+// Arguments are an explicit JSON string array, never a shell command line.
+$program = Cli::arg(0);
+if ($program === null) {
+    echo "Usage: scr command-runner.scr PROGRAM [JSON_ARGUMENT_ARRAY]\n";
+    exit(2);
+}
+$value = Cli::arg(1);
+if ($value === null) {
+    $value = "[]";
+}
+$arguments = Json::decode($value);
+$result = Process::run($program, $arguments, ["timeoutMs" => 10000, "maxOutputBytes" => 1048576]);
+echo $result->stdout;
+if (!$result->success) {
+    Log::error("Child process failed; stderr is available through the Process API");
+    exit(1);
+}

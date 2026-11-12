@@ -1,0 +1,8 @@
+<?scr // header
+function test( $x:int ): string{/*keep me*/
+// own line
+return "a\n\"b"; # tail
+}
+/* multi
+ unchanged */
+echo test(1); ?>

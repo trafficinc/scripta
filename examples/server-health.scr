@@ -1,0 +1,10 @@
+<?scr
+// One local observation. CPU measurement blocks for its observation interval.
+$path = Cli::arg(0);
+if ($path === null) {
+    $path = System::tempDirectory();
+}
+$memory = System::memoryUsage();
+$disk = System::diskUsage($path);
+$report = ["hostname" => System::hostname(), "platform" => System::platform(), "architecture" => System::architecture(), "uptimeSeconds" => System::uptime(), "cpuPercent" => System::cpuUsage(), "systemMemory" => ["totalBytes" => $memory->totalBytes, "availableBytes" => $memory->availableBytes], "disk" => ["totalBytes" => $disk->totalBytes, "usedBytes" => $disk->usedBytes, "availableBytes" => $disk->availableBytes, "percentUsed" => $disk->percentUsed]];
+echo Json::pretty($report) . "\n";

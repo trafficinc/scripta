@@ -1,0 +1,9 @@
+﻿#!/usr/bin/env scr
+<?scr
+$s = 'line
+two';
+$x = - -1;
+$list = [1, 2.0, "?> /* literal */"];
+$n = $list[0];
+echo $s;
+?>

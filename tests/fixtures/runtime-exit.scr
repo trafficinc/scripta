@@ -1,0 +1,7 @@
+<?scr
+function stop(): void {
+    echo "before\n";
+    exit(7);
+}
+stop();
+echo "after\n";

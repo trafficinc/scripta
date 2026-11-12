@@ -1,0 +1,203 @@
+//! Syntax structures, independent of parsing and evaluation.
+use scr_diagnostics::Span;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Literal {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryOp {
+    Or,
+    And,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    Concat,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    Positive,
+    Negative,
+    Not,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssignmentOp {
+    Assign,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Concat,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExprKind {
+    Literal(Literal),
+    Variable(String),
+    /// A callable/native name, distinct from a `$` variable.
+    Identifier(String),
+    Unary(UnaryOp, Box<Expr>),
+    Binary(Box<Expr>, BinaryOp, Box<Expr>),
+    Assignment(Box<Expr>, AssignmentOp, Box<Expr>),
+    Call(Box<Expr>, Vec<Expr>),
+    StaticCall {
+        namespace: Box<Expr>,
+        name: String,
+        arguments: Vec<Expr>,
+    },
+    PropertyAccess(Box<Expr>, String),
+    IndexAccess(Box<Expr>, Box<Expr>),
+    List(Vec<Expr>),
+    Map(Vec<(Expr, Expr)>),
+    Grouped(Box<Expr>),
+}
+
+/// A statement's span includes its semicolon or complete braced body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Statement {
+    pub kind: StatementKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StatementKind {
+    Echo(Expr),
+    Expression(Expr),
+    Block(Block),
+    If {
+        branches: Vec<(Expr, Box<Statement>)>,
+        else_branch: Option<Box<Statement>>,
+    },
+    While {
+        condition: Expr,
+        body: Box<Statement>,
+    },
+    For {
+        initializer: Vec<Expr>,
+        condition: Vec<Expr>,
+        increment: Vec<Expr>,
+        body: Box<Statement>,
+    },
+    Foreach {
+        iterable: Expr,
+        key: Option<Binding>,
+        value: Binding,
+        body: Box<Statement>,
+    },
+    Break,
+    Continue,
+    Function(FunctionDeclaration),
+    Return(Option<Expr>),
+    Try {
+        body: Block,
+        catches: Vec<CatchClause>,
+    },
+    Throw(Expr),
+    Exit(Option<Expr>),
+    Require {
+        path: Expr,
+        once: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    pub statements: Vec<Statement>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Binding {
+    /// Variable name without its `$` prefix.
+    pub name: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeAnnotation {
+    pub name: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parameter {
+    pub binding: Binding,
+    pub annotation: Option<TypeAnnotation>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionDeclaration {
+    pub name: String,
+    pub name_span: Span,
+    pub parameters: Vec<Parameter>,
+    pub return_type: Option<TypeAnnotation>,
+    pub body: Block,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatchClause {
+    pub binding: Binding,
+    pub exception_type: Option<TypeAnnotation>,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Program {
+    pub statements: Vec<Statement>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cloned_tree_preserves_structure_and_independent_spans() {
+        let variable = Expr {
+            kind: ExprKind::Variable("x".into()),
+            span: Span::new(1, 3),
+        };
+        let grouped = Expr {
+            kind: ExprKind::Grouped(Box::new(variable.clone())),
+            span: Span::new(0, 4),
+        };
+        assert_eq!(grouped.clone(), grouped);
+        let ExprKind::Grouped(inner) = grouped.kind else {
+            panic!("expected group")
+        };
+        assert_eq!(*inner, variable);
+        assert_ne!(inner.span, grouped.span);
+    }
+
+    #[test]
+    fn literals_and_names_remain_distinct() {
+        assert_ne!(Literal::Int(1), Literal::Float(1.0));
+        assert_ne!(Literal::Bool(false), Literal::Null);
+        assert_ne!(
+            ExprKind::Variable("str".into()),
+            ExprKind::Identifier("str".into())
+        );
+    }
+}

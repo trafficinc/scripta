@@ -1,0 +1,8 @@
+<?scr
+for ($i = 0; $i < 3; $i += 1) {
+    if ($i === 1)
+        continue;
+    echo str($i);
+}
+foreach ([1, 2] as $v)
+    echo str($v);

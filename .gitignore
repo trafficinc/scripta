@@ -1,0 +1,35 @@
+/target/
+
+/dist/
+
+# Local environment files; keep sanitized templates publishable.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+.envrc
+
+# Credentials and private keys.
+.aws/
+.ssh/
+.netrc
+.npmrc
+.pypirc
+credentials.json
+credentials.*.json
+secrets.json
+secrets.*.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+
+# Local logs and OS metadata.
+*.log
+.DS_Store

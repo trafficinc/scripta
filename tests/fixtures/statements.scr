@@ -1,0 +1,20 @@
+<?scr
+
+echo "Starting...\n";
+
+function add($a: int, $b: int): int {
+    return $a + $b;
+}
+
+$total = add(10, 20);
+
+if ($total > 20) {
+    echo("Success\n");
+} else {
+    echo "Failure\n";
+}
+
+foreach ([1, 2, 3] as $value) {
+    echo str($value) . "\n";
+}
+?>

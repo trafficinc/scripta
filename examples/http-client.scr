@@ -1,0 +1,13 @@
+<?scr
+// Network access happens only when an explicit URL is provided.
+$url = Cli::arg(0);
+if ($url === null) {
+    echo "Usage: scr http-client.scr URL\n";
+    exit(2);
+}
+$response = Http::get($url, ["timeoutMs" => 10000, "maxBodyBytes" => 1048576, "maxRedirects" => 3]);
+if (!$response->ok()) {
+    Log::error("HTTP request failed with status " . str($response->status));
+    exit(1);
+}
+echo Json::pretty($response->json()) . "\n";

@@ -1,0 +1,46 @@
+# Release checklist — 0.1.0
+
+Check only completed items with evidence. A workflow being present does not mean
+its jobs have passed. Unchecked platform entries block an all-platform release.
+
+## Source and version
+
+- [x] Standalone scr binary target; workspace version 0.1.0.
+- [x] Rust/compiler/actions pinned, Cargo.lock retained, unwind/overflow-safe profiles.
+- [x] Required examples and standard-library reference included in package inputs.
+- [ ] Review git diff, licenses/notices, release limitations, and dependency updates.
+- [ ] Verify the source tag exactly matches v0.1.0 and the intended reviewed commit.
+- [ ] Ensure the source tree is clean and source/CI/release settings are committed.
+
+## Local evidence
+
+- [x] Complete macOS ARM64 debug test suite and Clippy passed during preparation.
+- [x] Declared MSRV check result recorded.
+- [x] Complete native dist-profile test suite passed.
+- [x] Native distribution binary dependency inspection passed.
+- [x] Archive inventory/checksums verified; identical-input repack has identical hash.
+- [x] Extracted archive passed offline smoke with no external language runtime PATH.
+- [x] Archive name/hash and local machine/OS recorded in dist validation evidence.
+
+## Required native CI evidence before advertising all targets
+
+- [ ] Linux x86-64 debug/dist/CLI/package tests and dependency report.
+- [ ] Linux ARM64 debug/dist/CLI/package tests and dependency report.
+- [ ] macOS ARM64 debug/dist/CLI/package tests on the declared macOS baseline.
+- [ ] macOS x86-64 debug/dist/CLI/package tests and dependency report.
+- [ ] Windows x86-64 debug/dist/CLI/package tests and static-CRT import report.
+- [ ] Review the MSRV job and every relevant test; no ignored/skipped matrix failures.
+- [ ] Attach per-target validation records and CI run URLs; update compatibility rows.
+
+## Candidate review and publication (maintainer action)
+
+- [ ] Verify aggregate SHA256SUMS and all five uniquely named archives.
+- [ ] Inspect documentation/examples and installation/uninstallation from an archive.
+- [ ] Confirm signing/notarization status is described honestly; no unsupported claims.
+- [ ] Review unsigned preview limitations and explicit optional network/process behavior.
+- [ ] Prepare release notes with platform evidence and known limitations.
+- [ ] Publish chosen validated assets, checksums, validation and dependency reports.
+- [ ] Download a published artifact, verify checksum, and repeat local-script smoke.
+
+No tag, release, registry entry, account setting, or deployment is changed merely
+by checking this file or running the candidate workflow.

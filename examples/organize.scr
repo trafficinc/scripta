@@ -1,0 +1,12 @@
+<?scr
+// Run from a directory with a downloads folder. Existing destinations are kept:
+// a duplicate name raises AlreadyExistsError rather than overwriting a file.
+$source = "downloads";
+$destination = "documents";
+Dir::createAll($destination);
+foreach (Dir::files($source) as $file) {
+    if ($file->extension === "pdf") {
+        File::move($file->path, Path::join($destination, $file->name));
+    }
+}
+echo "Finished organizing files.\n";

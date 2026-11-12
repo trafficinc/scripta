@@ -1,0 +1,1 @@
+<?scr if(true)if(false)echo "a";else echo "b";try{require_once "x.scr";}catch(Error $e){Log::error($e);}

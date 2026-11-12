@@ -1,0 +1,12 @@
+#!/usr/bin/env scr
+<?scr
+// Syntax coverage; validation parses this without executing it.
+function sample($path: string): bool {
+    foreach ([1, 2.5e2] as $value) {
+        if ($value !== null && $value >= 1) {
+            echo "Unicode: 世界\n";
+        }
+    }
+    return true;
+}
+?>

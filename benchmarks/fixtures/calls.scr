@@ -1,0 +1,1 @@
+<?scr function add($x) { return $x+1; } $sum=0; for ($i=0;$i<10000;$i+=1) { $sum=add($sum); } echo str($sum) . "\n";

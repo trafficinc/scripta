@@ -1,0 +1,8 @@
+<?scr
+function inner(): int {
+    return 1 / 0;
+}
+function outer(): int {
+    return inner();
+}
+outer();
