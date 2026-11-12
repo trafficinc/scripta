@@ -320,6 +320,24 @@ fn error_playground_recovers_and_uncaught_errors_exit_one_with_source_details() 
 }
 
 #[test]
+fn functions_playground_runs_with_defaults_variadics_and_captured_callbacks() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/functions.scr");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    let formatted = scr_cli::formatter::format(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&formatted).unwrap(), formatted);
+    let mut output = Vec::new();
+    scr_cli::pipeline::run(&formatted, &mut output).unwrap();
+    let expected = "Hello, Scripta!\nWelcome, Scripta!\nTotal: 16\nCallback: 14\nCounter: 6, 8\nFresh defaults: [[\"new\"],[\"new\"]]\n";
+    assert_eq!(String::from_utf8(output).unwrap(), expected);
+    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        .arg(path)
+        .output()
+        .unwrap();
+    assert_eq!(success(output), expected);
+}
+
+#[test]
 fn health_example_runs_locally_and_reference_lists_all_exports() {
     let dir = tempfile::tempdir().unwrap();
     let output = success(run("server-health.scr", &[dir.path().as_os_str()]));

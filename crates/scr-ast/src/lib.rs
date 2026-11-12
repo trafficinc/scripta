@@ -73,6 +73,7 @@ pub enum ExprKind {
     List(Vec<Expr>),
     Map(Vec<(Expr, Expr)>),
     Grouped(Box<Expr>),
+    Function(Box<FunctionDeclaration>),
 }
 
 /// A statement's span includes its semicolon or complete braced body.
@@ -142,10 +143,12 @@ pub struct TypeAnnotation {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
     pub binding: Binding,
     pub annotation: Option<TypeAnnotation>,
+    pub default: Option<Expr>,
+    pub variadic: bool,
     pub span: Span,
 }
 
@@ -169,6 +172,85 @@ pub struct CatchClause {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Program {
     pub statements: Vec<Statement>,
+}
+
+impl Expr {
+    /// Visit direct expression children. Function signatures and bodies are
+    /// separate scopes and are handled explicitly by callers.
+    pub fn visit_children(&self, mut visit: impl FnMut(&Expr)) {
+        match &self.kind {
+            ExprKind::Unary(_, e)
+            | ExprKind::Grouped(e)
+            | ExprKind::AppendAccess(e)
+            | ExprKind::PropertyAccess(e, _) => visit(e),
+            ExprKind::Binary(a, _, b)
+            | ExprKind::Assignment(a, _, b)
+            | ExprKind::IndexAccess(a, b) => {
+                visit(a);
+                visit(b);
+            }
+            ExprKind::Call(callee, args) => {
+                visit(callee);
+                for arg in args {
+                    visit(arg);
+                }
+            }
+            ExprKind::StaticCall {
+                namespace,
+                arguments,
+                ..
+            } => {
+                visit(namespace);
+                for arg in arguments {
+                    visit(arg);
+                }
+            }
+            ExprKind::List(items) => {
+                for item in items {
+                    visit(item);
+                }
+            }
+            ExprKind::Map(entries) => {
+                for (key, value) in entries {
+                    visit(key);
+                    visit(value);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Statement {
+    /// Visit expressions directly owned by a statement, excluding nested
+    /// statements and function signatures/bodies.
+    pub fn visit_expressions(&self, mut visit: impl FnMut(&Expr)) {
+        match &self.kind {
+            StatementKind::Echo(e)
+            | StatementKind::Expression(e)
+            | StatementKind::Throw(e)
+            | StatementKind::Require { path: e, .. } => visit(e),
+            StatementKind::Return(Some(e)) | StatementKind::Exit(Some(e)) => visit(e),
+            StatementKind::If { branches, .. } => {
+                for (condition, _) in branches {
+                    visit(condition);
+                }
+            }
+            StatementKind::While { condition, .. } => visit(condition),
+            StatementKind::For {
+                initializer,
+                condition,
+                increment,
+                ..
+            } => {
+                for e in initializer.iter().chain(condition).chain(increment) {
+                    visit(e);
+                }
+            }
+            StatementKind::Foreach { iterable, .. } => visit(iterable),
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]

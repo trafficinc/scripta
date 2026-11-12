@@ -47,7 +47,8 @@ generated HTML or JSON through an existing web server when you need a dashboard.
   bounded process output, timeouts, and local system metrics.
 - **Structured data and APIs:** lists, maps, JSON, HTTPS requests, UTC dates,
   and structured local logging.
-- **Reusable scripts:** functions, closures, and local `require` / `require_once`.
+- **Reusable scripts:** default/variadic parameters, anonymous functions, lexical
+  captures, and local `require` / `require_once`.
 - **Developer tools:** syntax checks, a comment-preserving formatter, error codes,
   source locations, and runtime stack traces.
 - **A standalone interpreter:** the installed executable uses platform system
@@ -95,6 +96,7 @@ cargo build -p scr-cli --locked
 ./target/debug/scr run playground/collections.scr
 ./target/debug/scr run playground/log-analyzer.scr playground/sample-events.txt
 ./target/debug/scr run playground/errors.scr
+./target/debug/scr run playground/functions.scr
 ```
 
 | Script | What to try |
@@ -107,6 +109,7 @@ cargo build -p scr-cli --locked
 | [collections.scr](playground/collections.scr) | Filter, sort, and summarize records using list helpers and safe map lookups. |
 | [log-analyzer.scr](playground/log-analyzer.scr) | Analyze [sample events](playground/sample-events.txt), count log levels, list sorted services, and report malformed records. |
 | [errors.scr](playground/errors.scr) | Recover from indexing, arithmetic, and operand-type failures; add `--uncaught` to demonstrate a diagnostic and exit status 1. |
+| [functions.scr](playground/functions.scr) | Try defaults, typed variadics, anonymous callbacks, captured counters, and independent collection defaults. |
 
 After editing, check a script with
 `./target/debug/scr check playground/expenses.scr`, then run it again. There is no
@@ -401,8 +404,7 @@ define current support.
 | Medium | Pop and callback-based map/filter/reduce | List removal, slicing, concatenation, sorting, and membership are implemented. Use loops and new lists to filter or rebuild collections. |
 | Lower | Null fallback syntax | `Map::has` and `Map::get` provide safe key lookups. No `??`, `isset`, or null-safe access syntax. Direct missing-key indexing raises catchable `IndexError`. |
 | Medium | Numeric helpers: abs, min/max, rounding, powers, random numbers | Arithmetic, remainder, comparisons, and explicit numeric conversions exist. There is no math/random module. |
-| Medium | Script function defaults, variadic parameters, named arguments | Script-defined functions require their declared positional arguments. Pass a list/map for options or variable-length data. Host native functions have separate optional/variadic support. |
-| Medium | Anonymous functions and arrow functions | Named nested functions capture their lexical scope and can be assigned to variables; anonymous function literals are absent. |
+| Lower | Named arguments, arrow functions, and call-site unpacking | Default and variadic parameters and `function (...) { ... }` literals are supported. Calls still use positional arguments; `...` declares a variadic parameter and does not unpack arguments at a call site. |
 | Medium | String interpolation and formatting helpers | Build strings with `.` and explicit `str(value)` conversions. |
 | Medium | Guaranteed cleanup syntax | `try` / `catch` exists; `finally`, `defer`, and resource-management syntax do not. Cleanup must be arranged explicitly. |
 | Medium | Streaming file I/O and line iteration | `File::read` loads bounded whole files; file streams and a line iterator are absent. `Cli::prompt` supports interactive input. |
@@ -410,11 +412,12 @@ define current support.
 
 String utilities are complete in [Phase 1](docs/cli-roadmap.md#phase-1-strings).
 Collection helpers are complete in [Phase 2](docs/cli-roadmap.md#phase-2-collections-and-maps).
-Catchable core indexing, arithmetic, and operand-type errors are implemented in
-[Phase 3](docs/cli-roadmap.md#phase-3-recoverable-errors) and awaiting completion
-review. The log analyzer playground combines the first two phases, and
-`playground/errors.scr` demonstrates recovery. Runtime safety limits and
-cancellation continue to bypass catches.
+Catchable core indexing, arithmetic, and operand-type errors are complete in
+[Phase 3](docs/cli-roadmap.md#phase-3-recoverable-errors). Default/variadic
+parameters and anonymous functions are implemented in
+[Phase 4](docs/cli-roadmap.md#phase-4-functions) and awaiting completion review.
+The playgrounds demonstrate each phase. Runtime safety limits and cancellation
+continue to bypass catches.
 Regex support, Unicode normalization, and string indexing remain outside these phases.
 
 Strict booleans, explicit conversions, collection value semantics, and block

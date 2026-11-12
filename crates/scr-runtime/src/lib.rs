@@ -550,19 +550,7 @@ impl Runtime {
                         declaration.name_span,
                     );
                 }
-                let mut names = std::collections::HashSet::new();
-                for parameter in &declaration.parameters {
-                    if !names.insert(&parameter.binding.name) {
-                        return self.fail("duplicate parameter name", parameter.span);
-                    }
-                }
-                self.environments.capture();
-                let function = Value::Callable(Callable(Rc::new(Function::User {
-                    declaration: declaration.clone(),
-                    environment: scope,
-                    owner: self.identity.clone(),
-                    source: self.source.clone(),
-                })));
+                let function = self.user_function(declaration)?;
                 self.environments
                     .scope_mut(scope)
                     .functions
@@ -661,6 +649,7 @@ impl Runtime {
                 Ok(self.environments.scope(scope).variables[name].clone())
             }
             ExprKind::Identifier(name) => self.function(name, expr.span),
+            ExprKind::Function(declaration) => self.user_function(declaration),
             ExprKind::Grouped(inner) => self.evaluate(inner, output),
             ExprKind::Unary(op, operand) => {
                 let value = self.evaluate(operand, output)?;
@@ -773,6 +762,38 @@ impl Runtime {
         Ok(self.environments.scope(scope).functions[name].clone())
     }
 
+    fn user_function(&mut self, declaration: &scr_ast::FunctionDeclaration) -> Result<Value> {
+        let mut names = std::collections::HashSet::new();
+        let mut optional = false;
+        for (index, parameter) in declaration.parameters.iter().enumerate() {
+            if !names.insert(&parameter.binding.name) {
+                return self.fail("duplicate parameter name", parameter.span);
+            }
+            if parameter.variadic {
+                if parameter.default.is_some() || index + 1 != declaration.parameters.len() {
+                    return self.fail(
+                        "variadic parameter must be last and cannot have a default",
+                        parameter.span,
+                    );
+                }
+            } else if parameter.default.is_some() {
+                optional = true;
+            } else if optional {
+                return self.fail(
+                    "required parameters must precede default parameters",
+                    parameter.span,
+                );
+            }
+        }
+        self.environments.capture();
+        Ok(Value::Callable(Callable(Rc::new(Function::User {
+            declaration: declaration.clone(),
+            environment: self.environments.current,
+            owner: self.identity.clone(),
+            source: self.source.clone(),
+        }))))
+    }
+
     fn call(
         &mut self,
         callee: Value,
@@ -833,12 +854,26 @@ impl Runtime {
                     self.stack.pop();
                     return self.fail("user callable belongs to a different runtime", span);
                 }
-                if values.len() != declaration.parameters.len() {
+                let required = declaration
+                    .parameters
+                    .iter()
+                    .filter(|p| p.default.is_none() && !p.variadic)
+                    .count();
+                let variadic = declaration.parameters.last().is_some_and(|p| p.variadic);
+                let maximum = declaration.parameters.len();
+                if values.len() < required || (!variadic && values.len() > maximum) {
+                    let expected = if variadic {
+                        format!("at least {required} arguments")
+                    } else if required != maximum {
+                        format!("between {required} and {maximum} arguments")
+                    } else {
+                        format!("{required} arguments")
+                    };
                     let error = self.error(
                         format!(
-                            "TypeError: {}() expects {} arguments, got {}",
+                            "TypeError: {}() expects {}, got {}",
                             declaration.name,
-                            declaration.parameters.len(),
+                            expected,
                             values.len()
                         ),
                         span,
@@ -860,8 +895,33 @@ impl Runtime {
                     .scope_mut(self.environments.current)
                     .function_boundary = true;
                 let result = (|| {
-                    for (parameter, value) in declaration.parameters.iter().zip(values) {
-                        self.annotation(&parameter.annotation, &value, parameter.span, false)?;
+                    let mut values = values.into_iter();
+                    for parameter in &declaration.parameters {
+                        let value = if parameter.variadic {
+                            let items: Vec<_> = values.by_ref().collect();
+                            for value in &items {
+                                self.annotation(
+                                    &parameter.annotation,
+                                    value,
+                                    parameter.span,
+                                    false,
+                                )?;
+                            }
+                            let value = Value::List(items);
+                            self.validate_value(&value, 0, parameter.span)?;
+                            value
+                        } else {
+                            let value = if let Some(value) = values.next() {
+                                value
+                            } else {
+                                self.evaluate(
+                                    parameter.default.as_ref().expect("validated arity"),
+                                    output,
+                                )?
+                            };
+                            self.annotation(&parameter.annotation, &value, parameter.span, false)?;
+                            value
+                        };
                         self.environments
                             .scope_mut(self.environments.current)
                             .variables

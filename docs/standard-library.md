@@ -70,6 +70,13 @@ JSON encoding. `require` and `require_once` are statements, not native functions
 see [local script loading](language-spec.md#local-script-loading). There is no
 package manager or implicit remote module resolution.
 
+Default and variadic parameters and anonymous literals are language features,
+separate from native function registration. A script variadic annotation checks
+each extra argument and binds a list. See
+[function parameters and captures](language-spec.md#function-parameters-and-captures)
+and [the functions playground](../playground/functions.scr). Callback-based
+collection transforms remain deferred; callbacks can be passed to script helpers.
+
 ## Strings
 
 All helpers return new values and leave their arguments unchanged. Arguments

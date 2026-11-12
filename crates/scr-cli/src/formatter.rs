@@ -1,5 +1,5 @@
 //! Token-preserving formatter. Syntax is validated before any replacement is saved.
-use scr_ast::{Block, Program, Statement, StatementKind};
+use scr_ast::{Block, Expr, ExprKind, FunctionDeclaration, Program, Statement, StatementKind};
 use scr_diagnostics::{Diagnostic, Span};
 use scr_lexer::TokenKind as K;
 use std::{collections::HashSet, io::Write, path::Path};
@@ -8,6 +8,7 @@ use std::{collections::HashSet, io::Write, path::Path};
 struct Layout {
     starts: HashSet<usize>,
     bodies: Vec<Span>,
+    expression_ends: HashSet<usize>,
 }
 impl Layout {
     fn block(&mut self, block: &Block) {
@@ -25,9 +26,10 @@ impl Layout {
     }
     fn statement(&mut self, statement: &Statement) {
         self.starts.insert(statement.span.start);
+        statement.visit_expressions(|e| self.expression(e));
         match &statement.kind {
             StatementKind::Block(block) => self.block(block),
-            StatementKind::Function(function) => self.block(&function.body),
+            StatementKind::Function(function) => self.function(function, false),
             StatementKind::If {
                 branches,
                 else_branch,
@@ -49,6 +51,24 @@ impl Layout {
                 }
             }
             _ => {}
+        }
+    }
+    fn function(&mut self, function: &FunctionDeclaration, expression: bool) {
+        for parameter in &function.parameters {
+            if let Some(default) = &parameter.default {
+                self.expression(default);
+            }
+        }
+        if expression {
+            self.expression_ends.insert(function.body.span.end);
+        }
+        self.block(&function.body);
+    }
+    fn expression(&mut self, expression: &Expr) {
+        if let ExprKind::Function(function) = &expression.kind {
+            self.function(function, true);
+        } else {
+            expression.visit_children(|e| self.expression(e));
         }
     }
     fn extra(&self, offset: usize) -> usize {
@@ -197,14 +217,14 @@ fn needs_space(previous: Option<&K>, current: &K, previous_unary: bool, unary: b
     }
     if matches!(
         previous,
-        K::Arrow | K::StaticAccess | K::LeftParen | K::LeftBracket
+        K::Arrow | K::StaticAccess | K::LeftParen | K::LeftBracket | K::Ellipsis
     ) {
         return false;
     }
     if matches!(current, K::LeftParen) {
         return matches!(
             previous,
-            K::If | K::Elseif | K::While | K::For | K::Foreach | K::Catch
+            K::If | K::Elseif | K::While | K::For | K::Foreach | K::Catch | K::Function
         );
     }
     if matches!(current, K::LeftBracket) && ends_expression(previous) {
@@ -274,7 +294,7 @@ pub fn format(source: &str) -> Result<String, Vec<Diagnostic>> {
                 braces += 1;
                 writer.pending = true;
             }
-            K::RightBrace => writer.pending = true,
+            K::RightBrace => writer.pending = !layout.expression_ends.contains(&token.span.end),
             // Statement start hints handle semicolons without splitting for clauses.
             _ => {}
         }

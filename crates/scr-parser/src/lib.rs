@@ -31,7 +31,11 @@ pub fn parse_expression(tokens: &[Token]) -> Result<Expr, Diagnostic> {
     let mut parser = Parser::new(tokens);
     let expression = parser.expression(0)?;
     parser.expect(TokenKind::Eof)?;
-    Ok(expression)
+    if let Some(error) = parser.errors.into_iter().next() {
+        Err(error)
+    } else {
+        Ok(expression)
+    }
 }
 
 fn validate(tokens: &[Token]) -> Result<(), Diagnostic> {
@@ -252,9 +256,14 @@ impl Parser<'_> {
                     StatementKind::Continue
                 }
             }
-            TokenKind::Function => {
+            TokenKind::Function
+                if matches!(
+                    self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                    Some(TokenKind::Ident(_))
+                ) =>
+            {
                 self.pos += 1;
-                StatementKind::Function(self.function()?)
+                StatementKind::Function(self.function(true)?)
             }
             TokenKind::Return => {
                 self.pos += 1;
@@ -439,28 +448,72 @@ impl Parser<'_> {
         Ok(TypeAnnotation { name, span })
     }
 
-    fn function(&mut self) -> Result<FunctionDeclaration, Diagnostic> {
-        let name_span = self.current().span;
-        let name = self.name()?;
+    fn function(&mut self, named: bool) -> Result<FunctionDeclaration, Diagnostic> {
+        // A function's default expressions and body have their own expression
+        // budgets, even when its literal occurs inside an enclosing expression.
+        let saved = (self.expression_depth, self.expression_nodes);
+        self.expression_depth = 0;
+        self.expression_nodes = 0;
+        let result = self.function_inner(named);
+        (self.expression_depth, self.expression_nodes) = saved;
+        result
+    }
+
+    fn function_inner(&mut self, named: bool) -> Result<FunctionDeclaration, Diagnostic> {
+        let name_span = if named {
+            self.current().span
+        } else {
+            self.tokens[self.pos - 1].span
+        };
+        let name = if named {
+            self.name()?
+        } else {
+            "<anonymous>".into()
+        };
         self.expect(TokenKind::LeftParen)?;
         let mut parameters = Vec::new();
+        let mut optional = false;
         if self.current().kind != TokenKind::RightParen {
             loop {
                 let start = self.current().span.start;
+                let variadic = self.take(TokenKind::Ellipsis);
                 let binding = self.binding()?;
                 let annotation = if self.take(TokenKind::Colon) {
                     Some(self.type_annotation()?)
                 } else {
                     None
                 };
+                let default = if self.take(TokenKind::Assign) {
+                    if variadic {
+                        return Err(Diagnostic::new(
+                            "variadic parameters cannot have defaults",
+                            binding.span,
+                        ));
+                    }
+                    optional = true;
+                    Some(self.expression(0)?)
+                } else {
+                    if optional && !variadic {
+                        return Err(Diagnostic::new(
+                            "required parameters must precede default parameters",
+                            binding.span,
+                        ));
+                    }
+                    None
+                };
                 let span = Span::new(start, self.tokens[self.pos - 1].span.end);
                 parameters.push(Parameter {
                     binding,
                     annotation,
+                    default,
+                    variadic,
                     span,
                 });
                 if !self.take(TokenKind::Comma) {
                     break;
+                }
+                if variadic {
+                    return Err(Diagnostic::new("variadic parameter must be last", span));
                 }
             }
         }
@@ -623,6 +676,7 @@ impl Parser<'_> {
                 | TokenKind::Not
                 | TokenKind::LeftParen
                 | TokenKind::LeftBracket
+                | TokenKind::Function
         ) {
             return Err(Diagnostic::new("expected expression", token.span)
                 .with_help("provide a value, variable, or expression at this position"));
@@ -666,6 +720,7 @@ impl Parser<'_> {
                 ExprKind::Grouped(Box::new(expr))
             }
             TokenKind::LeftBracket => self.collection()?,
+            TokenKind::Function => ExprKind::Function(Box::new(self.function(false)?)),
             _ => return Err(Diagnostic::new("expected expression", token.span)),
         };
         Ok(Expr {

@@ -252,6 +252,73 @@ fn append_targets_are_write_only_and_keep_their_spans() {
 }
 
 #[test]
+fn function_literals_defaults_and_variadics_have_complete_spans() {
+    let source = r#"function ($value: int = 2, ...$rest: int): int { return $value; }"#;
+    let expr = expression(source);
+    assert_eq!(expr.span, Span::new(6, source.len() + 6));
+    let ExprKind::Function(function) = expr.kind else {
+        panic!()
+    };
+    assert_eq!(function.name, "<anonymous>");
+    assert_eq!(
+        &source[function.name_span.start - 6..function.name_span.end - 6],
+        "function"
+    );
+    assert!(function.parameters[0].default.is_some());
+    assert!(!function.parameters[0].variadic);
+    assert!(function.parameters[1].variadic);
+    assert!(function.parameters[1].default.is_none());
+    let span = function.parameters[0].span;
+    assert_eq!(&source[span.start - 6..span.end - 6], "$value: int = 2");
+    let span = function.parameters[1].span;
+    assert_eq!(&source[span.start - 6..span.end - 6], "...$rest: int");
+    for source in [
+        "(function ($n = 2) { return $n; })()",
+        "function ($f = function () { return 1; }) { return $f(); }",
+        "[function () {}, function () {}]",
+    ] {
+        expression(source);
+    }
+}
+
+#[test]
+fn malformed_signatures_and_anonymous_control_flow_are_rejected() {
+    for source in [
+        "function ($a = 1, $b) {}",
+        "function (...$a, $b) {}",
+        "function (...$a = []) {}",
+        "function (...$a, ...$b) {}",
+        "function (...$a,) {}",
+        "function ($a = ) {}",
+        "function (...$a: ) {}",
+        "function named() {}",
+        "function () { break; }",
+        "function () { continue; }",
+        "function () { echo ; }",
+        "function () { function f() { break; } }",
+        "f(...$items)",
+    ] {
+        let tokens = scr_lexer::lex(&format!("<?scr {source}")).unwrap();
+        assert!(parse_expression(&tokens).is_err(), "{source}");
+    }
+    let tokens = scr_lexer::lex("<?scr while (true) { $f = function () { break; }; }").unwrap();
+    assert!(parse(&tokens).is_err());
+}
+
+#[test]
+fn anonymous_function_bodies_have_independent_expression_budgets() {
+    let source = format!("<?scr $f = function () {{ {} }};", "$x = 1;".repeat(300));
+    parse(&scr_lexer::lex(&source).unwrap()).unwrap();
+    let source = format!(
+        "<?scr $f = {}0{};",
+        "function ($x = ".repeat(80),
+        ") {}".repeat(80)
+    );
+    let error = parse(&scr_lexer::lex(&source).unwrap()).unwrap_err();
+    assert_eq!(error.code, "E0204");
+}
+
+#[test]
 fn user_examples_parse_without_evaluation() {
     let source = r#"<?scr
 $count = 10;

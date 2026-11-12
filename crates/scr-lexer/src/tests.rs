@@ -291,9 +291,31 @@ fn invalid_and_unterminated_strings() {
 }
 
 #[test]
+fn variadic_ellipsis_is_a_single_token_distinct_from_concatenation() {
+    let source = "<?scr function f(...$values: int) {} $text = 'a' . 'b';";
+    let tokens = lex(source).unwrap();
+    let token = tokens
+        .iter()
+        .find(|t| t.kind == TokenKind::Ellipsis)
+        .unwrap();
+    assert_eq!(&source[token.span.start..token.span.end], "...");
+    assert_eq!(
+        tokens
+            .iter()
+            .filter(|t| t.kind == TokenKind::Ellipsis)
+            .count(),
+        1
+    );
+    assert_eq!(
+        tokens.iter().filter(|t| t.kind == TokenKind::Dot).count(),
+        1
+    );
+}
+
+#[test]
 fn invalid_operators_and_characters() {
     for op in [
-        "++", "--", "**", "%=", "<<", ">>", "??", "...", "&=", "|=", "^=", "&", "|", "^", "~", "?",
+        "++", "--", "**", "%=", "<<", ">>", "??", "&=", "|=", "^=", "&", "|", "^", "~", "?",
     ] {
         fails(&format!("<?scr {op}"), LexerErrorKind::InvalidOperator);
     }

@@ -1,0 +1,10 @@
+<?scr
+function f($x = 1, ...$rest: int) {
+    return function ($n: int = 2): int {
+        if ($n > 0)
+            return $x + $n;
+        return 0;
+    };
+}
+$f = f();
+echo str($f());

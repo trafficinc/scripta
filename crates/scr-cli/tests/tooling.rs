@@ -5,7 +5,14 @@ use std::process::Command;
 #[test]
 fn formatter_snapshots_preserve_tokens_and_are_idempotent() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/formatter");
-    for name in ["basic", "comments", "loops", "literals", "branches"] {
+    for name in [
+        "basic",
+        "comments",
+        "loops",
+        "literals",
+        "branches",
+        "functions",
+    ] {
         let source = std::fs::read_to_string(root.join(format!("{name}.input.scr"))).unwrap();
         let expected = std::fs::read_to_string(root.join(format!("{name}.expected.scr"))).unwrap();
         let formatted = formatter::format(&source).unwrap();
@@ -22,6 +29,38 @@ fn formatter_snapshots_preserve_tokens_and_are_idempotent() {
         assert_eq!(formatter::format(&formatted).unwrap(), formatted, "{name}");
     }
 }
+#[test]
+fn check_visits_anonymous_functions_in_defaults_and_nested_expressions() {
+    for source in [
+        "<?scr $f = function ($x, $x) {};",
+        "<?scr function f($callback = function ($x, $x) {}) {}",
+        "<?scr $a = [function ($x, $x) {}];",
+        "<?scr $a = ['key' => function ($x, $x) {}];",
+        "<?scr function f() { return function ($x, $x) {}; }",
+        "<?scr if ((function ($x, $x) {})()) {}",
+        "<?scr for ($f = function ($x, $x) {}; false;) {}",
+    ] {
+        let errors = pipeline::check(source).unwrap_err();
+        assert_eq!(
+            errors.iter().filter(|e| e.code == "E0302").count(),
+            1,
+            "{source}: {errors:?}"
+        );
+    }
+    let errors = pipeline::check(
+        "<?scr $f = function () { function duplicate() {} function duplicate() {} };",
+    )
+    .unwrap_err();
+    assert!(errors.iter().any(|e| e.code == "E0301"));
+    pipeline::check("<?scr function f($value = unknown()) {} $callback = function (...$items: Custom): Custom { return missing(); };").unwrap();
+    let source = "<?scr $f=function($callback=function($n=1){if($n>0)return $n;return 0;}){return $callback();};echo str($f());";
+    let formatted = formatter::format(source).unwrap();
+    assert_eq!(formatter::format(&formatted).unwrap(), formatted);
+    let mut output = Vec::new();
+    pipeline::run(&formatted, &mut output).unwrap();
+    assert_eq!(output, b"1");
+}
+
 #[test]
 fn append_survives_check_format_and_execution() {
     let source = "<?scr $items=[];$items[]=1;$items[len($items)]=2;$groups=[[]];$groups[0][]=3;echo Json::encode([$items,$groups]);";
