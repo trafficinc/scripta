@@ -1,0 +1,16 @@
+<?scr
+
+$expenses = [
+    "Lunch" => 15,
+    "Coffee" => 5,
+    "Transport" => 12
+];
+
+$total = 0;
+
+foreach ($expenses as $name => $amount) {
+    echo $name . ": $" . str($amount) . "\n";
+    $total += $amount;
+}
+
+echo "Total: $" . str($total) . "\n";

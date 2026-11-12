@@ -1,0 +1,751 @@
+# Standard library
+
+The standard library registers functions through the public runtime native API.
+Scalar built-ins take exactly one positional argument. Invalid counts, types, and
+conversion values raise catchable `TypeError` exceptions with script call spans
+and stack traces. There is no implicit conversion in arithmetic, boolean
+conditions, string concatenation, or output.
+
+| Function | Accepted inputs and behavior |
+| --- | --- |
+| `str(value): string` | Null becomes `"null"`; bool becomes `"true"`/`"false"`; int and finite float use decimal display; strings are unchanged. |
+| `int(value): int` | Int is unchanged; bool becomes 0/1; a finite integral float within i64 range is converted exactly; strings must parse as signed decimal i64 without whitespace or fractional/exponent notation. |
+| `float(value): float` | Finite floats are unchanged; ints convert to f64 (large values may round); bool becomes 0.0/1.0; strings must parse as finite floating-point numbers without whitespace. |
+| `bool(value): bool` | Bool is unchanged; numeric 0/1 become false/true; exactly `"false"`/`"true"` become false/true. Other values are errors. |
+| `type(value): string` | Returns `null`, `bool`, `int`, `float`, `string`, `list`, `map`, or `callable`. Native objects return their host-defined type name. |
+| `len(value): int` | Counts Unicode scalar values in a string (not bytes or grapheme clusters), or entries in a list/map. Other values are errors. |
+| `sleep(milliseconds): null` | Requires a nonnegative int duration in milliseconds and the `sleep` capability, allowed by default. Zero returns immediately; long sleeps check cancellation in chunks of at most 10 ms of requested sleep. OS scheduling can delay observation. |
+
+`int(1.5)` raises an error rather than truncating. `bool(2)`, `bool("")`, and
+`bool("1")` raise errors rather than applying truthiness. Null is accepted only by
+`str`, not by the numeric or bool conversions. Collections, native objects, and
+callables are not accepted by any conversion. Non-finite floats are never valid.
+Float string display need not retain a decimal point (`str(1.0)` is `"1"`), while
+the original numeric types remain distinct for strict equality.
+
+```scr
+<?scr
+$usage = int("85");
+echo "Usage: " . str($usage) . "%\n";
+$ratio = float($usage) / 100.0;
+if (bool("true")) echo str($ratio) . "\n";
+```
+
+Embedders opt in by calling `scr_stdlib::register(&mut runtime)?`. Registration
+returns `NativeResult<()>`; duplicate names produce `RegistryError` and preserve
+the existing registration. `echo` and `exit` remain language statements. Neither
+is registered as a native function; exit returns a code without terminating the
+embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Log`, `Json`, and `Http` are
+registered by default.
+
+## Release 0.1.0 export index
+
+This reference covers all 73 registered functions in the default library, plus
+native response/entry properties and local loading statements. No optional plugin,
+external language runtime, shell, or network is required to use the local APIs.
+Detailed signatures, return types, errors, permissions and limitations follow.
+
+| Module | Public functions | Details |
+| --- | --- | --- |
+| Globals | `str`, `int`, `float`, `bool`, `type`, `len`, `sleep` | Conversion table above |
+| File | `File::exists`, `File::read`, `File::write`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension` | [Filesystem](#filesystem-and-paths) |
+| Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
+| Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute` | [Paths](#filesystem-and-paths) |
+| Process | `Process::run`, `Process::spawn`, `Process::shell`, `Process::wait`, `Process::poll`, `Process::kill`, `Process::exists`, `Process::currentId` | [Processes](#processes) |
+| Env | `Env::get`, `Env::set`, `Env::has`, `Env::remove`, `Env::all` | [Environment](#environment) |
+| Cli | `Cli::args`, `Cli::arg`, `Cli::has`, `Cli::option`, `Cli::prompt` | [CLI](#script-arguments-and-prompts) |
+| System | `System::platform`, `System::architecture`, `System::hostname`, `System::cpuUsage`, `System::memoryUsage`, `System::diskUsage`, `System::uptime`, `System::homeDirectory`, `System::tempDirectory` | [System](#system-information) |
+| Date | `Date::now`, `Date::format`, `Date::parse`, `Date::sleep` | [Dates](#dates) |
+| Log | `Log::info`, `Log::warn`, `Log::error`, `Log::debug`, `Log::setFile` | [Logging](#local-logging) |
+| Json | `Json::encode`, `Json::decode`, `Json::pretty` | [JSON](#json) |
+| Http | `Http::get`, `Http::post`, `Http::request` | [HTTP](#http) |
+
+`DirEntry`, `ProcessResult`, `ProcessHandle`, `MemoryUsage`, `DiskUsage`, and
+`HttpResponse` are read-only native objects whose properties/methods are listed
+in their module sections. Convert selected properties into ordinary maps before
+JSON encoding. `require` and `require_once` are statements, not native functions;
+see [local script loading](language-spec.md#local-script-loading). There is no
+package manager or implicit remote module resolution.
+
+## Registering Rust modules
+
+Dependencies point from `scr-stdlib` to `scr-runtime`, then from `scr-runtime` to
+`scr-ast`/`scr-diagnostics`. The runtime does not depend on the standard library.
+A future module exports a registration function using only the public runtime API.
+For example, a separately registered host extension can expose an environment value:
+
+```rust
+use scr_runtime::{NativeError, NativeFunction, NativeResult, NativeSignature,
+                  NativeType, Runtime, Value};
+
+pub fn register_host(runtime: &mut Runtime) -> NativeResult<()> {
+    runtime.register("Host::env", NativeFunction::new(
+        NativeSignature::new(vec![NativeType::String], NativeType::String),
+        |context, args| {
+            let [Value::String(name)] = args else {
+                return Err(NativeError::type_error("Host::env() requires one string"));
+            };
+            let value = context.env(name)?.unwrap_or_default().to_str()
+                .ok_or_else(|| NativeError::new("EncodingError", "environment value is not UTF-8"))?;
+            Ok(Value::String(value.into()))
+        },
+    ))
+}
+```
+
+This is a host-extension example using the same environment snapshot as `Env`;
+it requires the `environment.read` capability. No interpreter edits
+are needed: add the module and invoke its registration from `scr_stdlib::register`
+or the embedding host. `register_native` is an alias of `register`. Registration
+accepts a bare identifier or one `Namespace::method` pair; reserved keywords,
+invalid names, and conflicts with existing native/script functions are rejected.
+Registrations are sequential; a module should propagate the first error.
+
+`NativeFunction` holds a required `NativeSignature` and a Rust closure implementing
+`Fn(&mut RuntimeContext<'_>, &[Value]) -> NativeResult<Value>`. Closures can capture
+host state. Signatures specify exact positional arity, argument constraints, and
+the return constraint. `NativeSignature::with_variadic(type)` validates trailing
+positional arguments; `Path::join` uses this with no required parameters.
+`NativeType::Any` and `NativeType::OneOf` support dynamic
+and union inputs. Objects use `NativeType::Object("HostType")`. Counts and types
+are checked before Rust code runs, with no implicit conversions. Return types,
+finite floats, and collection integrity are checked after the callback. Bad host
+return values raise `NativeError` exceptions. Use checked operations and pattern
+matching when validating argument contents; avoid indexing/unwrap on script data.
+
+This replaces the old bare `fn(&[Value]) -> Result<Value, String>` registration:
+wrap callbacks with a signature and accept the context argument. Both runtime
+registration and standard-library registration now return results.
+
+## Runtime context and errors
+
+Set `RuntimeOptions.context: ContextOptions` before `Runtime::with_options`.
+The CLI supplies the script path and only script arguments, excluding the
+executable, interpreter command, and script path. Embedders can supply arguments
+and metadata directly. The context
+contains:
+
+| Field | Host behavior |
+| --- | --- |
+| `working_directory` | Mutable runtime-local `PathBuf`; defaults to the process working directory. `Dir::change` changes only this runtime. |
+| `script_path` | Optional host-selected source path. |
+| `cli_arguments` | OS strings preserve native argument encoding. |
+| `environment` | A mutable runtime-local snapshot of OS strings; defaults to the host environment. Env writes affect subsequent children. `context.env(name)` checks `environment.read`. |
+| `input` | Defaults to buffered process stdin; override with `Runtime::set_input_stream` for prompts. |
+| `output` | The same writer passed to `Runtime::execute`, shared with echo and prompts. |
+| `error` | Defaults to process stderr; override with `Runtime::set_error_stream`. |
+| `cancellation` | The atomic cancellation flag from runtime options; `check_cancelled()` returns an interruption error. |
+| `permissions` | Automation capabilities are allowed by default: sleep, filesystem read/write, environment read/write, process execute/inspect, system.inspect, log.write, http.request, and cli.prompt. `process.shell` remains opt-in. |
+| `call_span` | Original script span of the native call. |
+| `max_value_bytes` | Optional host logical-value budget; file reads enforce it while buffering. |
+
+Capabilities are a cooperation interface for trusted Rust implementations, not a
+sandbox around arbitrary host code. Hosts grant capabilities by inserting names
+into `PermissionConfig.allowed`. Modules enforce them; registering additional
+OS APIs never requires changing the interpreter. Environment snapshots do not
+mutate the process environment.
+
+Callbacks return `NativeError::new("ExceptionName", message)` or use conversions:
+`std::io::Error` converts via `?` into `IoError`; a Rust `String` converts into
+`NativeError`. The runtime attaches the script call span and active stack frames.
+Script catches match the exception name, `Error`, or an untyped catch. The catch
+binding contains the message string, but a `catch (string $e)` does not match a
+native exception simply because the message is a string. Uncaught exceptions
+reach the host as `RuntimeError` with kind-prefixed messages and original traces.
+Cancellation uses the reserved `Interrupted` kind and bypasses script catches.
+Blocking native modules must cooperate with cancellation to make timely progress.
+
+Native return values can include `Value::NativeObject(Rc<dyn NativeObject>)`.
+Implement `type_name` and `get_property`; the default `set_property` rejects writes.
+Direct, compound, and indexed property writes all respect this setter. Getter and
+setter failures become catchable `PropertyError` exceptions at the property access.
+Hosts may opt into writable properties by implementing the setter; no script
+classes or inheritance are introduced.
+
+
+## Filesystem and paths
+
+All filesystem paths and text contents use UTF-8 script strings. Rust's standard
+filesystem APIs interpret paths using the running OS: POSIX conventions on Linux
+and macOS, drive letters/UNC paths and native separators on Windows. Backslashes
+are ordinary filename characters on Unix. Windows drive-relative (`C:foo`) and
+rooted-without-drive (`\foo`) inputs are rejected with `PathError`; use ordinary
+relative paths or fully absolute paths. Windows canonical paths may use the
+verbatim `\\?\` prefix. No tilde, environment-variable, or glob expansion occurs.
+NUL characters are rejected. Empty filesystem paths and `Path::absolute("")` are
+rejected; empty lexical path components are permitted.
+
+Relative paths resolve against `RuntimeOptions.context.working_directory`, which
+starts at the host process working directory, not the script's parent directory.
+An injected relative base is resolved against the process working directory.
+`Dir::change` updates the runtime-local base for later calls, including calls
+inside functions and later execute calls. It never calls `std::env::set_current_dir`
+and does not affect other runtimes. Existing `DirEntry` snapshots keep their paths.
+
+| File method | Behavior |
+| --- | --- |
+| `File::exists(path): bool` | True for a regular file. Missing paths, directories, and final symlinks return false. Permission and other inspection failures raise exceptions. |
+| `File::read(path): string` | Reads a complete regular file as UTF-8. Invalid file bytes raise `EncodingError`. |
+| `File::write(path, contents): null` | Creates or truncates a regular file, replacing its contents. Parent directories must exist. |
+| `File::append(path, contents): null` | Creates a missing file or appends UTF-8 bytes to a regular file. |
+| `File::copy(source, destination): null` | Copies bytes, including binary files, to a new file. Refuses any existing destination, including symlinks and directories. Does not copy metadata/permissions. |
+| `File::move(source, destination): null` | Moves a regular file to a new name, refusing any existing destination. Uses exclusive hard-link creation followed by source removal; cross-device/unsupported-link errors fall back to exclusive copy then removal. |
+| `File::delete(path): null` | Deletes one regular file. Missing paths raise an exception. Never deletes directories or symlinks. |
+| `File::size(path): int` | Regular-file size in bytes, checked against i64 range. |
+| `File::modified(path): int` | Modification time in whole Unix seconds (floored), checked against i64 range. |
+| `File::extension(path): string` | Lexical suffix without the dot, or empty string. Does not require the file to exist; same as `Path::extension`. |
+
+Copy/move destinations are protected with exclusive OS creation, so a destination
+that appears after the initial check is not overwritten. If source removal fails
+after move creates its destination, both names remain and an exception states
+that the destination remains. Hard-link moves retain metadata; copy fallback uses
+new-file metadata. Writes/appends are not atomic replacements and may leave partial
+contents on cancellation or I/O failure. Copy failure attempts to delete its newly
+created partial destination and reports any cleanup error. Reads, writes, copies,
+and listings check cancellation between chunks or entries.
+
+| Directory method | Behavior |
+| --- | --- |
+| `Dir::exists(path): bool` | True for a directory; false for missing paths, files, and final symlinks. Other errors propagate. |
+| `Dir::create(path): null` | Creates one new directory; its parent must exist. Any existing name raises an error. |
+| `Dir::createAll(path): null` | Creates missing parents; an existing directory succeeds. Files and final symlinks are rejected. |
+| `Dir::files(path): list` | Shallow list of regular-file `DirEntry` snapshots, sorted by UTF-8 name in case-sensitive lexical order. |
+| `Dir::directories(path): list` | Shallow list of directory snapshots in the same order. |
+| `Dir::remove(path): null` | Removes only an empty directory. Rejects root, current directory, and its ancestors. There is no recursive-delete argument or API. |
+| `Dir::current(): string` | Canonical absolute runtime working directory. |
+| `Dir::change(path): null` | Requires an existing directory and saves its canonical absolute path in this runtime. |
+
+Listings exclude symlinks and special files and never recurse. All filesystem
+operations reject a final symlink except existence checks (false) and lexical
+extension extraction. Intermediate symlink directories use OS resolution; the
+optional root policy checks their canonical destinations. Errors reading metadata,
+permissions, or directory entries propagate instead of silently skipping entries.
+If a selected entry's name/path cannot be represented in UTF-8 (including unpaired
+Windows surrogates), the entire listing raises `EncodingError`; names are never
+lossily replaced. File contents have the same strict UTF-8 rule for `File::read`.
+
+Entries have type `DirEntry` and read-only properties: `name` (basename), `path`
+(absolute path), `extension` (suffix or empty string), `size` (bytes for files,
+null for directories), `modified` (Unix seconds), and `isDirectory` (bool).
+Properties are metadata snapshots; later filesystem changes do not update them.
+Direct, compound, and indexed property assignments raise `PropertyError`.
+
+| Path method | Behavior |
+| --- | --- |
+| `Path::join(...strings): string` | Joins zero or more native path components. An absolute later component replaces the previous path, following Rust path rules. Zero arguments returns empty string. |
+| `Path::filename(path): string` | Final filename component, or empty string if none. |
+| `Path::extension(path): string` | Last extension without dot. `.hidden` has no extension; `a.tar.gz` gives `gz`. |
+| `Path::parent(path): string` | Lexical parent, or empty string if none (including a bare filename or root). |
+| `Path::normalize(path): string` | Lexically removes `.` and collapses `..`, preserving leading relative `..` and stopping at absolute roots. Empty input normalizes to `.`. |
+| `Path::absolute(path): string` | Resolves against the runtime directory, then lexically normalizes. The target need not exist. |
+
+Path helpers and `File::extension` do no filesystem I/O and require no filesystem
+capability. Lexical normalization does not resolve symlinks; applying it before
+I/O can change the meaning of paths containing symlinks and `..`. Actual I/O
+preserves native path resolution.
+
+### Permissions and exceptions
+
+Filesystem operations require `filesystem.read` for observations (including
+`Dir::change`) or `filesystem.write` for mutations. Copy requires read permission
+on its source and write permission on its destination; move requires write on both.
+These capabilities are allowed by default; hosts can remove them from
+`PermissionConfig.allowed` to deny access.
+
+Embedders can additionally restrict read/write access and allowed directory roots:
+
+```rust
+use scr_stdlib::{FilesystemPolicy, register_with_filesystem_policy};
+let policy = FilesystemPolicy {
+    read: true,
+    write: false,
+    roots: Some(vec![std::fs::canonicalize("/data/input")?]),
+};
+register_with_filesystem_policy(&mut runtime, policy)?;
+```
+
+Use `scr_stdlib::register` for unrestricted roots, or the policy registration
+instead of it (not both). Roots must be existing absolute directories and are
+canonicalized at registration. `roots: None` permits all paths; `Some(vec![])`
+denies all paths. Checks resolve symlinks and existing ancestors before checking
+component-based containment, including paths with missing suffixes that may be
+created. Relative traversal and stable symlinks escaping the roots are denied.
+These standard-library checks are not a race-proof OS sandbox: directory trees
+must be trusted against concurrent path/symlink replacement. Trusted Rust modules
+can access host APIs directly.
+
+Exceptions include `TypeError` (arity/type mismatch), `PathError` (invalid paths),
+`FileNotFoundError`, `AlreadyExistsError`, `PermissionError`, `EncodingError`,
+`RangeError`, and `FilesystemError` for other I/O or wrong-kind failures. Messages
+include the operation and offending path where available; native call spans and
+stack traces are retained. Only a genuine not-found inspection becomes false in
+an existence check. A missing parent or file/directory collision never causes
+implicit deletion or replacement of a different kind of object.
+
+```scr
+<?scr
+$source = "downloads";
+$destination = "documents";
+Dir::createAll($destination);
+foreach (Dir::files($source) as $file) {
+    if ($file->extension === "pdf") {
+        File::move($file->path, Path::join($destination, $file->name));
+    }
+}
+echo "Finished organizing files.\n";
+```
+
+
+## Processes
+
+`Process::run(command, arguments = [], options = ...)` launches one executable
+with literal positional arguments using Rust's `Command`. The command is one
+program name/path, not a shell command line. Spaces, quotes, pipes, redirects,
+globs, and `$()` in arguments remain literal. Arguments must be a list of strings;
+NUL characters and empty program names raise `TypeError` before launch. A bare
+program uses native executable/PATH lookup. Relative executable paths containing
+components such as `./tool` resolve against the requested child working directory.
+
+```scr
+<?scr
+$result = Process::run("git", ["status", "--short"]);
+if ($result->success) {
+    echo $result->stdout;
+} else {
+    echo "Git failed: " . $result->stderr;
+    exit(1);
+}
+```
+
+A normal process exit returns a read-only `ProcessResult` object:
+
+| Property | Value |
+| --- | --- |
+| `exitCode` | Native exit code, or null when Unix signal termination supplies no code. Windows follows Rust's signed exit-code representation. |
+| `stdout` | Captured UTF-8 text, or empty string for inherited/null output. |
+| `stderr` | Captured UTF-8 text, or empty string for inherited/null output. |
+| `success` | Whether the native status is successful (normally exit code zero). |
+| `durationMs` | Nonnegative elapsed milliseconds from launch through cleanup/capture. |
+
+A nonzero exit code is a result, not an exception. Spawn failures, timeout,
+cancellation, output-limit violations, and invalid UTF-8 output are errors.
+
+### Child options and output
+
+Supply an optional third map, for example:
+
+```scr
+$result = Process::run("git", ["status"], [
+    "cwd" => "repository",
+    "env" => ["LANG" => "C", "UNWANTED" => null],
+    "timeoutMs" => 5000,
+    "maxOutputBytes" => 1048576,
+    "stdout" => "capture",
+    "stderr" => "inherit"
+]);
+```
+
+| Option | Default and behavior |
+| --- | --- |
+| `cwd` | Runtime working directory. Relative overrides resolve against that base. Does not change parent/runtime cwd. |
+| `env` | Overrides the runtime environment snapshot. String values replace/add; null removes a key for this child. An empty list is accepted as an empty override map. |
+| `timeoutMs` | 60000 ms by default; nonnegative int, or null to disable the deadline. Zero is an immediate deadline. |
+| `maxOutputBytes` | 8388608 bytes (8 MiB) combined across captured stdout/stderr. Per-call limits may lower but cannot exceed the host ceiling. Zero permits no captured bytes. |
+| `stdout`, `stderr` | Each accepts `capture`, `inherit`, or `null`. Capture is the default. |
+| `stdin` | `null` (immediate EOF) by default; `inherit` uses OS stdin. |
+
+Unknown options and invalid values raise `TypeError` before a child is launched.
+Inheritance uses the process's actual OS standard handles, not injected runtime
+writers/readers. Corresponding parent writers are flushed before launch to keep
+earlier output ordered. Spawned children can interleave output with later script
+output. Captured streams retain their individual byte order; there is no combined
+stdout/stderr ordering guarantee.
+
+Capture uses separate temporary files, with no stdout/stderr pipe dependency or
+reader thread waiting for EOF. A monitor polls status, deadline, cancellation, and
+combined file length at roughly 5 ms intervals. Temporary disk use can exceed the
+limit between polls; returned capture memory is bounded by the configured limit.
+Large/continuous writers are stopped with `OutputLimitError`. Temporary files are
+released after capture/cleanup. Disk errors propagate. Capture does not wait for
+EOF from descendants that inherited a stream. Invalid UTF-8 raises `EncodingError`
+after child cleanup; binary output has no implicit lossy conversion.
+
+Hosts configure registration defaults and capture ceilings through:
+
+```rust
+use scr_stdlib::{StdlibOptions, process::ProcessConfig};
+use std::time::Duration;
+let options = StdlibOptions {
+    process: ProcessConfig {
+        default_timeout: Some(Duration::from_secs(120)),
+        max_output_bytes: 4 * 1024 * 1024,
+    },
+    ..Default::default()
+};
+scr_stdlib::register_with_options(&mut runtime, options)?;
+```
+
+Use this instead of another standard-library registration. The default timeout
+is a default, not a maximum: a call can choose a longer timeout or null. The output
+ceiling is enforced per child. Allocation limits for arbitrary script values and
+aggregate limits across many simultaneous children remain separate concerns.
+
+### Spawn, handles, and cleanup
+
+`Process::spawn(command, arguments = [], options = ...)` accepts the same options
+and returns a read-only `ProcessHandle` immediately. Each handle exposes `pid` and
+`running` (whether its monitor has not yet completed). Handles cannot be forged
+from integers or a native object that only claims the same type name.
+
+| Method | Behavior |
+| --- | --- |
+| `Process::wait(handle)` | Waits and returns a ProcessResult, or raises the stored launch-monitor error. Repeated waits retain the completed result. |
+| `Process::poll(handle)` | Returns null while pending; otherwise returns the result or raises the stored error. |
+| `Process::kill(handle)` | Requests forced termination, waits for cleanup, and returns the resulting status. A completed handle retains its original result. |
+| `Process::exists(pid): bool` | Requires a positive representable PID and reports whether it appears in a fresh process-inspection snapshot. OS visibility restrictions can make another user's process invisible. |
+| `Process::currentId(): int` | Current Scripta host process ID. |
+
+A background monitor enforces timeouts, capture limits, and cancellation even
+while the script does other work. Dropping the last reference to a handle kills
+and reaps its owned child. A runtime retains globals until dropped or replaced;
+embedding hosts that reuse a runtime may deliberately retain handles across
+execute calls. The CLI drops its runtime on success, script exit, and errors.
+There is no detach operation. Spawning an unused handle immediately drops it.
+Launch errors point to run/spawn; deferred errors point to wait/poll/kill where
+observed. Cancellation bypasses script catches.
+
+On Unix, children start in a fresh process group and cleanup sends SIGKILL to
+that group plus the direct child, then reaps the direct child. A program that
+explicitly detaches descendants into another session/group can escape group
+cleanup; process groups are not a security sandbox. On Windows, children are
+assigned to a Job Object before being resumed; cleanup terminates the job and
+reaps the direct child. Job assignment/resumption failures kill and reap the
+owned child. Windows host job restrictions may prevent creation and raise an
+exception. Remaining descendants in the managed group/job are terminated when
+the leader exits, including after a successful run.
+
+The CLI maps Ctrl-C, and supported Unix termination/hangup signals, to cooperative
+cancellation; pending child jobs are cleaned up and interrupted runs exit 130.
+Abnormal host termination (for example SIGKILL, power loss, or an abort outside
+normal cleanup) does not provide a portable cleanup guarantee.
+
+### Explicit shell execution and permissions
+
+`Process::shell(code, options = ...)` is a separately named operation requiring
+both `process.execute` and `process.shell`. The shell capability is disabled by
+default. Hosts must explicitly insert `process.shell` into
+`PermissionConfig.allowed` to enable it. On Unix the interpreter is `/bin/sh -c`;
+on Windows it is `cmd.exe /D /S /C`, with code supplied as a raw shell command
+line rather than ordinary argv escaping. Code is intentionally shell-interpreted and
+must not be formed from untrusted input without shell-specific handling.
+
+On Windows, direct run/spawn reject `.bat` and `.cmd` program paths so batch files
+cannot trigger implicit shell invocation. Use the explicit shell API for batch
+syntax. Scripts may still explicitly select an interpreter executable as a direct
+program; `process.execute` grants arbitrary external program execution. It is a
+broad capability, not an OS sandbox or an enforcement mechanism for the File/Dir
+root policy. Remove it when a host must not permit external programs.
+`process.inspect` controls Process::exists. CurrentId needs no capability.
+
+Errors include `CommandNotFoundError`, `ProcessError`, `PermissionError`,
+`TimeoutError`, `OutputLimitError`, `EncodingError`, and `TypeError`. Errors retain
+the native call span and script stack. Timeout/limit errors discard partial output
+after cleanup instead of returning a successful result with truncated text.
+
+## Environment
+
+Environment state starts as an injectable snapshot of the host environment and
+is mutable only within one runtime. Changes persist across calls, functions, and
+execute calls, and are inherited by later children. They never call process-wide
+`std::env::set_var` or `remove_var`. Per-child overrides do not mutate this snapshot.
+
+| API | Behavior |
+| --- | --- |
+| `Env::get(name)` | String value or null if absent; an empty value is an empty string. |
+| `Env::set(name, value): null` | Both arguments must be strings. Replaces/adds the runtime-local value. |
+| `Env::has(name): bool` | Whether the name is present, including empty values. |
+| `Env::remove(name): null` | Removes a name; an already absent name succeeds. |
+| `Env::all(): map` | UTF-8 string keys/values, deterministically sorted by name. |
+
+Names must be nonempty without `=` or NUL; values cannot contain NUL. Unix names
+are case-sensitive. Windows ASCII environment names are matched case-insensitively.
+Access to a non-UTF-8 environment value raises `EncodingError`; Env::all rejects
+any unrepresentable entry. Children inherit native OS snapshot values without
+lossy replacement. Read/has/all require `environment.read`; set/remove require
+`environment.write`. Both capabilities are enabled by default.
+
+## Script arguments and prompts
+
+These forms expose exactly the same script argument list:
+
+```sh
+scr script.scr arg1 arg2
+scr run script.scr arg1 arg2
+```
+
+The executable, `run`, and the script path are excluded. All tokens after the
+script path belong to the script, including `--help`, `--version`, empty strings,
+and `--`. `scr check` still accepts just one path. `scr run -- <path> ...` permits
+paths starting with a hyphen or matching interpreter commands.
+
+| API | Behavior |
+| --- | --- |
+| `Cli::args(): list` | All script arguments as UTF-8 strings, preserved verbatim. |
+| `Cli::arg(index)` | Zero-based nonnegative int index; string or null if out of range. |
+| `Cli::has(name): bool` | Whether an option is present before the first `--`. |
+| `Cli::option(name)` | Last occurrence's value string, or null for absent/valueless options. |
+| `Cli::prompt(message)` | Writes and flushes a string prompt, reads one UTF-8 line, strips LF/CRLF, and returns it; EOF gives null. |
+
+Option names may be queried as `name`, `--name`, or `-name`. Recognized forms are
+`--name=value`, `--name value`, `-name=value`, and `-name value`. A following token
+starting with a hyphen is treated as another option; use `--count=-1` for negative
+values. `--name=` supplies an empty string. Repeated options use the last
+occurrence, even when valueless. Short flags are not bundled: `-abc` is the name
+`abc`. The first `--` stops option queries but stays in Cli::args. No quoting or
+shell parsing is performed on script arguments. Non-UTF-8 arguments raise
+`EncodingError` when exposed; their native encoding is preserved by CLI parsing.
+
+Prompts use the runtime output writer and configurable buffered input
+(`Runtime::set_input_stream`). They require `cli.prompt`, enabled by default.
+The line limit is 64 KiB including its terminator; larger lines raise
+`InputLimitError`. I/O and encoding failures are exceptions. Cancellation is
+checked before and after input; an embedding reader blocked inside a read must
+return before cancellation can be observed. Child stdin inheritance uses OS
+stdin rather than this injected reader.
+
+
+## System information
+
+No System API launches an external command. Strings, signed 64-bit byte counts,
+seconds, and finite percentage floats have the same meaning on Linux, macOS,
+and Windows. `System::platform()` returns Rust's target OS identifier (`linux`,
+`macos`, `windows`); `System::architecture()` returns the compiled target architecture
+(e.g. `aarch64` or `x86_64`), which may differ from the physical host under emulation.
+These two constant queries require no permission. Other queries require
+`system.inspect`, enabled by default.
+
+| API | Return and behavior |
+| --- | --- |
+| `System::hostname(): string` | Native hostname; unavailable/empty results raise `UnsupportedError`. |
+| `System::cpuUsage(intervalMs = 200): float` | Blocking system-wide average CPU utilization from two counter observations, normalized across logical CPUs to 0–100 percent. |
+| `System::memoryUsage(): MemoryUsage` | Physical **system RAM**, not this process's resident/virtual memory, swap, or container memory limit. |
+| `System::diskUsage(path): DiskUsage` | Capacity of the filesystem containing an existing file/directory. Relative paths use runtime cwd. Requires `filesystem.read` and respects the host root policy. |
+| `System::uptime(): int` | Whole seconds since OS boot, not runtime/process age. Zero/unavailable results raise `UnsupportedError`. |
+| `System::homeDirectory(): string` | Native current user's home directory, using Rust's OS/environment lookup. |
+| `System::tempDirectory(): string` | Rust's native temporary directory selection. Does not create or guarantee writability of the directory. |
+
+`DiskUsage` is read-only, with `totalBytes: int`, `usedBytes: int`,
+`availableBytes: int`, and `percentUsed: float`. Used bytes are total minus native
+free bytes; available bytes are those available to the caller/nonprivileged user.
+Reserved space/quotas can make used + available less than total.
+Percent used is `100 * usedBytes / totalBytes`. A single native filesystem stats
+query supplies these counters; an invalid/nonexistent path raises an I/O error.
+
+`MemoryUsage` has the same read-only property names, but used bytes are explicitly
+`totalBytes - availableBytes`. Available includes memory the OS considers
+reclaimable, with OS-specific accounting of caches; it is not merely unallocated
+RAM. The module does not claim to report process memory.
+
+CPU calls create a fresh counter baseline, wait at least the requested interval,
+then refresh the counters. The default is the larger of 200 ms and sysinfo's
+platform minimum. An explicit interval must be at least that minimum and at most
+60000 ms, otherwise `RangeError`; negative/noninteger durations are `TypeError`.
+The sampling wait also requires `sleep` and checks cancellation every 10 ms.
+Scheduling/refresh work can lengthen the actual interval. No cached first reading
+or arbitrary instantaneous percentage is returned. A genuine idle reading is zero.
+
+Host metrics use the existing sysinfo dependency. Unsupported OS backends, missing
+CPU lists, missing hostname, and zero memory capacity raise `UnsupportedError`;
+inconsistent counters raise `SystemError`, and byte counts beyond i64 raise
+`RangeError`. Native filesystem failures remain explicit `IoError`. Some sysinfo
+backends do not expose an error for every counter refresh failure; restricted
+hosts can prevent observation, and the library cannot distinguish every such
+backend failure from a genuine zero CPU reading. macOS sandbox restrictions and
+restricted Linux `/proc` access may make capabilities unavailable. No missing
+metric is synthesized. Home/temp lookups use the host environment, not the mutable
+`Env` snapshot. Non-UTF-8 directory paths raise `EncodingError`.
+
+```scr
+<?scr
+ echo "Host: " . System::hostname() . "\n";
+ echo "Platform: " . System::platform() . "\n";
+ $disk = System::diskUsage(System::tempDirectory());
+ if ($disk->percentUsed > 85.0) echo "Disk capacity warning\n";
+```
+
+## Dates
+
+| API | Behavior |
+| --- | --- |
+| `Date::now(): int` | Current wall-clock Unix **milliseconds**, UTC; may move backward when the system clock changes. |
+| `Date::format(timestamp, format): string` | Formats signed Unix milliseconds in UTC using [Chrono strftime directives](https://docs.rs/chrono/latest/chrono/format/strftime/). No local-time or locale dependency. |
+| `Date::parse(value): int` | Parses RFC 3339 with an explicit `Z` or numeric offset, returning UTC Unix milliseconds. Submillisecond precision is floored, including dates before 1970. |
+| `Date::sleep(milliseconds): null` | Same nonnegative int duration, `sleep` permission, and cooperative cancellation as global `sleep`. Uses monotonic elapsed time. |
+
+Invalid dates, missing timezones, unsupported leap seconds, and invalid format
+directives raise `DateError`. Out-of-range formatting raises `RangeError` rather
+than panicking. There is no heuristic parsing of ambiguous locale-specific dates.
+For example, `Date::format(Date::now(), "%Y-%m-%dT%H:%M:%S%.3fZ")` emits UTC.
+
+## Local logging
+
+`Log::info(message)`, `Log::warn(message)`, `Log::error(message)`, and
+`Log::debug(message)` accept exactly one string and return null. All four levels
+are enabled and written consistently as lowercase `info`, `warn`, `error`, `debug`.
+Each call synchronously writes one JSON line with `timestamp` (RFC 3339 UTC with
+milliseconds), `level`, and `message`; JSON escaping prevents multiline messages
+or control characters from injecting extra records. The default destination is
+the runtime stderr writer, independent of script stdout.
+
+`Log::setFile(path)` selects a local append-only file instead of stderr;
+`Log::setFile(null)` restores stderr. The parent directory must exist. Selection
+validates/open-creates the file before changing the destination; subsequent writes
+recheck filesystem permissions and roots. No truncation or implicit directory
+creation occurs. File paths resolve against runtime cwd at selection. Each log
+call opens, appends, flushes, and closes the file; no background daemon, rotation,
+network transport, remote collector, or environment-based network destination is
+installed. Multiple runtimes/processes may interleave writes; atomicity across
+writers is not promised. I/O failures are catchable `IoError` exceptions.
+
+All log calls and destination changes require `log.write`, enabled by default.
+File destinations additionally require `filesystem.write` and obey FilesystemPolicy
+(including its documented concurrent-symlink limitations). Hosts can set a default
+file and extra literal secrets through `StdlibOptions { log: LogConfig { file:
+Some(path), redacted_values: vec![secret] }, ..Default::default() }`, importing
+`scr_stdlib::log::LogConfig`. Relative host default paths use runtime cwd at write
+time. Configuration and destination changes are local to the registered runtime.
+
+Redaction happens before JSON serialization or I/O. Messages containing common
+credential markers (password, secret, token, API key, authorization, credentials,
+private keys), Bearer credentials, PEM headers, or URLs with userinfo are replaced
+in full with `[REDACTED]`. Literal configured secrets and values of credential-named
+variables in the runtime environment snapshot are replaced wherever they occur.
+Empty secrets are ignored. Detection is deliberately conservative and may hide
+benign messages containing these words. This cannot recognize every arbitrary
+unmarked credential: callers should avoid passing secrets and hosts should
+configure additional sensitive literal values. Logging never automatically dumps
+the environment, process arguments, or exception context.
+
+
+## JSON
+
+`Json::encode(value): string` produces compact JSON; `Json::pretty(value): string`
+uses two-space indentation. `Json::decode(string)` returns native Scripta values.
+The JSON implementation uses serde_json without coercing native objects.
+
+| Scripta | JSON |
+| --- | --- |
+| null | null |
+| bool | boolean |
+| int | exact signed 64-bit integer |
+| finite float | JSON number (IEEE 754 f64 precision) |
+| string | string, with Unicode preserved and required escaping |
+| list | array |
+| map with string keys | object |
+
+Integer map keys raise `JsonError`: convert keys explicitly rather than silently
+colliding with string keys. Native objects and callables also raise `JsonError`;
+select their properties into a list/map first. Empty decoded objects remain maps,
+and empty arrays remain lists. Object key order is deterministic (sorted), not a
+preservation of source order. Duplicate keys in decoded JSON use the last value.
+
+Integer JSON tokens outside i64 are rejected, including values beyond u64; they
+are never silently rounded into floats. Tokens with a fractional part or exponent
+become floats and must fit a finite f64. NaN, infinity, trailing content, invalid
+escapes, malformed JSON, and nonfinite/out-of-range numbers raise `JsonError`.
+Malformed JSON errors include the parser's one-based line/column location (columns
+measure bytes). Numeric conversion errors identify the invalid number category.
+Encoding is capped at 64 nesting levels and decoding at 128. Arguments and arity are checked through the native type system.
+
+```scr
+$data = Json::decode("{\"status\":\"up\",\"count\":3}");
+echo Json::pretty($data) . "\n";
+```
+
+## HTTP
+
+`Http::get(url, options = [])`, `Http::post(url, body, options = [])`, and
+`Http::request(method, url, options = [])` make synchronous HTTP/HTTPS requests.
+URLs must be absolute, have a host, and contain no embedded user credentials.
+POST's body must be a string; JSON requests use `Json::encode(value)` explicitly
+and supply `Content-Type: application/json`. Generic request bodies use the
+`body` option. Supplying both POST's body argument and a body option is an error.
+Methods are case-sensitive HTTP tokens; CONNECT tunnels are unsupported.
+
+| Option | Default and behavior |
+| --- | --- |
+| `timeoutMs` | 30000; positive int within the platform clock range, covering the operation including redirects and body reads. |
+| `headers` | Map of string header names to string values. Invalid names/newlines are rejected; Host, Content-Length, and Transfer-Encoding are managed by the client. |
+| `maxBodyBytes` | 8388608 (8 MiB); nonnegative int, no higher than the host ceiling. Counts bytes before UTF-8 decoding. An oversized response is an error, never successful truncation. |
+| `maxRedirects` | 5; nonnegative int, no higher than the host ceiling. Zero returns the original 3xx response without following it. |
+| `body` | Empty string; raw request body for `Http::request`. |
+
+Unknown options and invalid values raise `TypeError` before connecting. Headers
+are optional; omit `headers` or use `headers: []` for an empty set. Each request returns a read-only
+`HttpResponse` after the complete bounded body has been read:
+
+| Member | Behavior |
+| --- | --- |
+| `status: int` | HTTP status code. |
+| `headers: map` | Lowercase names mapped to **lists of strings**, preserving repeated header values. Header ordering is unspecified. |
+| `body: string` | UTF-8 response text. Invalid UTF-8 raises `EncodingError`; binary bodies and charset conversion are not exposed yet. |
+| `ok(): bool` | True for status 200–299, false otherwise. |
+| `json()` | Decodes body using exactly `Json::decode` semantics, including line/column errors. Does not require a Content-Type header. |
+| `text(): string` | Returns the retained body. Repeated calls do not consume it. |
+
+HTTP 4xx/5xx responses are normal response values with `ok() == false`.
+Transport failures return no response: `ConnectionError` covers connection/DNS/I/O
+failures, `TlsError` covers certificate/handshake failures, `TimeoutError` covers
+the deadline, `RedirectError` covers exhausted/unsupported redirects, and
+`ResponseLimitError` covers excessive body size. Other protocol errors are
+`HttpError`. Methods accept no arguments; bad arity is `TypeError`.
+
+The blocking ureq client uses Rustls with WebPKI public certificate roots and
+certificate/hostname validation enabled. There is no script option to bypass
+validation. HTTPS requests cannot redirect down to HTTP. Client redirects follow
+ureq semantics: 301/302/303 may change POST to GET; 307/308 with a non-replayable
+request body raise `RedirectError`. Authorization is removed on redirected
+requests by the client; custom headers can be forwarded, so callers should use
+`maxRedirects: 0` when sending sensitive custom headers to untrusted endpoints.
+No proxy is selected implicitly from the host environment; no cookie jar or
+transparent response decompression is installed. Native DNS resolution may be
+subject to OS resolver scheduling. Cancellation is checked before/after blocking
+HTTP work; it cannot interrupt a pending socket operation before its timeout.
+
+Requests require `http.request`, enabled by default. Hosts can remove that
+capability or use `StdlibOptions { http: HttpConfig { timeout, max_response_bytes,
+max_redirects }, ..Default::default() }` with `scr_stdlib::http::HttpConfig`.
+Per-call timeout overrides must remain positive; body/redirect limits cannot
+exceed host ceilings. HTTP responses never automatically enter logs.
+
+```scr
+<?scr
+$response = Http::get("https://example.com/api/status");
+if (!$response->ok()) throw "API request failed";
+$data = $response->json();
+echo $data["status"] . "\n";
+```
+
+See [local script loading](language-spec.md#local-script-loading) for reusable
+helpers and configuration files. HTTP never acts as a remote module loader.
+
+
+## Distribution and resource behavior
+
+Every module above is statically linked into scr; there is no separate standard
+library runtime to install. File/module/JSON/date/log/metrics examples can run
+offline. Only an explicit Http call requires its endpoint, and only an explicit
+Process call requires another executable. See [compatibility](compatibility.md)
+for tested targets and [installation](install.md) for binary installation.
+
+RuntimeOptions controls max_source_bytes (default 8 MiB), max_value_bytes,
+max_scopes, instruction_limit, and bounded recursion. CLI equivalents are
+SCR_MAX_SOURCE_BYTES, SCR_MAX_VALUE_BYTES, SCR_MAX_SCOPES, and SCR_MAX_STEPS.
+Except source/value depth, new budgets are opt-in. A logical-value limit is not
+an aggregate native-object/process heap ceiling. Retained captures last until
+runtime drop. See [safety details](performance.md) for exact accounting and tests.
+
+Diagnostics mask literal/comment excerpts and redact known credential values;
+ContextOptions.redacted_values adds host-provided values. Script catch values and
+explicit echo output retain their ordinary semantics. No implicit network logging
+or background daemon is installed by library registration.

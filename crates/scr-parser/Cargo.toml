@@ -1,0 +1,17 @@
+[package]
+name = "scr-parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+scr-ast.workspace = true
+scr-diagnostics.workspace = true
+scr-lexer.workspace = true
+
+[dev-dependencies]
+proptest = { version = "1.6", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,8 @@
+<?scr
+$result = Process::run("git", ["status", "--short"], ["timeoutMs" => 5000]);
+if ($result->success) {
+    echo $result->stdout;
+} else {
+    echo "Git failed: " . $result->stderr;
+    exit(1);
+}

@@ -1,0 +1,1 @@
+<?scr $sum=0; for ($i=0;$i<150;$i+=1) { for ($j=0;$j<150;$j+=1) { $sum+=1; } } echo str($sum) . "\n";

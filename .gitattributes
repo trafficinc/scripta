@@ -1,0 +1,19 @@
+
+# Formatter snapshots intentionally contain exact and mixed newline bytes.
+crates/scr-cli/tests/snapshots/formatter/*.scr -text
+
+# Benchmark fixture hashes and source bytes are part of the measurement record.
+benchmarks/fixtures/* -text
+
+# Keep release inputs stable across checkout platforms.
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.svg text eol=lf
+*.yml text eol=lf
+examples/*.scr text eol=lf
+examples/lib/*.scr text eol=lf
+LICENSE text eol=lf
+
+# Preserve exact upstream license/provenance bytes checked by SHA-256.
+release-notices/** -text
