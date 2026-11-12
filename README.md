@@ -90,6 +90,10 @@ cargo build -p scr-cli --locked
 ./target/debug/scr run playground/expenses.scr
 ./target/debug/scr run playground/table.scr
 ./target/debug/scr run playground/scores.scr
+./target/debug/scr run playground/arrays.scr
+./target/debug/scr run playground/strings.scr
+./target/debug/scr run playground/collections.scr
+./target/debug/scr run playground/log-analyzer.scr playground/sample-events.txt
 ```
 
 | Script | What to try |
@@ -97,6 +101,10 @@ cargo build -p scr-cli --locked
 | [expenses.scr](playground/expenses.scr) | Edit the expense map; `foreach` prints each item and calculates the total. |
 | [table.scr](playground/table.scr) | Change `$number`; a `while` loop prints its multiplication table. |
 | [scores.scr](playground/scores.scr) | Change the scores; `if` / `elseif` / `else` assigns a result to each name. |
+| [arrays.scr](playground/arrays.scr) | Build a list with `[] =` and assignment at its length, replace an item, and append to a list inside a map. |
+| [strings.scr](playground/strings.scr) | Parse, normalize, search, and format a Unicode status record with the `String` helpers. |
+| [collections.scr](playground/collections.scr) | Filter, sort, and summarize records using list helpers and safe map lookups. |
+| [log-analyzer.scr](playground/log-analyzer.scr) | Analyze [sample events](playground/sample-events.txt), count log levels, list sorted services, and report malformed records. |
 
 After editing, check a script with
 `./target/debug/scr check playground/expenses.scr`, then run it again. There is no
@@ -343,7 +351,7 @@ examples and have not been deployment-tested in this checkout.
 
 ## Standard library
 
-The [complete reference](docs/standard-library.md) documents all **73 functions**,
+The [complete reference](docs/standard-library.md) documents all **94 functions**,
 return values, native objects, limits, and errors.
 
 | Modules | Use |
@@ -354,6 +362,8 @@ return values, native objects, limits, and errors.
 | `System` | Platform, CPU sampling, system memory, disk usage, and host details. |
 | `Date`, `Log` | UTC timestamps, parsing, sleep, and redacted local JSON logs. |
 | `Json`, `Http` | JSON conversion and bounded HTTP/HTTPS requests. |
+| `String` | Trim, split/join, search, replace, take substrings, and convert case. |
+| `List`, `Map` | Slice, remove, concatenate, sort, test membership, construct maps, and safely look up keys. |
 | Global functions | Explicit conversions, `type`, `len`, and cancellable `sleep`. |
 
 Local script reuse uses `require "lib/helpers.scr"` or
@@ -368,6 +378,43 @@ The [example guide](examples/README.md) also covers file organizing, log cleanup
 directory backups, server health, HTTP requests, and command execution.
 File-changing automation examples preview their work and require `--apply` to
 perform changes. The older `organize.scr` example moves files immediately.
+
+## Current gaps in language basics
+
+The [CLI development phases and approvals](docs/cli-roadmap.md) organize the next
+work into six phases, each requiring approval before implementation begins.
+
+Scripta already has string and collection utilities, scalar values, lists/maps,
+nested indexing, list appends,
+conditions, `for` / `while` / `foreach`, functions with optional type annotations,
+lexical captures, `try` / `catch` / `throw`, local script loading, and JSON.
+The following review identifies useful additions for CLI automation. Priorities
+are suggestions, not release commitments; the
+[language specification](docs/language-spec.md) and
+[standard-library index](docs/standard-library.md#release-010-export-index)
+define current support.
+
+| Suggested priority | Missing basics | Current behavior or workaround |
+| --- | --- | --- |
+| Medium | Pop and callback-based map/filter/reduce | List removal, slicing, concatenation, sorting, and membership are implemented. Use loops and new lists to filter or rebuild collections. |
+| Lower | Null fallback syntax | `Map::has` and `Map::get` provide safe key lookups. No `??`, `isset`, or null-safe access syntax. Direct missing-key indexing still bypasses `catch`. |
+| Medium | Numeric helpers: abs, min/max, rounding, powers, random numbers | Arithmetic, remainder, comparisons, and explicit numeric conversions exist. There is no math/random module. |
+| Medium | Script function defaults, variadic parameters, named arguments | Script-defined functions require their declared positional arguments. Pass a list/map for options or variable-length data. Host native functions have separate optional/variadic support. |
+| Medium | Anonymous functions and arrow functions | Named nested functions capture their lexical scope and can be assigned to variables; anonymous function literals are absent. |
+| Medium | String interpolation and formatting helpers | Build strings with `.` and explicit `str(value)` conversions. |
+| Medium | Guaranteed cleanup syntax | `try` / `catch` exists; `finally`, `defer`, and resource-management syntax do not. Cleanup must be arranged explicitly. |
+| Medium | Recoverable arithmetic and indexing errors | Explicit throws, function type errors, and native exceptions are catchable. Core errors such as division by zero, missing map keys, and invalid list indexes stop execution even inside `try`. |
+| Medium | Streaming file I/O and line iteration | `File::read` loads bounded whole files; file streams and a line iterator are absent. `Cli::prompt` supports interactive input. |
+| Lower | Convenience syntax: ternary expressions, `switch` / `match`, `++` / `--`, `%=` | Use `if` / `elseif` / `else`, `+= 1`, `-= 1`, and `$value = $value % divisor`. |
+
+String utilities are complete in [Phase 1](docs/cli-roadmap.md#phase-1-strings).
+Collection helpers are implemented in [Phase 2](docs/cli-roadmap.md#phase-2-collections-and-maps)
+and awaiting completion review. The log analyzer playground combines both phases.
+Regex support, Unicode normalization, and string indexing remain outside these phases.
+
+Strict booleans, explicit conversions, collection value semantics, and block
+scope are existing language choices. Classes, a package manager, and a web
+runtime are separate scope decisions rather than prerequisites for CLI scripts.
 
 ## Limits and diagnostics
 

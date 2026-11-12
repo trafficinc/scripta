@@ -247,6 +247,8 @@ fn native_objects_return_read_only_properties_and_catch_property_errors() {
         "$result->code = 9",
         "$result->code += 1",
         "$result->items[0] = 9",
+        "$result->items[] = 9",
+        "$result->items[1] = 9",
         "$result->missing",
     ] {
         let error = run(&mut runtime, &format!("{expression};")).unwrap_err();

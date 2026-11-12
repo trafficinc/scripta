@@ -1,0 +1,30 @@
+<?scr
+
+// Filter records with a loop, then sort and summarize the retained names.
+$records = [
+    ["name" => "café-api", "active" => true],
+    ["name" => "worker", "active" => false],
+    ["name" => "auth", "active" => true],
+    ["name" => "cache"]
+];
+$names = [];
+foreach ($records as $record) {
+    if (Map::get($record, "active", false)) {
+        $names[] = $record["name"];
+    }
+}
+$names = List::sort($names);
+echo "Active: " . String::join($names, ", ") . "\n";
+echo "First: " . String::join(List::slice($names, 0, 1), ", ") . "\n";
+echo "Without first: " . Json::encode(List::remove($names, 0)) . "\n";
+echo "With extra: " . Json::encode(List::concat($names, ["queue"])) . "\n";
+echo "Has auth: " . str(List::contains($names, "auth")) . "\n";
+
+$summary = Map::create();
+$summary["active"] = len($names);
+$summary["total"] = len($records);
+$summary["temporary"] = true;
+$summary = Map::remove($summary, "temporary");
+echo "Fields: " . String::join(Map::keys($summary), ", ") . "\n";
+echo "Values: " . Json::encode(Map::values($summary)) . "\n";
+echo "Has total: " . str(Map::has($summary, "total")) . "\n";

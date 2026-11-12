@@ -68,6 +68,8 @@ pub enum ExprKind {
     },
     PropertyAccess(Box<Expr>, String),
     IndexAccess(Box<Expr>, Box<Expr>),
+    /// A write-only list append target, valid only with plain assignment.
+    AppendAccess(Box<Expr>),
     List(Vec<Expr>),
     Map(Vec<(Expr, Expr)>),
     Grouped(Box<Expr>),

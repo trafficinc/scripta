@@ -161,13 +161,15 @@ Native calls use `Identifier::name(arguments)`, for example
 `Process::run("git", ["status"])`. The namespace must be a bare identifier and
 the member must be followed by an argument list. This is native API syntax;
 classes and object declarations are not part of this grammar. Property members
-must be identifiers; dynamic member syntax is not supported. Indexing requires
-one expression inside brackets; empty append indexing is not supported.
+must be identifiers; dynamic member syntax is not supported. Index reads require
+one expression inside brackets. Empty brackets are a write-only list append
+target and must be followed immediately by plain `=` assignment.
 
 A list uses `[expression, ...]`. A map uses `[key => value, ...]`, preserving
 entry order and each key/value expression in the AST. The first entry determines
 whether a nonempty collection is a list or map; mixing the forms is an error.
-`[]` is an empty list; there is no empty map literal in this phase. Collections
+`[]` is an empty list; there is no empty map literal. `Map::create()` constructs
+an empty map through the standard library. Collections
 accept an optional trailing comma. Keys are expressions that must evaluate to
 `int` or `string`. Keys retain their types: `1` and `"1"` are different keys.
 Duplicate keys replace their earlier value without changing iteration position.
@@ -361,15 +363,59 @@ invalid inputs or arities raise `TypeError`. `type` returns stable type names,
 nonnegative integer milliseconds and checks host cancellation. See
 [standard library](standard-library.md) for the conversion matrix and native API.
 
+The `String` namespace supplies pure text helpers for trimming, literal
+split/join, search, replacement, Unicode scalar substrings, and Unicode case
+conversion. These are registered native functions, not string methods or new
+syntax; they do not add string interpolation or string indexing. Arguments are
+strictly typed. Invalid substring bounds and empty split/replacement search
+strings raise catchable `RangeError`; result budget failures raise
+`ResourceLimitError`. See [string helpers](standard-library.md#strings) for
+signatures, edge cases, Unicode behavior, and limits.
+
 ### Collections and host objects
 
 Lists and maps have owned value semantics: assignment or argument passing copies
 the collection, including nested collections. Native object and callable handles
-retain identity when copied. List indexes must be nonnegative ints within the
-existing length. List assignment replaces an existing element; it does not
-implicitly append. Map lookup requires an existing int/string key; assignment
-may add a final key. Nested assignment never creates missing intermediate
-collections. Indexing other types is an error.
+retain identity when copied. List indexes must be nonnegative ints. Reads and
+compound assignments require an existing element. Plain assignment replaces an
+existing element or appends at exactly the current length; skipping indexes is
+an error, and no holes are created.
+
+`$items[] = value` appends to an existing list, including an empty list. Nested
+targets such as `$groups[0][] = value` or `$map["items"][] = value` work when the
+intermediate collections exist. The target must already be a list; undefined
+variables, null, scalars, and maps are not converted to lists. Empty brackets
+cannot be read, used in compound assignment, or used as an intermediate target
+(`$items[][] = value` is invalid). An append assignment evaluates to its assigned
+value, like other assignments.
+
+Target index expressions and native object receivers are evaluated once, before
+the RHS. Appending uses the target list's length after evaluating the RHS, so
+an RHS that appends to the same list does not have its new element overwritten.
+The usual value nesting and optional logical-byte limits apply; a failed growth
+check leaves the destination unchanged (target/RHS side effects are not rolled back).
+
+```scr
+<?scr
+$items = [];
+$items[] = "apple";
+$items[len($items)] = "banana";
+$items[0] = "pear";
+echo Json::encode($items); // ["pear","banana"]
+```
+
+Map lookup requires an existing int/string key; assignment may add a final key.
+Nested assignment never creates missing intermediate collections. Indexing
+other types is an error.
+
+The standard library's `List` and `Map` namespaces add collection helpers without
+new syntax. List removal, slicing, concatenation, membership, and homogeneous
+sorting preserve strict value semantics. `Map::has` and `Map::get` safely handle
+absent keys, while normal indexing still requires an existing key. Map keys and
+values can be projected in insertion order, and removal returns an independent
+map. Invalid helper arguments and bounds raise catchable native errors; this
+does not change core arithmetic or indexing errors. See the
+[collection reference](standard-library.md#collections) for signatures and limits.
 
 Property access uses host native objects. A host may expose readable or writable
 properties; assigning a read-only property raises an error. The runtime contains
@@ -412,8 +458,13 @@ lifetime of native object handles through safe reference-counted ownership.
 
 ## Planned features
 
-Interpolation, variable annotation syntax, richer exception types,
-general resource limits, and collection growth helpers remain future work.
+Interpolation, variable annotation syntax, richer exception types, and
+callback-based collection transforms and pop remain future work.
+List and map helpers for removal, slicing, concatenation, membership, sorting,
+construction, projection, and safe lookup are implemented.
+List growth through `[] =` and assignment at the current length is implemented.
+See the [basics review](../README.md#current-gaps-in-language-basics) for suggested
+priorities within the CLI automation direction.
 
 
 ## Local script loading

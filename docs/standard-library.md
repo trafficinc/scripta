@@ -35,12 +35,12 @@ Embedders opt in by calling `scr_stdlib::register(&mut runtime)?`. Registration
 returns `NativeResult<()>`; duplicate names produce `RegistryError` and preserve
 the existing registration. `echo` and `exit` remain language statements. Neither
 is registered as a native function; exit returns a code without terminating the
-embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Log`, `Json`, and `Http` are
+embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Log`, `Json`, `Http`, `String`, `List`, and `Map` are
 registered by default.
 
 ## Release 0.1.0 export index
 
-This reference covers all 73 registered functions in the default library, plus
+This reference covers all 94 registered functions in the default library, plus
 native response/entry properties and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -48,6 +48,9 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Module | Public functions | Details |
 | --- | --- | --- |
 | Globals | `str`, `int`, `float`, `bool`, `type`, `len`, `sleep` | Conversion table above |
+| String | `String::trim`, `String::split`, `String::join`, `String::contains`, `String::startsWith`, `String::endsWith`, `String::replace`, `String::substring`, `String::lower`, `String::upper` | [Strings](#strings) |
+| List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort` | [Collections](#collections) |
+| Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove` | [Collections](#collections) |
 | File | `File::exists`, `File::read`, `File::write`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension` | [Filesystem](#filesystem-and-paths) |
 | Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
 | Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute` | [Paths](#filesystem-and-paths) |
@@ -66,6 +69,125 @@ in their module sections. Convert selected properties into ordinary maps before
 JSON encoding. `require` and `require_once` are statements, not native functions;
 see [local script loading](language-spec.md#local-script-loading). There is no
 package manager or implicit remote module resolution.
+
+## Strings
+
+All helpers return new values and leave their arguments unchanged. Arguments
+have the exact types below; there is no implicit scalar-to-string conversion.
+Wrong argument counts or types raise catchable `TypeError` exceptions.
+
+| Function | Behavior |
+| --- | --- |
+| `String::trim(text: string): string` | Removes Unicode whitespace from both ends, preserving interior whitespace. Empty or all-whitespace input returns `""`. |
+| `String::split(text: string, separator: string): list` | Splits on literal, nonoverlapping separators and preserves leading, trailing, and consecutive empty fields. Empty text returns `[""]`; no match returns `[text]`. An empty separator raises `RangeError`. |
+| `String::join(items: list, separator: string): string` | Joins a list containing only strings. Empty input returns `""`, one item returns that item, and an empty separator concatenates items. Non-string elements raise `TypeError`. |
+| `String::contains(text: string, search: string): bool` | True when the literal search occurs anywhere in text. An empty search returns true, including in empty text. |
+| `String::startsWith(text: string, search: string): bool` | True when text begins with the literal search. An empty search returns true. |
+| `String::endsWith(text: string, search: string): bool` | True when text ends with the literal search. An empty search returns true. |
+| `String::replace(text: string, search: string, replacement: string): string` | Replaces all literal, nonoverlapping matches from left to right. Replacement text is not searched again. No match returns the original text's value; an empty replacement deletes matches. An empty search raises `RangeError`. |
+| `String::substring(text: string, start: int, length: int optional): string` | Takes nonnegative Unicode scalar positions. Omitted length returns the suffix. Start beyond `len(text)`, negative offsets, or length beyond the remaining text raise `RangeError`. Start at the end is valid with omitted length or length zero. Empty text accepts start zero with omitted length or length zero. Explicit null is not an omitted length. |
+| `String::lower(text: string): string` | Applies locale-independent Unicode lowercase, including contextual Greek final sigma. Empty input returns `""`. Mappings can expand a scalar, such as `İ` becoming `i` plus a combining dot. |
+| `String::upper(text: string): string` | Applies locale-independent Unicode uppercase. Empty input returns `""`. Mappings can expand scalars, such as `ß` becoming `SS`. |
+
+Matching is case-sensitive and literal, with no regular expressions or Unicode
+normalization. For example, precomposed `é` and `e` followed by a combining acute
+accent are different searches. Substring positions use the same Unicode scalar
+unit as `len`, not bytes or grapheme clusters; a combining mark can be selected
+separately. Trimming and case conversion use Rust's Unicode tables, independently
+of the operating system locale.
+
+```scr
+<?scr
+$parts = String::split(String::trim("  café,tea,,  "), ",");
+echo Json::encode($parts) . "\n"; // ["café","tea","",""]
+echo String::join(["café", "tea"], " / ") . "\n"; // café / tea
+echo str(String::contains("café", "fé")) . "\n"; // true
+echo str(String::startsWith("café", "ca")) . "\n"; // true
+echo str(String::endsWith("café", "fé")) . "\n"; // true
+echo String::replace("a-a", "a", "b") . "\n"; // b-b
+echo String::substring("é🦀abc", 1, 2) . "\n"; // 🦀a
+echo String::lower("HELLO") . "\n"; // hello
+echo String::upper("Straße") . "\n"; // STRASSE
+```
+
+The helpers need no OS capability, external command, or network access. String
+results account for one Value slot plus UTF-8 output bytes. Split results account
+for a list Value slot plus one Value slot and UTF-8 bytes for each field, including
+empty fields. Configured `max_value_bytes` limits are checked before reserving
+the result buffer or adding a split field. Case conversion preflights expanded
+UTF-8 length before constructing the Unicode result. Detected size overflows,
+budget violations, and fallible reservation failures raise catchable
+`ResourceLimitError`. These are logical per-value limits, not a hard process
+memory ceiling; input arguments are still subject to the runtime's ordinary
+limits. Cancellation is checked at native-call boundaries and during iterative
+result construction. A failed helper does not replace an assignment destination.
+
+Try [the strings playground](../playground/strings.scr) for a complete status
+record normalization example.
+
+## Collections
+
+List and Map helpers return new values and leave input collections unchanged.
+Nested lists and maps are copied; native object and callable handles retain
+their identity, matching ordinary assignment and argument passing. List results
+have contiguous indexes starting at zero. Map results and key/value projections
+preserve insertion order and distinguish integer keys from string keys.
+
+| Function | Behavior |
+| --- | --- |
+| `List::remove(items: list, index: int): list` | Copies the list without the existing zero-based index and renumbers remaining positions. Negative or absent positions raise `RangeError`, including removal from an empty list. |
+| `List::slice(items: list, start: int, length: int optional): list` | Copies a contiguous range using nonnegative positions. Omitted length copies the suffix. Start beyond `len(items)`, negative offsets, or length beyond the remainder raise `RangeError`. Start at the end with omitted or zero length returns `[]`; `List::slice([], 0)` returns `[]`. Explicit null is not an omitted length. |
+| `List::concat(left: list, right: list): list` | Returns left's elements followed by right's. Empty lists are valid. Both inputs remain unchanged. |
+| `List::contains(items: list, value: any): bool` | Tests membership with strict recursive equality, like `===`. Int `1`, float `1.0`, and string `"1"` differ. Lists compare in order; maps compare contents independent of insertion order. Native objects and callables compare by identity. Empty lists return false. |
+| `List::sort(items: list, descending: bool optional): list` | Returns a stable sorted copy, ascending by default. Nonempty lists must contain only ints, only finite floats, or only strings. Mixed types, bools, nulls, collections, objects, and callables raise `TypeError`, even in a single-element list. Empty lists are valid. Set descending to true to reverse the comparison direction while preserving equal elements' original order. |
+| `Map::create(): map` | Returns an empty map. `[]` continues to create an empty list. Add map entries with normal indexed assignment. |
+| `Map::has(items: map, key: int or string): bool` | Tests whether the exact typed key exists, including keys whose value is null. |
+| `Map::get(items: map, key: int or string, default: any optional): any` | Returns a copy of an existing value, or the default if the key is absent. Omitted default is null. A stored null is returned as null, not replaced by the default. As in other calls, default arguments are evaluated eagerly even when the key exists. |
+| `Map::keys(items: map): list` | Returns the map's keys in insertion order, preserving each int/string type. An empty map returns `[]`. |
+| `Map::values(items: map): list` | Returns copies of values in insertion order. An empty map returns `[]`. |
+| `Map::remove(items: map, key: int or string): map` | Returns a copy without that key, preserving the remaining entries' order. An absent key returns an unchanged copy, including for an empty map. |
+
+Arguments are strictly typed; invalid types and argument counts raise catchable
+`TypeError`. No helper converts a list into a map, coerces a key, creates holes,
+or creates missing intermediate collections. Sorting uses the language's numeric
+and UTF-8 string ordering, with no locale collation or numeric coercion. Stable
+float sorting preserves the order of equal values, including positive and
+negative zero.
+
+```scr
+<?scr
+$items = [3, 1, 2];
+echo Json::encode(List::sort($items)) . "\n"; // [1,2,3]
+echo Json::encode(List::remove($items, 1)) . "\n"; // [3,2]
+echo Json::encode(List::slice($items, 1, 2)) . "\n"; // [1,2]
+echo Json::encode(List::concat($items, [4])) . "\n"; // [3,1,2,4]
+echo str(List::contains($items, 2)) . "\n"; // true
+$config = Map::create();
+$config["name"] = "worker";
+$config["optional"] = null;
+echo str(Map::has($config, "optional")) . "\n"; // true
+echo str(Map::get($config, "optional", "fallback")) . "\n"; // null
+echo str(Map::get($config, "retries", 3)) . "\n"; // 3
+echo Json::encode(Map::keys($config)) . "\n"; // ["name","optional"]
+echo Json::encode(Map::values(Map::remove($config, "optional"))) . "\n"; // ["worker"]
+```
+
+Helpers need no OS capability, network access, or external command. Before
+copying result collections, they check the 128-level nesting limit and optional
+`max_value_bytes` budget using the runtime's logical accounting: one Value slot
+per value, UTF-8 string bytes, and MapKey slots plus string-key bytes. Detected
+size overflows, byte-budget violations, and fallible result reservations raise
+`ResourceLimitError`; input arguments and returned booleans also remain subject
+to the runtime's ordinary value checks. These limits do not bound process RSS
+or sorting scratch space. Cancellation is checked at native-call boundaries
+and during result traversal/copying; a sort can delay cancellation while it is
+ordering the result. Failed helpers leave assignment destinations unchanged.
+
+`Map::get` and `has` provide safe lookups today. Direct missing-key indexing
+and core arithmetic/indexing failures retain their existing behavior and bypass
+`catch`; changing that belongs to the next phase. Callback transforms and pop
+are deferred. Try the [collections playground](../playground/collections.scr)
+and [log analyzer](../playground/log-analyzer.scr) for complete examples.
 
 ## Registering Rust modules
 
@@ -137,7 +259,7 @@ contains:
 | `cancellation` | The atomic cancellation flag from runtime options; `check_cancelled()` returns an interruption error. |
 | `permissions` | Automation capabilities are allowed by default: sleep, filesystem read/write, environment read/write, process execute/inspect, system.inspect, log.write, http.request, and cli.prompt. `process.shell` remains opt-in. |
 | `call_span` | Original script span of the native call. |
-| `max_value_bytes` | Optional host logical-value budget; file reads enforce it while buffering. |
+| `max_value_bytes` | Optional host logical-value budget; file reads enforce it while buffering, and String helpers check result sizes before allocating output. |
 
 Capabilities are a cooperation interface for trusted Rust implementations, not a
 sandbox around arbitrary host code. Hosts grant capabilities by inserting names
