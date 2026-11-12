@@ -5,8 +5,8 @@ transforming collections, handling failures, and reusing scripts. Each phase
 requires explicit approval before implementation starts. Completing one phase
 does not authorize the next.
 
-**Next action: review Phase 4 Functions.** Implementation is ready for review.
-Acceptance and approval to start Phase 5 are pending.
+**Next action: choose the next scope after the CLI review below.** All six
+phases are accepted. The proposed Phase 7 remains unapproved.
 
 ## Progress and approval record
 
@@ -15,9 +15,9 @@ Acceptance and approval to start Phase 5 are pending.
 | 1 | Strings | Accepted | Approved | Accepted |
 | 2 | Collections and maps | Accepted | Approved | Accepted |
 | 3 | Recoverable errors | Accepted | Approved | Accepted |
-| 4 | Functions | Ready for review | Approved | Pending |
-| 5 | Math and formatting | Waiting for Phase 4 | Pending | Pending |
-| 6 | Cleanup and streaming | Waiting for Phase 5 | Pending | Pending |
+| 4 | Functions | Accepted | Approved | Accepted |
+| 5 | Math and formatting | Accepted | Approved | Accepted |
+| 6 | Cleanup and streaming | Accepted | Approved | Accepted |
 
 Record explicit approvals here as they arrive. Use the statuses Waiting,
 Approved, In progress, Ready for review, and Accepted. Record the approving
@@ -364,7 +364,10 @@ Make reusable helpers easier to call and pass around.
 **Approval record:** Approved by the user's “continue” instruction after the
 Phase 3 completion summary. This also accepts Phase 3.
 
-**Completion record:** Ready for review. Named and anonymous functions support
+**Acceptance record:** Accepted by the user’s “Phase 5 Math and formatting awaits
+your approval. OK” instruction.
+
+**Completion record:** Accepted. Named and anonymous functions support
 per-call defaults, a final typed variadic parameter, and existing lexical
 capture/return annotations. The lexer recognizes `...` for parameter declarations;
 the parser and runtime reject invalid ordering. Anonymous literals register no
@@ -396,7 +399,8 @@ Defaults are evaluated only when omitted; explicit null remains an argument.
 Variadic annotations check elements. Captures share enclosing function locals
 and retain the existing scope lifetime and budget rules; globals still require
 explicit arguments. Named arguments, arrow syntax, call-site unpacking, and
-callback-based collection helpers remain deferred. No work on Phase 5 has started.
+callback-based collection helpers remain deferred. Phase 5 is approved separately
+below.
 
 **Next approval after acceptance:** Phase 5 Math and formatting.
 
@@ -424,9 +428,66 @@ Support common calculations and readable CLI reports.
 - A reporting playground formats a readable numeric summary.
 - The shared phase checks pass.
 
-**Approval record:** Pending.
+**API contract**
 
-**Completion record:** Pending.
+- `Math::abs(value)`, `floor(value)`, `ceil(value)`, and `round(value)` accept
+  one int or finite float and preserve its type. Integers are unchanged except
+  for abs; abs of i64 minimum raises `ArithmeticError`. Float floor rounds toward
+  negative infinity, ceil toward positive infinity, and round to the nearest
+  integer with halfway ties away from zero. Float results remain floats, including
+  signed zero from rounding; abs converts negative zero to positive zero. No
+  conversion to int is implied.
+- `Math::min(left, right)` and `max(left, right)` require two ints or two finite
+  floats and return the selected value with its original type. Equal inputs
+  select the left argument, including signed zero. Mixed numeric types, nonnumeric
+  values, non-finite floats, and wrong arity raise `TypeError`.
+- `String::format(template: string, values: list): string` replaces each `{}`
+  with the next scalar value using `str` display (null, bool, int, finite float,
+  or string). `{{` and `}}` emit literal braces. Replacement strings are literal,
+  not reparsed. Other brace syntax, unmatched braces, or missing/extra values
+  raise `FormatError`; unsupported values raise `TypeError`.
+- Formatting preserves Unicode and returns a new string. It preflights one Value
+  slot plus output UTF-8 bytes before reserving its result, checks cancellation
+  while scanning, and reports size overflow, budget or reservation failures as
+  `ResourceLimitError`. It adds no precision, width, indexing, or interpolation
+  syntax; numeric presentation uses the explicit Math and conversion helpers.
+
+**Approval record:** Approved by the user’s “Phase 5 Math and formatting awaits
+your approval. OK” instruction, which also accepts Phase 4. Approval applies only
+to Phase 5.
+
+**Acceptance record:** Accepted by the user’s “ok” after the Phase 5 completion summary.
+
+**Completion record:** Accepted. Six Math helpers and `String::format`
+are registered by default, bringing the standard-library export count to 101.
+The reference, language specification, export coverage, and README describe the
+new APIs. Numeric helpers preserve strict types and finite values; abs checks
+integer overflow. Formatting validates brace syntax and scalar arguments, measures
+output before reserving a result buffer, and checks cancellation during both
+passes. No language syntax changes were needed.
+
+Four integration tests cover numeric boundaries, positive and negative rounding,
+signed zero, Unicode and escaped braces, strict types/arity, catchable failures,
+failed assignment preservation, output limits, and runtime reuse. Unit tests
+cover non-finite host values, exact output budgets (including empty output), and
+cancellation. A CLI test checks the reporting playground, formatter stability,
+and execution from an unrelated directory.
+
+| Validation | Result |
+| --- | --- |
+| `cargo test --workspace --locked` | Passed outside the sandbox after an existing non-UTF-8 filesystem test was blocked with Operation not permitted inside it. |
+| `cargo test -p scr-cli --locked --test release_examples reporting_playground_runs_before_and_after_formatting` | Passed after adding the reporting CLI test. |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed. |
+| `cargo fmt --all -- --check` | Passed. |
+| `git diff --check` | Passed. |
+| `cargo run -p scr-cli --locked -- run playground/reporting.scr` | Passed; reported four jobs, 8.6–19.5 ms duration, rounded average 13 ms, bounds 12–13 ms, and escaped literal braces. |
+
+Review [the reporting playground](../playground/reporting.scr),
+[Math helpers](standard-library.md#math), and
+[formatting contract](standard-library.md#strings). Formatting uses scalar display
+without decimal precision, width, or indexed placeholders. Budgets are logical
+per-value limits, not a process memory ceiling. No Phase 6 work has started.
+
 
 **Next approval after acceptance:** Phase 6 Cleanup and streaming.
 
@@ -459,9 +520,160 @@ Provide reliable cleanup and bounded processing of large files.
 - A streaming playground processes a log file and uses `finally` for cleanup.
 - The shared phase checks pass.
 
-**Approval record:** Pending.
+**API contract**
 
-**Completion record:** Pending.
+- `try { ... }` requires one or more catch clauses, a final `finally { ... }`,
+  or both. Finally runs once after the body and any matching catch, including
+  normal completion, throw, return, break, continue, and exit. Its ordinary
+  completion preserves the pending outcome; a throw, return, loop control, or
+  exit from finally replaces that outcome. Diagnostics describe the replacement
+  failure with its original source and stack. Finally has a separate block scope.
+- Fatal runtime failures and cancellation bypass finally, as they bypass catches.
+  Cleanup executes under the same instruction, depth, scope, value and cancellation
+  limits; no extra execution allowance is granted. Native resources still release
+  when their last reference is dropped, including runtime teardown unless the
+  host retains aliases. OS termination may prevent all cleanup.
+- `File::openLines(path: string, maxLineBytes: int optional): FileStream` opens a
+  regular file for UTF-8 line reading; the default maximum is 1 MiB, measured in
+  raw bytes per line including LF/CRLF terminators. The maximum must be positive.
+  Opening uses the existing filesystem read capability, policy roots, and symlink
+  rules. Stream operations retain the open descriptor and recheck read permission
+  and host read policy, rather than reopening or resolving the path again. A
+  stream belongs to its filesystem registration; reads through another
+  registration raise `TypeError`. Its read-only bool `closed` property exposes
+  whether the descriptor is closed.
+- `File::readLine(stream: FileStream): string or null` returns the next line,
+  stripping a terminal LF and its optional preceding CR. A bare CR is preserved.
+  Blank lines return an empty string; EOF returns null, repeatedly. A final line
+  without LF is returned normally; UTF-8 is strict and a BOM is preserved.
+- `File::close(stream: FileStream): null` closes shared stream identity, is
+  idempotent, and requires no read permission. Aliases see the same cursor and
+  closed state. Reading a closed stream raises `StreamError`. Read/encoding/line
+  size/allocation failures close the stream to avoid exposing a partial cursor.
+  Cancellation within an active read also closes the stream.
+- Reads use an 8 KiB buffer and grow only the current line, checking cancellation
+  between chunks. Lines exceeding the configured raw-byte ceiling or the logical
+  result limit (one Value slot plus UTF-8 bytes) raise `ResourceLimitError`.
+  Invalid UTF-8 raises `EncodingError`; OS errors use existing filesystem error
+  categories. Wrong types/arity raise `TypeError`, invalid maxima `RangeError`.
+  These helpers add no writing streams, iterator syntax, or asynchronous I/O.
+
+**Approval record:** Approved by the user’s “ok” after the Phase 5 completion
+summary. This also accepts Phase 5. Approval applies only to Phase 6.
+
+**Acceptance record:** Accepted by the user’s “continue” instruction after the
+Phase 6 completion summary. This authorizes the planned CLI experience review;
+it does not select an unspecified new implementation phase.
+
+**Completion record:** Accepted. The lexer, AST, parser, runtime,
+formatter, and declaration checker support finally after optional catch clauses.
+Cleanup preserves pending outcomes on ordinary completion and replaces them when
+it produces new control flow or failure; fatal runtime errors and cancellation
+remain outside script cleanup. Catch binding validation occurs only for a selected
+catch so an unmatched exception can reach finally without creating an unnecessary
+binding budget failure. Diagnostics retain their source, stack, and redaction.
+
+Three new File helpers provide shared, explicitly closable UTF-8 line streams,
+bringing the default export count to 104. Reads retain an 8 KiB input buffer and
+one bounded line, enforce raw-line and logical output limits, and close after
+active read failures. The reference documents registration ownership, permissions,
+line endings, EOF, errors, descriptor lifetime, and synchronous-read limitations.
+The specification and README basics review describe the completed phase.
+
+Eight runtime tests cover ordinary/caught/unmatched paths, competing failures,
+returns and exits, nested loop control, scope separation, diagnostics/redaction,
+fatal limits, cancellation, and runtime reuse. Lexer/parser/tooling tests cover
+finally keywords and clauses, malformed syntax, declaration validation, formatter
+stability, and preserved execution. Seven stream integration tests cover shared
+cursors, explicit close, repeated EOF, Unicode/BOM/line endings, strict arguments,
+line/output limits, failed assignment preservation, UTF-8 errors, permission and
+root policy, symlinks, descriptor identity, and registration ownership. Three
+stream unit tests cover exact output budgets across split UTF-8/CRLF buffers,
+injected read failures/cancellation, and actual descriptor release on close and
+runtime teardown. A 2 MiB input is processed under a 256-byte per-value budget,
+while the same whole-file read fails. The CLI test runs the streaming playground
+before/after formatting from another directory with sample, CRLF, empty,
+invalid-encoding, and oversized-line inputs, and checks its usage exit status.
+
+| Validation | Result |
+| --- | --- |
+| `cargo test --workspace --locked` | Passed outside the sandbox, including all cleanup, stream, tooling, playground, and export-index tests. |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed. |
+| `cargo fmt --all -- --check` | Passed. |
+| `git diff --check` | Passed. |
+| `cargo run -p scr-cli --locked -- run playground/streaming.scr playground/sample-events.txt` | Passed; reported five records (three info, one warn, one error), one malformed record, and a closed stream. |
+
+Review [the streaming playground](../playground/streaming.scr),
+[cleanup semantics](language-spec.md#exceptions-and-control-flow), and
+[stream contract](standard-library.md#bounded-file-streams). Cleanup receives no
+extra execution budget, and fatal failures/cancellation can bypass it. Native
+streams close when their last reference drops; a host-retained alias can extend
+their lifetime past runtime teardown. OS reads remain synchronous and path races
+retain the existing filesystem limitations. Writable streams, iterator syntax,
+and general resource-management syntax remain deferred.
+
 
 **Next decision after acceptance:** Review the CLI experience and choose further
 work explicitly. There is no automatically authorized next phase.
+
+
+## CLI experience review after Phase 6
+
+**Review instruction:** The user requested “continue” after the Phase 6
+completion summary. This review completes the next decision checkpoint; new feature work
+still requires an explicit scope approval.
+
+**Findings from the current debug CLI**
+
+| Workflow | Observed result |
+| --- | --- |
+| `scr help` | Exit 0 with global usage. |
+| `scr run --help`, `scr check --help`, `scr fmt --help` | Exit 2 with a filename/usage error instead of command-specific help. |
+| `scr help run` | Exit 2, unexpected extra arguments. |
+| `scr check playground/streaming.scr` | Exit 0 without executing the script. |
+| Reporting and streaming sample runs | Expected summaries; the streaming example reports five valid records, one malformed record, and a closed stream. |
+| Piped data with `Cli::prompt("")` | Works, preserving Unicode and empty lines while stripping LF/CRLF; a 65537-byte payload raises `InputLimitError` at the prompt's fixed 64 KiB raw line limit. |
+| Piped data into the streaming playground without a filename | Exit 2 with the example's usage message; it currently requires a file argument. |
+| `scr run -` | Exit 2; source from stdin is not implemented. This is separate from a file-backed script consuming piped data. |
+| `SCR_MAX_STEPS=20 scr run playground/streaming.scr playground/sample-events.txt` | Exit 1 with the instruction-limit diagnostic and source/stack details. |
+| `scr fmt --check` on the new reporting/streaming playgrounds | Initially failed; both examples were formatted and now pass. Their execution tests still pass. |
+
+The file-processing APIs cover the approved examples. The next practical
+improvements are help discovery and a dedicated bounded input API for shell
+pipelines. Existing `Cli::prompt("")` is a working stdin workaround, so pipeline
+input is not wholly absent. A noninteractive API would avoid tying record input
+to a prompt capability, fixed prompt line limit, and output flushing.
+
+**Validation:** `cargo test -p scr-cli --locked --test release_examples playground`
+passes all six matching playground tests. Both new playgrounds pass
+`scr fmt --check`. `cargo fmt --all -- --check` and `git diff --check` pass.
+The CLI probes used temporary scripts/input and did not change public APIs.
+
+## Proposed Phase 7 CLI pipelines and help
+
+**Status:** Proposed; approval to start is pending. This is the recommended next
+scope, not an automatically authorized continuation.
+
+**Proposed scope**
+
+- Support `scr help run|check|fmt` and command-local `--help`/`-h` before the
+  source path, printing relevant help to stdout with exit 0. Preserve literal
+  paths after `--`, usage errors, and all arguments after the script path.
+- Add `Cli::readLine(maxLineBytes: int optional): string or null` for bounded
+  UTF-8 input from the runtime's existing buffered stdin, without printing or
+  flushing a prompt. Reuse file-stream conventions for LF/CRLF, empty lines,
+  EOF, raw-byte maxima, logical output limits, and cancellation. Define the
+  input capability and recovery behavior after read/encoding/limit errors in
+  the API contract before implementation.
+- Let the streaming playground accept `-` as its data-input argument while
+  preserving its filename mode and missing-argument usage. Keep script source
+  in a file; source-from-stdin parsing is a separate future decision.
+- Add end-to-end pipe/help tests and focused input boundary tests, update the
+  reference/export counts and README, and run the shared phase checks.
+
+Callback transforms, precision formatting, writable streams, source from stdin,
+and new language syntax remain separate possible scopes.
+
+**Approval record:** Pending.
+
+**Completion record:** Not started.

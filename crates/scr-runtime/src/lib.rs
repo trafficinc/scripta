@@ -181,6 +181,7 @@ impl Runtime {
             "continue",
             "try",
             "catch",
+            "finally",
             "throw",
             "true",
             "false",
@@ -564,46 +565,64 @@ impl Runtime {
                 };
                 return Err(Signal::Return(value));
             }
-            StatementKind::Try { body, catches } => match self.block(body, output) {
-                Err(
-                    signal @ (Signal::Throw(..)
-                    | Signal::TypeError(_)
-                    | Signal::OperationException(..)
-                    | Signal::NativeException(..)),
-                ) => {
-                    let (value, exception_type) = match &signal {
-                        Signal::Throw(value, _) => (value.clone(), value.type_name().to_string()),
-                        Signal::TypeError(error) => {
-                            (Value::String(error.message.clone()), "TypeError".into())
+            StatementKind::Try {
+                body,
+                catches,
+                finally,
+            } => {
+                let pending = (|| {
+                    match self.block(body, output) {
+                        Err(
+                            signal @ (Signal::Throw(..)
+                            | Signal::TypeError(_)
+                            | Signal::OperationException(..)
+                            | Signal::NativeException(..)),
+                        ) => {
+                            let (value, exception_type) = match &signal {
+                                Signal::Throw(value, _) => {
+                                    (value.clone(), value.type_name().to_string())
+                                }
+                                Signal::TypeError(error) => {
+                                    (Value::String(error.message.clone()), "TypeError".into())
+                                }
+                                Signal::NativeException(error, _) => {
+                                    (Value::String(error.message.clone()), error.kind.clone())
+                                }
+                                Signal::OperationException(kind, error) => {
+                                    (Value::String(error.message.clone()), (*kind).into())
+                                }
+                                _ => unreachable!(),
+                            };
+                            for catch in catches {
+                                if catch.exception_type.as_ref().is_none_or(|annotation| {
+                                    annotation.name == "Error" || annotation.name == exception_type
+                                }) {
+                                    self.validate_value(&value, 0, statement.span)?;
+                                    let previous = self
+                                        .enter_scope(self.environments.current, statement.span)?;
+                                    self.environments
+                                        .scope_mut(self.environments.current)
+                                        .variables
+                                        .insert(catch.binding.name.clone(), value);
+                                    let result = self.statements(&catch.body.statements, output);
+                                    self.environments.leave(previous);
+                                    return result;
+                                }
+                            }
+                            return Err(signal);
                         }
-                        Signal::NativeException(error, _) => {
-                            (Value::String(error.message.clone()), error.kind.clone())
-                        }
-                        Signal::OperationException(kind, error) => {
-                            (Value::String(error.message.clone()), (*kind).into())
-                        }
-                        _ => unreachable!(),
-                    };
-                    self.validate_value(&value, 0, statement.span)?;
-                    for catch in catches {
-                        if catch.exception_type.as_ref().is_none_or(|annotation| {
-                            annotation.name == "Error" || annotation.name == exception_type
-                        }) {
-                            let previous =
-                                self.enter_scope(self.environments.current, statement.span)?;
-                            self.environments
-                                .scope_mut(self.environments.current)
-                                .variables
-                                .insert(catch.binding.name.clone(), value);
-                            let result = self.statements(&catch.body.statements, output);
-                            self.environments.leave(previous);
-                            return result;
-                        }
+                        result => result?,
                     }
-                    return Err(signal);
+                    Ok(())
+                })();
+                if matches!(&pending, Err(Signal::Error(_) | Signal::Interrupted(_))) {
+                    return pending;
                 }
-                result => result?,
-            },
+                if let Some(body) = finally {
+                    self.block(body, output)?;
+                }
+                pending?;
+            }
             StatementKind::Throw(expr) => {
                 let value = self.evaluate(expr, output)?;
                 let message = match &value {

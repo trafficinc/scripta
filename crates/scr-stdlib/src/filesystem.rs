@@ -1,5 +1,7 @@
 //! Filesystem modules, implemented only through Rust's standard library.
 use crate::paths;
+#[path = "file_streams.rs"]
+mod streams;
 use scr_runtime::{
     NativeError, NativeFunction, NativeObject, NativeResult, NativeSignature, NativeType, Runtime,
     RuntimeContext, Value,
@@ -435,6 +437,7 @@ pub fn register(runtime: &mut Runtime, policy: FilesystemPolicy) -> NativeResult
             ),
         )?;
     }
+    streams::register(runtime, policy)?;
     Ok(())
 }
 fn perform(

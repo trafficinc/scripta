@@ -281,12 +281,6 @@ impl Parser<'_> {
                 self.pos += 1;
                 let body = self.block()?;
                 let mut catches = Vec::new();
-                if self.current().kind != TokenKind::Catch {
-                    return Err(Diagnostic::new(
-                        "expected catch after try block",
-                        self.current().span,
-                    ));
-                }
                 while self.current().kind == TokenKind::Catch {
                     let start = self.current().span.start;
                     self.pos += 1;
@@ -308,7 +302,22 @@ impl Parser<'_> {
                         span,
                     });
                 }
-                StatementKind::Try { body, catches }
+                let finally = if self.take(TokenKind::Finally) {
+                    Some(self.block()?)
+                } else {
+                    None
+                };
+                if catches.is_empty() && finally.is_none() {
+                    return Err(Diagnostic::new(
+                        "expected catch or finally after try block",
+                        self.current().span,
+                    ));
+                }
+                StatementKind::Try {
+                    body,
+                    catches,
+                    finally,
+                }
             }
             TokenKind::Echo | TokenKind::Throw => {
                 let echo = self.take(TokenKind::Echo);
@@ -347,9 +356,9 @@ impl Parser<'_> {
                 self.expect(TokenKind::Semicolon)?;
                 StatementKind::Exit(value)
             }
-            TokenKind::Else | TokenKind::Elseif | TokenKind::Catch => {
+            TokenKind::Else | TokenKind::Elseif | TokenKind::Catch | TokenKind::Finally => {
                 return Err(Diagnostic::new(
-                    "unexpected clause; attach else/elseif to if or catch to try",
+                    "unexpected clause; attach else/elseif to if or catch/finally to try",
                     keyword_span,
                 ));
             }

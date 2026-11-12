@@ -194,6 +194,75 @@ fn case(context: &RuntimeContext<'_>, input: &str, upper: bool) -> NativeResult 
     }))
 }
 
+fn format_parts(
+    context: &RuntimeContext<'_>,
+    template: &str,
+    values: &[Value],
+    mut emit: impl FnMut(&str) -> NativeResult<()>,
+) -> NativeResult<()> {
+    context.check_cancelled()?;
+    let invalid = || {
+        NativeError::new(
+            "FormatError",
+            "expected {}, {{, or }} and exactly one value per placeholder",
+        )
+    };
+    let mut chars = template.chars();
+    let mut used = 0;
+    while let Some(ch) = chars.next() {
+        context.check_cancelled()?;
+        match ch {
+            '{' => match chars.next() {
+                Some('{') => emit("{")?,
+                Some('}') => {
+                    let value = values.get(used).ok_or_else(invalid)?;
+                    used += 1;
+                    match value {
+                        Value::String(value) => emit(value)?,
+                        Value::Null => emit("null")?,
+                        Value::Bool(true) => emit("true")?,
+                        Value::Bool(false) => emit("false")?,
+                        // Numeric display has bounded size regardless of the template.
+                        Value::Int(value) => emit(&value.to_string())?,
+                        Value::Float(value) if value.is_finite() => emit(&value.to_string())?,
+                        _ => {
+                            return Err(NativeError::type_error(
+                                "String::format values must be scalars with finite numbers",
+                            ));
+                        }
+                    }
+                }
+                _ => return Err(invalid()),
+            },
+            '}' => match chars.next() {
+                Some('}') => emit("}")?,
+                _ => return Err(invalid()),
+            },
+            _ => emit(ch.encode_utf8(&mut [0; 4]))?,
+        }
+    }
+    if used != values.len() {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+fn format(context: &RuntimeContext<'_>, template: &str, values: &[Value]) -> NativeResult {
+    let mut bytes = 0usize;
+    format_parts(context, template, values, |part| {
+        bytes = bytes
+            .checked_add(part.len())
+            .ok_or_else(|| resource("format result size overflow"))?;
+        text_size(context, bytes)
+    })?;
+    let mut result = buffer(context, bytes)?;
+    format_parts(context, template, values, |part| {
+        result.push_str(part);
+        Ok(())
+    })?;
+    Ok(Value::String(result))
+}
+
 pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
     use NativeType::{Bool, Int, List, String as Text};
     for (name, parameters, returns) in [
@@ -207,6 +276,7 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
         ("substring", vec![Text, Int], Text),
         ("lower", vec![Text], Text),
         ("upper", vec![Text], Text),
+        ("format", vec![Text, List], Text),
     ] {
         let mut signature = NativeSignature::new(parameters, returns);
         if name == "substring" {
@@ -225,6 +295,12 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
                 "substring" => substring(context, args),
                 "lower" => case(context, text(&args[0]), false),
                 "upper" => case(context, text(&args[0]), true),
+                "format" => {
+                    let Value::List(values) = &args[1] else {
+                        unreachable!("validated list parameter")
+                    };
+                    format(context, text(&args[0]), values)
+                }
                 _ => unreachable!("registered string helper"),
             }),
         )?;
@@ -264,6 +340,12 @@ mod tests {
         type Operation = Box<dyn Fn(&RuntimeContext<'_>) -> NativeResult>;
         let cases: Vec<(usize, Operation)> = vec![
             (slot + 2, Box::new(|c| owned(c, "é"))),
+            (slot, Box::new(|c| format(c, "", &[]))),
+            (
+                slot + 8,
+                Box::new(|c| format(c, "{{{}}}", &[Value::String("é🦀".into())])),
+            ),
+            (slot + 3, Box::new(|c| format(c, "{}", &[Value::Int(-12)]))),
             (slot, Box::new(|c| owned(c, ""))),
             (4 * slot + 2, Box::new(|c| split(c, "a,,b", ","))),
             (2 * slot, Box::new(|c| split(c, "", ","))),
@@ -316,8 +398,18 @@ mod tests {
                 "ResourceLimitError"
             );
             assert_eq!(size(context, None).unwrap_err().kind, "ResourceLimitError");
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                assert_eq!(
+                    format(context, "{}", &[Value::Float(value)])
+                        .unwrap_err()
+                        .kind,
+                    "TypeError"
+                );
+            }
             context.cancellation = Some(Arc::new(AtomicBool::new(true)));
             for result in [
+                format(context, "{}", &[Value::Int(1)]),
+                format(context, "", &[]),
                 split(context, "a,b", ","),
                 join(context, &Value::List(vec![Value::String("a".into())]), ","),
                 replace(context, "aaa", "a", "b"),

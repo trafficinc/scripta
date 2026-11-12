@@ -115,6 +115,7 @@ pub enum StatementKind {
     Try {
         body: Block,
         catches: Vec<CatchClause>,
+        finally: Option<Block>,
     },
     Throw(Expr),
     Exit(Option<Expr>),

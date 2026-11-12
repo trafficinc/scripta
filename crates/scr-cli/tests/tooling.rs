@@ -62,6 +62,33 @@ fn check_visits_anonymous_functions_in_defaults_and_nested_expressions() {
 }
 
 #[test]
+fn finally_survives_check_format_and_execution_and_validates_nested_declarations() {
+    let source = "<?scr try{try{echo 'a';}finally{if(true)echo 'b';}}catch($e){echo 'bad';}finally{echo 'c';}";
+    pipeline::check(source).unwrap();
+    let formatted = formatter::format(source).unwrap();
+    assert!(formatted.contains("} finally {"));
+    assert_eq!(formatter::format(&formatted).unwrap(), formatted);
+    for source in [source, &formatted] {
+        let mut output = Vec::new();
+        pipeline::run(source, &mut output).unwrap();
+        assert_eq!(output, b"abc");
+    }
+    for source in [
+        "<?scr try {} finally { function duplicate() {} function duplicate() {} }",
+        "<?scr try {} finally { $f = function ($x, $x) {}; }",
+    ] {
+        assert!(pipeline::check(source).is_err());
+    }
+    for source in [
+        "<?scr try {} finally { return; }",
+        "<?scr try {} finally { break; }",
+        "<?scr finally {}",
+    ] {
+        assert!(pipeline::check(source).is_err());
+    }
+}
+
+#[test]
 fn append_survives_check_format_and_execution() {
     let source = "<?scr $items=[];$items[]=1;$items[len($items)]=2;$groups=[[]];$groups[0][]=3;echo Json::encode([$items,$groups]);";
     pipeline::check(source).unwrap();

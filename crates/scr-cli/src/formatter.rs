@@ -44,10 +44,17 @@ impl Layout {
             StatementKind::While { body, .. }
             | StatementKind::For { body, .. }
             | StatementKind::Foreach { body, .. } => self.body(body),
-            StatementKind::Try { body, catches } => {
+            StatementKind::Try {
+                body,
+                catches,
+                finally,
+            } => {
                 self.block(body);
                 for catch in catches {
                     self.block(&catch.body);
+                }
+                if let Some(body) = finally {
+                    self.block(body);
                 }
             }
             _ => {}
@@ -269,14 +276,14 @@ pub fn format(source: &str) -> Result<String, Vec<Diagnostic>> {
             braces = braces.saturating_sub(1);
             writer.newline();
         }
-        let join = matches!(token.kind, K::Else | K::Elseif | K::Catch)
+        let join = matches!(token.kind, K::Else | K::Elseif | K::Catch | K::Finally)
             && matches!(previous, Some(K::RightBrace));
         if join && !writer.text.ends_with('\n') {
             writer.pending = false;
             writer.space();
         } else if writer.pending
             || layout.starts.contains(&token.span.start)
-            || matches!(token.kind, K::Else | K::Elseif | K::Catch) && !join
+            || matches!(token.kind, K::Else | K::Elseif | K::Catch | K::Finally) && !join
         {
             writer.newline();
         }

@@ -1,0 +1,16 @@
+<?scr
+$durations = [12.4, 8.6, 19.5, 10.0];
+$total = 0.0;
+$fastest = $durations[0];
+$slowest = $durations[0];
+foreach ($durations as $duration) {
+    $total += $duration;
+    $fastest = Math::min($fastest, $duration);
+    $slowest = Math::max($slowest, $duration);
+}
+$average = $total / float(len($durations));
+echo String::format("Run summary: {} jobs\n", [len($durations)]);
+echo String::format("Duration: {}–{} ms; rounded average: {} ms\n", [$fastest, $slowest, Math::round($average)]);
+echo String::format("Average bounds: {}–{} ms\n", [Math::floor($average), Math::ceil($average)]);
+echo String::format("Absolute adjustment: {} ms\n", [Math::abs(-2)]);
+echo String::format("{{complete}}: {}\n", [true]);

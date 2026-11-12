@@ -101,7 +101,7 @@ above corrects the implicit conversion in the original design sketch.
 ## Lexer coverage and equality policy
 
 The lexer recognizes these keywords: `true false null echo if elseif else while
-for foreach as function return break continue try catch throw exit`. Keywords
+for foreach as function return break continue try catch finally throw exit`. Keywords
 are case-sensitive; `$if` is a variable, and `if_name` is an identifier.
 
 Operators and punctuation: `+ - * / % . = += -= *= /= .= == != === !== < <= > >=
@@ -220,7 +220,7 @@ statement = expression ";"
           | "break" ";" | "continue" ";"
           | "function" identifier "(" parameters ")" [ ":" type ] block
           | "return" [ expression ] ";"
-          | "try" block catch { catch }
+          | "try" block ( catch { catch } [ "finally" block ] | "finally" block )
           | "throw" expression ";"
           | "exit" [ expression ] ";"
           | "exit" "(" [ expression ] ")" ";"
@@ -241,9 +241,9 @@ forms use identical output behavior and type rules. Empty or multiple echo
 arguments are errors. Output adds no newline and requires explicit conversions.
 
 Control-flow bodies may be a single statement or a block. An `else` or `elseif`
-attaches to the nearest unfinished `if`. Orphan `else`, `elseif`, and `catch`
+attaches to the nearest unfinished `if`. Orphan `else`, `elseif`, `catch`, and `finally`
 clauses are errors. Braced control-flow bodies, standalone blocks, function
-bodies, and try/catch blocks do not consume a trailing semicolon. A single simple
+bodies, and try/catch/finally blocks do not consume a trailing semicolon. A single simple
 statement used as a body still needs its own semicolon.
 
 Each `for` header contains exactly two semicolon separators. Its three sections
@@ -335,7 +335,8 @@ and independent mutable defaults.
 
 ### Exceptions and control flow
 
-A `try` requires a braced body and at least one `catch`. Catch clauses use
+A `try` requires a braced body and at least one `catch` or a final `finally`
+block (or both). Catch clauses use
 `catch (Error $e) { ... }` or `catch ($e) { ... }`. Types here are exception names,
 not class declarations. `throw` requires one expression. `exit;`, `exit();`,
 `exit expression;`, and `exit(expression);` are accepted as statements; exit is
@@ -391,6 +392,23 @@ also bypass catches. Existing named native exceptions (including helper
 `RangeError` and `ResourceLimitError`) retain their documented behavior; they are
 distinct from core runtime safety limits. Exit, return, break, and continue
 propagate through try/catch without triggering catches.
+
+A `finally` block runs once after the try body and its selected catch, if any,
+on normal completion, throw, return, break, continue, and exit. It has its own
+block scope; try and catch locals are unavailable there, so declare shared state
+in the enclosing scope. Normal cleanup preserves the pending outcome, including
+a return value evaluated before cleanup. A new throw, return, loop control, or
+exit from finally replaces the pending outcome. Replacement failures retain their
+own source location, stack trace, and diagnostic redaction; the original failure
+is not chained into the replacement diagnostic. Nested cleanup runs inside out.
+
+Fatal runtime failures, including cancellation, budgets, undefined names and I/O
+output failures, bypass finally as well as catches. Cleanup itself is subject to
+the same execution limits and cancellation and can be interrupted; it receives
+no additional budget. Forced process termination can prevent all cleanup.
+Native file streams release on explicit close or last-reference drop, including
+runtime teardown when the host has not retained aliases. See
+[bounded file streams](standard-library.md#bounded-file-streams).
 
 The parser reports unexpected tokens, missing semicolons, unmatched braces and
 parentheses, and invalid control-flow contexts with source spans. An unclosed
@@ -475,6 +493,20 @@ strictly typed. Invalid substring bounds and empty split/replacement search
 strings raise catchable `RangeError`; result budget failures raise
 `ResourceLimitError`. See [string helpers](standard-library.md#strings) for
 signatures, edge cases, Unicode behavior, and limits.
+
+`Math::abs`, `min`, `max`, `floor`, `ceil`, and `round` preserve int/float types.
+Binary min/max require matching numeric types and select the left value on ties.
+Floats must be finite; rounding ties go away from zero. Ints pass through rounding
+unchanged; abs of i64 minimum raises catchable `ArithmeticError`.
+
+`String::format(template, values)` explicitly formats scalar values from a list
+using `str` display. Sequential `{}` placeholders consume exactly one value each;
+`{{` and `}}` escape literal braces. Replacement text is literal. Invalid brace
+syntax or value counts raise `FormatError`; invalid types raise `TypeError`.
+Unicode and argument values are preserved. The result is preflighted against the
+logical output byte budget; failures raise `ResourceLimitError`. This is a native
+helper and adds no interpolation syntax. See [Math](standard-library.md#math)
+and [strings](standard-library.md#strings) for the full contracts.
 
 ### Collections and host objects
 

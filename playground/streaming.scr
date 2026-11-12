@@ -1,0 +1,40 @@
+<?scr
+// Usage: scr run playground/streaming.scr playground/sample-events.txt
+$path = Cli::arg(0);
+if ($path === null) {
+    echo "Usage: scr run playground/streaming.scr <events-file>\n";
+    exit 2;
+}
+$counts = Map::create();
+$malformed = 0;
+$records = 0;
+$stream = File::openLines($path, 65536);
+try {
+    while (($line = File::readLine($stream)) !== null) {
+        $line = String::trim($line);
+        if ($line === "" || String::startsWith($line, "#")) {
+            continue;
+        }
+        $fields = String::split($line, "|");
+        if (len($fields) !== 3) {
+            $malformed += 1;
+            continue;
+        }
+        $level = String::lower(String::trim($fields[0]));
+        $service = String::trim($fields[1]);
+        $message = String::trim($fields[2]);
+        if (!List::contains(["info", "warn", "error"], $level) || $service === "" || $message === "") {
+            $malformed += 1;
+            continue;
+        }
+        $counts[$level] = Map::get($counts, $level, 0) + 1;
+        $records += 1;
+    }
+} finally {
+    File::close($stream);
+}
+echo String::format("Records: {}\n", [$records]);
+foreach (["info", "warn", "error"] as $level) {
+    echo String::format("{}: {}\n", [$level, Map::get($counts, $level, 0)]);
+}
+echo String::format("Malformed: {}\nStream closed: {}\n", [$malformed, $stream->closed]);
