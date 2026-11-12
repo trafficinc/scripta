@@ -72,7 +72,11 @@ canonical target, preserving permissions and a symlink used to address that targ
 `--check` never writes; a difference produces E0502 and exit 1.
 
 `check` also rejects duplicate direct function declarations in one lexical body,
-including nested function bodies, and repeated parameter names. Separate lexical
+including anonymous functions inside expressions/defaults, and repeated parameter
+names. Signature ordering is checked by the parser. Default expressions are not
+evaluated by `check`. The formatter traverses anonymous bodies and defaults and
+keeps a function literal's closing brace attached to its expression punctuation.
+Separate lexical
 blocks may declare the same name. Declarations on mutually exclusive/dynamic paths
 are not exhaustively analyzed, nor are required files loaded. This is a declaration
 and syntax check, not complete static type checking of a dynamically typed language.

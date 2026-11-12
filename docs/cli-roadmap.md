@@ -5,8 +5,8 @@ transforming collections, handling failures, and reusing scripts. Each phase
 requires explicit approval before implementation starts. Completing one phase
 does not authorize the next.
 
-**Next action: review Phase 3 Recoverable errors.** Implementation is ready for
-review. Acceptance and approval to start Phase 4 are pending.
+**Next action: review Phase 4 Functions.** Implementation is ready for review.
+Acceptance and approval to start Phase 5 are pending.
 
 ## Progress and approval record
 
@@ -14,8 +14,8 @@ review. Acceptance and approval to start Phase 4 are pending.
 | --- | --- | --- | --- | --- |
 | 1 | Strings | Accepted | Approved | Accepted |
 | 2 | Collections and maps | Accepted | Approved | Accepted |
-| 3 | Recoverable errors | Ready for review | Approved | Pending |
-| 4 | Functions | Waiting for Phase 3 | Pending | Pending |
+| 3 | Recoverable errors | Accepted | Approved | Accepted |
+| 4 | Functions | Ready for review | Approved | Pending |
 | 5 | Math and formatting | Waiting for Phase 4 | Pending | Pending |
 | 6 | Cleanup and streaming | Waiting for Phase 5 | Pending | Pending |
 
@@ -270,7 +270,10 @@ Let scripts recover from ordinary data and arithmetic failures.
 **Approval record:** Approved by the user's “continue” instruction after the
 Phase 2 completion summary. This also accepts Phase 2 and its checkpoint.
 
-**Completion record:** Ready for review. Core operators and indexing now return
+**Acceptance record:** Accepted by the user's “continue” instruction after the
+Phase 3 completion summary.
+
+**Completion record:** Accepted. Core operators and indexing now return
 typed error categories, separating recoverable TypeError/IndexError/ArithmeticError
 from fatal resource failures without inspecting message text. Core exceptions
 reuse the original diagnostic span, source, redacted message, and stack frames.
@@ -330,9 +333,70 @@ Make reusable helpers easier to call and pass around.
   an anonymous function passed as a callback.
 - The shared phase checks pass.
 
-**Approval record:** Pending.
+**API contract**
 
-**Completion record:** Pending.
+- Parameters use `$value: type = expression` for defaults and
+  `...$values: type` for a variadic list. Required parameters precede defaults;
+  a single variadic parameter must be last and cannot have a default.
+- Supplied positional arguments evaluate left to right in the caller, as before.
+  Missing defaults evaluate left to right once per call in the callee parameter
+  scope, seeing earlier parameter bindings and captured enclosing function locals.
+  Supplied arguments suppress their defaults. Explicit null does not omit an argument.
+- Defaults can be expressions and are checked against their annotation after
+  evaluation. Collection defaults are independent across calls; ordinary explicit
+  side effects in default expressions are not rolled back on a later failure.
+- Extra positional arguments become a fresh list, empty when no extras exist.
+  A variadic annotation applies to each element. The resulting list is subject
+  to the usual value nesting and byte limits.
+- Anonymous literals use `function (...) { ... }` with optional return annotations.
+  They are callable values, capture lexical environments by reference like named
+  nested functions, and retain their definition source for diagnostics and includes.
+  They do not register a function name; traces label them `<anonymous>`.
+- Existing global isolation remains: pass globals explicitly; captures read and
+  update enclosing function locals. Recursion through a captured local binding
+  is supported. Captured scopes retain the existing lifetime and scope-budget rules.
+- Arity and annotation errors remain catchable TypeError exceptions. Default
+  evaluation failures preserve the callee source span and call stack. Core limits
+  and cancellation retain their fatal behavior.
+- Named arguments, arrow syntax, call-site unpacking, and callback-based standard
+  library transforms remain deferred.
+
+**Approval record:** Approved by the user's “continue” instruction after the
+Phase 3 completion summary. This also accepts Phase 3.
+
+**Completion record:** Ready for review. Named and anonymous functions support
+per-call defaults, a final typed variadic parameter, and existing lexical
+capture/return annotations. The lexer recognizes `...` for parameter declarations;
+the parser and runtime reject invalid ordering. Anonymous literals register no
+name and retain their definition source. `check` traverses defaults and function
+literals inside expressions, and formatting preserves literal punctuation and
+unbraced body indentation. The standard-library export count remains 94.
+
+Eight runtime integration tests cover defaults, evaluation order, independent
+collection values, variadic typing and wrapping, callbacks, shared captures,
+recursion, global/caller isolation, arity/annotation failures, definition/call-site
+traces, and cancellation/byte/depth/scope/instruction limits. Lexer/parser tests
+cover ellipsis spans, parameter spans, malformed signatures, control-flow
+boundaries, and expression budgets. Tooling tests cover nested anonymous
+declaration validation and a formatter snapshot. A module test verifies relative
+requires and traces inside callbacks retained across execute calls; the CLI test
+checks the functions playground before and after formatting.
+
+| Validation | Result |
+| --- | --- |
+| `cargo test --workspace --locked` | Passed, including new function, lexer/parser, tooling, module, and CLI tests. |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed. |
+| `cargo fmt --all -- --check` | Passed. |
+| `git diff --check` | Passed. |
+| `cargo run -p scr-cli --locked -- run playground/functions.scr` | Passed; printed greetings, total 16, callback result 14, counter values 6 and 8, and two independent defaults. |
+
+Review [the functions playground](../playground/functions.scr) and
+[the language contract](language-spec.md#function-parameters-and-captures).
+Defaults are evaluated only when omitted; explicit null remains an argument.
+Variadic annotations check elements. Captures share enclosing function locals
+and retain the existing scope lifetime and budget rules; globals still require
+explicit arguments. Named arguments, arrow syntax, call-site unpacking, and
+callback-based collection helpers remain deferred. No work on Phase 5 has started.
 
 **Next approval after acceptance:** Phase 5 Math and formatting.
 

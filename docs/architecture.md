@@ -56,6 +56,12 @@ as trivia. A single EOF token is emitted at the original source's end.
 Statements use `Statement { kind: StatementKind, span }`; their ranges include
 terminating semicolons or complete bodies. Blocks, variable bindings, parameter
 annotations, function names, and catch clauses also retain source spans. The
+Parameter AST includes `default: Option<Expr>` and `variadic: bool`; embedders
+constructing AST parameters must supply `None` and `false` for ordinary required
+parameters. Anonymous literals use `ExprKind::Function` with a boxed declaration
+and the diagnostic name `<anonymous>`, without registering a named function.
+Signature ordering is checked by the parser and defensively by the runtime.
+The lexer recognizes a distinct Ellipsis token for variadic parameters. The
 parser uses recursive descent for statements and Pratt parsing for expressions.
 `parse` returns the first diagnostic; `parse_with_diagnostics` returns all safely
 recoverable diagnostics. Recovery discards the rest of an already diagnosed
@@ -81,9 +87,14 @@ scope; user function values retain their declaration environment ID and runtime
 identity. First assignment creates a local binding unless a lexical ancestor
 already contains that name. Function call scopes mark a variable-lookup boundary
 that excludes globals while retaining access to captured enclosing function locals.
-Function lookup still reaches registered global functions. Parameters, foreach bindings, and catch bindings
-explicitly shadow outer names. Uncaptured scopes are released on all control-flow
-paths and their slots reused. Captured environments are conservatively retained
+Function lookup still reaches registered global functions. Parameters, foreach
+bindings, and catch bindings explicitly shadow outer names. Missing defaults
+evaluate per call in parameter order in that parameter
+scope, with the definition source active. Variadic annotations check elements,
+then the collected list is validated against depth/value budgets. Anonymous
+and named nested functions share capture, ownership, and source retention rules;
+they do not acquire access to global variables. Uncaptured scopes are released
+on all control-flow paths and their slots reused. Captured environments are conservatively retained
 until the runtime is dropped, avoiding reference-counted environment/function
 cycles. A callable from one runtime cannot execute in another runtime.
 

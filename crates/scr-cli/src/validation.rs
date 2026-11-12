@@ -1,4 +1,4 @@
-use scr_ast::{Block, Program, Statement, StatementKind};
+use scr_ast::{Block, Expr, ExprKind, FunctionDeclaration, Program, Statement, StatementKind};
 use scr_diagnostics::Diagnostic;
 use std::collections::HashSet;
 
@@ -29,23 +29,9 @@ fn block(body: &Block, errors: &mut Vec<Diagnostic>) {
     scope(&body.statements, errors);
 }
 fn nested(statement: &Statement, errors: &mut Vec<Diagnostic>) {
+    statement.visit_expressions(|e| expression(e, errors));
     match &statement.kind {
-        StatementKind::Function(function) => {
-            let mut names = HashSet::new();
-            for parameter in &function.parameters {
-                if !names.insert(&parameter.binding.name) {
-                    errors.push(
-                        Diagnostic::new(
-                            format!("duplicate parameter ${}", parameter.binding.name),
-                            parameter.binding.span,
-                        )
-                        .with_code("E0302")
-                        .with_help("give each parameter a distinct name"),
-                    );
-                }
-            }
-            block(&function.body, errors);
-        }
+        StatementKind::Function(declaration) => function(declaration, errors),
         StatementKind::Block(body) => block(body, errors),
         StatementKind::If {
             branches,
@@ -68,5 +54,33 @@ fn nested(statement: &Statement, errors: &mut Vec<Diagnostic>) {
             }
         }
         _ => {}
+    }
+}
+
+fn function(function: &FunctionDeclaration, errors: &mut Vec<Diagnostic>) {
+    let mut names = HashSet::new();
+    for parameter in &function.parameters {
+        if !names.insert(&parameter.binding.name) {
+            errors.push(
+                Diagnostic::new(
+                    format!("duplicate parameter ${}", parameter.binding.name),
+                    parameter.binding.span,
+                )
+                .with_code("E0302")
+                .with_help("give each parameter a distinct name"),
+            );
+        }
+        if let Some(default) = &parameter.default {
+            expression(default, errors);
+        }
+    }
+    block(&function.body, errors);
+}
+
+fn expression(expr: &Expr, errors: &mut Vec<Diagnostic>) {
+    if let ExprKind::Function(declaration) = &expr.kind {
+        function(declaration, errors);
+    } else {
+        expr.visit_children(|e| expression(e, errors));
     }
 }

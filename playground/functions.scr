@@ -1,0 +1,44 @@
+<?scr
+
+function greet($name: string, $prefix: string = "Hello"): string {
+    return $prefix . ", " . $name . "!";
+}
+
+function total($initial: int = 0, ...$values: int): int {
+    $sum = $initial;
+    foreach ($values as $value) {
+        $sum += $value;
+    }
+    return $sum;
+}
+
+function apply($value: int, $callback: callable): int {
+    return $callback($value);
+}
+
+function multiplier($factor: int): callable {
+    return function ($value: int): int {
+        return $value * $factor;
+    };
+}
+
+function counter($seed: int = 0): callable {
+    return function ($step: int = 1): int {
+        $seed += $step;
+        return $seed;
+    };
+}
+
+function fresh($items: list = []): list {
+    $items[] = "new";
+    return $items;
+}
+
+echo greet("Scripta") . "\n";
+echo greet("Scripta", "Welcome") . "\n";
+echo "Total: " . str(total(10, 1, 2, 3)) . "\n";
+$double = multiplier(2);
+echo "Callback: " . str(apply(7, $double)) . "\n";
+$next = counter(5);
+echo "Counter: " . str($next()) . ", " . str($next(2)) . "\n";
+echo "Fresh defaults: " . Json::encode([fresh(), fresh()]) . "\n";

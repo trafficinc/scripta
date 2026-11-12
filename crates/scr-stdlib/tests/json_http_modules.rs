@@ -34,6 +34,37 @@ fn error(runtime: &mut Runtime, source: &str, kind: &str) -> RuntimeError {
     error
 }
 #[test]
+fn anonymous_callbacks_keep_definition_paths_for_relative_requires() {
+    let directory = tempfile::tempdir().unwrap();
+    let lib = directory.path().join("lib");
+    std::fs::create_dir(&lib).unwrap();
+    std::fs::write(lib.join("callback.scr"), "<?scr $callback = function ($number: int = 2): int { require 'increment.scr'; return $number + $increment; };").unwrap();
+    std::fs::write(lib.join("increment.scr"), "<?scr $increment = 5;").unwrap();
+    let mut runtime = runtime(Some(&directory.path().join("main.scr")));
+    run(&mut runtime, "require 'lib/callback.scr';").unwrap();
+    run(
+        &mut runtime,
+        "$answer = $callback(); $explicit = $callback(10);",
+    )
+    .unwrap();
+    assert_eq!(runtime.get_global("answer"), Some(&Value::Int(7)));
+    assert_eq!(runtime.get_global("explicit"), Some(&Value::Int(15)));
+    std::fs::write(lib.join("increment.scr"), "<?scr $increment = 1 / 0;").unwrap();
+    let error = run(&mut runtime, "$callback();").unwrap_err();
+    assert!(error.message.starts_with("ArithmeticError:"));
+    assert_eq!(
+        error.source.as_ref().unwrap().path,
+        std::fs::canonicalize(lib.join("increment.scr")).unwrap()
+    );
+    assert!(
+        error
+            .trace
+            .iter()
+            .any(|frame| frame.function == "<anonymous>")
+    );
+}
+
+#[test]
 fn json_roundtrips_structures_numbers_unicode_and_empty_objects() {
     let mut runtime = runtime(None);
     run(&mut runtime, r#"

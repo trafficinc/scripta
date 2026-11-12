@@ -151,7 +151,8 @@ cannot be confused with `$file . name`, which is concatenation.
 
 Primary expressions are `null`, booleans, integer/float/string literals,
 `$variable`, bare identifiers such as `str` or `Process`, parenthesized
-expressions, and bracketed collections. Identifiers represent callable/native
+expressions, bracketed collections, and anonymous function literals.
+Identifiers represent callable/native
 names and remain distinct from variables in the AST. Prefix operators accept
 any expression at their binding power. A call has an expression callee and zero
 or more comma-separated arguments; calls may chain, for example `$f()(1)`.
@@ -226,7 +227,9 @@ statement = expression ";"
 block = "{" { statement } "}"
 expressions = [ expression { "," expression } ]
 parameters = [ parameter { "," parameter } ]
-parameter = variable [ ":" type ]
+parameter = variable [ ":" type ] [ "=" expression ]
+          | "..." variable [ ":" type ]
+anonymous_function = "function" "(" parameters ")" [ ":" type ] block
 catch = "catch" "(" [ type ] variable ")" block
 type = identifier | "null"
 ```
@@ -257,16 +260,80 @@ labels are unsupported. `return;` and `return expression;` are only valid inside
 functions. A function boundary resets the loop context, even when the function
 is declared in a loop. Nested functions are parsed with their own context.
 
-Functions are named declarations with mandatory braced bodies. Parameters use
-`$name` or `$name: type`; return types use `: type` after the closing parenthesis.
-Parameters do not support defaults or trailing commas. Duplicate parameter
-names and redeclaration of a function in the same scope are errors. Calls require
-exact arity. Parameter and return annotations require matching types without
-conversion. Built-in type names are `null`, `bool`, `int`, `float`, `string`,
-`list`, `map`, and `callable`; native object annotations match the host type name.
-`void` return types permit only null. Falling off a function or `return;` returns
-null. Annotations check call boundaries; they do not freeze parameter bindings
-against later reassignment. No classes or object declarations are introduced.
+Functions have mandatory braced bodies and can be named declarations or
+anonymous expression literals, `function (...) { ... }`. A literal registers no
+function name and evaluates to a callable; each evaluation creates a distinct
+callable identity. A literal used as an expression statement requires a
+semicolon, while a named declaration does not. Return types use `: type` after
+the closing parenthesis.
+
+### Function parameters and captures
+
+Parameters use `$name` or `$name: type`, optionally followed by `= expression`.
+Required parameters must precede defaults. A final `...$values` parameter
+collects remaining positional arguments into a new list; `...$values: int`
+checks each extra argument as an int, not the resulting list. It binds an empty
+list when there are no extra arguments. Only one variadic parameter is allowed,
+it must be last, and it cannot have a default. Parameter and call argument lists
+do not accept trailing commas. Duplicate parameter names and redeclaration of a
+named function in the same scope remain errors.
+
+Calls evaluate supplied arguments left to right in the caller before arity and
+annotation checks, as before. Missing defaults evaluate left to right, once per
+call, in the callee's parameter scope before its body. They see earlier bound
+parameters and captured enclosing function locals; later parameters are not yet
+bound and the caller's unrelated locals are not visible. A supplied argument,
+including explicit null, suppresses that parameter's default. Collection default
+expressions are evaluated afresh, so mutations do not persist between calls.
+Normal side effects of an evaluated default remain visible if a later default
+or annotation fails. Direct top-level named declarations are hoisted without
+evaluating their defaults.
+
+Calls require all required arguments and reject extra arguments unless there
+is a variadic parameter. Parameter and return annotations require matching types
+without conversion. Built-in type names are `null`, `bool`, `int`, `float`,
+`string`, `list`, `map`, and `callable`; native object annotations match the host
+type name. `void` return types permit only null. Falling off a function or
+`return;` returns null. Annotations check call boundaries; they do not freeze
+parameter bindings against later reassignment. Defaults are checked after
+evaluation, and each variadic element is checked before binding its list.
+The resulting list obeys the ordinary byte and nesting limits, including its
+additional outer list slot and nesting level.
+
+Anonymous literals capture environments by reference, like named nested
+functions. Returned callbacks can share and update enclosing function locals.
+The existing global isolation applies to both named and anonymous functions:
+pass global variables explicitly. A recursive anonymous function can refer to
+its own captured local binding inside an enclosing function; assignment at the
+global scope does not grant a closure access to globals. Captured scopes retain
+the existing runtime lifetime and scope-budget rules. Defaults and function
+bodies retain their definition source for diagnostics and relative `require`.
+Anonymous frames are labelled `<anonymous>`; arity/annotation failures remain
+catchable `TypeError`. Default evaluation failures keep their original category
+and source location, with the callee frame and its caller's call site.
+
+```scr
+<?scr
+function total($initial: int = 0, ...$values: int): int {
+    $sum = $initial;
+    foreach ($values as $value) { $sum += $value; }
+    return $sum;
+}
+function multiplier($factor: int): callable {
+    return function ($number: int = 1): int { return $number * $factor; };
+}
+$double = multiplier(2);
+echo str(total(10, 1, 2)) . "\n"; // 13
+echo str($double(7)) . "\n"; // 14
+```
+
+Named arguments, arrow syntax, and call-site unpacking (`f(...$items)`) remain
+unsupported. `...` is recognized for parameter declarations only. No classes or
+object declarations are introduced. See the
+[functions playground](../playground/functions.scr) for callbacks, counters,
+and independent mutable defaults.
+
+### Exceptions and control flow
 
 A `try` requires a braced body and at least one `catch`. Catch clauses use
 `catch (Error $e) { ... }` or `catch ($e) { ... }`. Types here are exception names,

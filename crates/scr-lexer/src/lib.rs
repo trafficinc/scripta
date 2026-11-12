@@ -40,6 +40,7 @@ pub enum TokenKind {
     Slash,
     Percent,
     Dot,
+    Ellipsis,
     Assign,
     PlusAssign,
     MinusAssign,
@@ -439,7 +440,7 @@ impl<'a> Lexer<'a> {
     fn operator(&mut self, start: SourcePosition) -> Result<TokenKind, LexerError> {
         // Reject unsupported multi-character operators instead of silently splitting them.
         for spelling in [
-            "<=>", "<>", "++", "--", "**", "%=", "<<", ">>", "??", "...", "&=", "|=", "^=",
+            "<=>", "<>", "++", "--", "**", "%=", "<<", ">>", "??", "&=", "|=", "^=",
         ] {
             if self.rest().starts_with(spelling) {
                 self.consume(spelling);
@@ -451,6 +452,7 @@ impl<'a> Lexer<'a> {
             }
         }
         for (spelling, kind) in [
+            ("...", TokenKind::Ellipsis),
             ("===", TokenKind::StrictEqual),
             ("!==", TokenKind::StrictNotEqual),
             ("+=", TokenKind::PlusAssign),
