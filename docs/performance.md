@@ -189,9 +189,12 @@ transient scopes unwind immediately. No daemon or new GC architecture is added.
 Diagnostic redaction is conservative and can hide benign credential-shaped text.
 It cannot identify every arbitrary unmarked secret embedded in a user-thrown
 message; callers should avoid throwing credentials and hosts can configure
-`ContextOptions.redacted_values`. Script catch values retain their original value;
-redaction affects reporting, not control flow or string operations. Raw host access
-to SourceFile.text is trusted and intentionally still available.
+`ContextOptions.redacted_values`. Explicitly thrown values and existing native
+exception catch messages retain their original semantics. Core operation error
+catches expose the already-redacted diagnostic message; classification uses a
+typed category and is independent of redaction. Redaction does not change
+ordinary string operations. Raw host access to SourceFile.text is trusted and
+intentionally still available.
 
 ## Reproduction and evidence
 

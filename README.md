@@ -94,6 +94,7 @@ cargo build -p scr-cli --locked
 ./target/debug/scr run playground/strings.scr
 ./target/debug/scr run playground/collections.scr
 ./target/debug/scr run playground/log-analyzer.scr playground/sample-events.txt
+./target/debug/scr run playground/errors.scr
 ```
 
 | Script | What to try |
@@ -105,6 +106,7 @@ cargo build -p scr-cli --locked
 | [strings.scr](playground/strings.scr) | Parse, normalize, search, and format a Unicode status record with the `String` helpers. |
 | [collections.scr](playground/collections.scr) | Filter, sort, and summarize records using list helpers and safe map lookups. |
 | [log-analyzer.scr](playground/log-analyzer.scr) | Analyze [sample events](playground/sample-events.txt), count log levels, list sorted services, and report malformed records. |
+| [errors.scr](playground/errors.scr) | Recover from indexing, arithmetic, and operand-type failures; add `--uncaught` to demonstrate a diagnostic and exit status 1. |
 
 After editing, check a script with
 `./target/debug/scr check playground/expenses.scr`, then run it again. There is no
@@ -397,19 +399,22 @@ define current support.
 | Suggested priority | Missing basics | Current behavior or workaround |
 | --- | --- | --- |
 | Medium | Pop and callback-based map/filter/reduce | List removal, slicing, concatenation, sorting, and membership are implemented. Use loops and new lists to filter or rebuild collections. |
-| Lower | Null fallback syntax | `Map::has` and `Map::get` provide safe key lookups. No `??`, `isset`, or null-safe access syntax. Direct missing-key indexing still bypasses `catch`. |
+| Lower | Null fallback syntax | `Map::has` and `Map::get` provide safe key lookups. No `??`, `isset`, or null-safe access syntax. Direct missing-key indexing raises catchable `IndexError`. |
 | Medium | Numeric helpers: abs, min/max, rounding, powers, random numbers | Arithmetic, remainder, comparisons, and explicit numeric conversions exist. There is no math/random module. |
 | Medium | Script function defaults, variadic parameters, named arguments | Script-defined functions require their declared positional arguments. Pass a list/map for options or variable-length data. Host native functions have separate optional/variadic support. |
 | Medium | Anonymous functions and arrow functions | Named nested functions capture their lexical scope and can be assigned to variables; anonymous function literals are absent. |
 | Medium | String interpolation and formatting helpers | Build strings with `.` and explicit `str(value)` conversions. |
 | Medium | Guaranteed cleanup syntax | `try` / `catch` exists; `finally`, `defer`, and resource-management syntax do not. Cleanup must be arranged explicitly. |
-| Medium | Recoverable arithmetic and indexing errors | Explicit throws, function type errors, and native exceptions are catchable. Core errors such as division by zero, missing map keys, and invalid list indexes stop execution even inside `try`. |
 | Medium | Streaming file I/O and line iteration | `File::read` loads bounded whole files; file streams and a line iterator are absent. `Cli::prompt` supports interactive input. |
 | Lower | Convenience syntax: ternary expressions, `switch` / `match`, `++` / `--`, `%=` | Use `if` / `elseif` / `else`, `+= 1`, `-= 1`, and `$value = $value % divisor`. |
 
 String utilities are complete in [Phase 1](docs/cli-roadmap.md#phase-1-strings).
-Collection helpers are implemented in [Phase 2](docs/cli-roadmap.md#phase-2-collections-and-maps)
-and awaiting completion review. The log analyzer playground combines both phases.
+Collection helpers are complete in [Phase 2](docs/cli-roadmap.md#phase-2-collections-and-maps).
+Catchable core indexing, arithmetic, and operand-type errors are implemented in
+[Phase 3](docs/cli-roadmap.md#phase-3-recoverable-errors) and awaiting completion
+review. The log analyzer playground combines the first two phases, and
+`playground/errors.scr` demonstrates recovery. Runtime safety limits and
+cancellation continue to bypass catches.
 Regex support, Unicode normalization, and string indexing remain outside these phases.
 
 Strict booleans, explicit conversions, collection value semantics, and block

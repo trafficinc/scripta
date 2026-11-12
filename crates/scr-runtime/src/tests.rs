@@ -496,14 +496,18 @@ fn explicit_throws_catch_by_type_and_propagate_other_control_flow() {
             .message
             .contains("uncaught")
     );
-    assert!(
-        failure("try { 1 / 0; } catch ($e) {}")
-            .message
-            .contains("division by zero")
-    );
+    execute("try { 1 / 0; } catch ($e) {}");
     execute(
         "try { throw 1; } catch (Error $e) {} try { try { throw true; } catch (int $e) {} } catch ($e) {}",
     );
+}
+
+#[test]
+fn core_operation_allocation_failures_stay_fatal() {
+    let runtime = Runtime::new();
+    let result =
+        runtime.operation::<()>(Err(ops::Error::Fatal("allocation failed")), Span::default());
+    assert!(matches!(result, Err(Signal::Error(_))));
 }
 
 #[test]

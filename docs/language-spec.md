@@ -284,8 +284,45 @@ or an untyped catch; their binding contains the error message string. Uncaught
 TypeErrors preserve the original location and stack. Native functions can raise
 named exceptions such as `IoError` and `PermissionError`; native property failures
 raise `PropertyError`. These match their named catch, `Error`, or an untyped catch,
-and bind the message string. Other runtime failures such as arithmetic overflow
-are not intercepted by catch. Exit, return, break, and continue also
+and bind the message string. Core operator and collection failures are also
+catchable, with the following exception names:
+
+| Name | Core failures |
+| --- | --- |
+| `IndexError` | Missing map keys, out-of-bounds or negative list positions, sparse list writes, and absent intermediate collection entries. |
+| `ArithmeticError` | Division/remainder by zero (including float signed zero), integer arithmetic/negation overflow, and non-finite float arithmetic results. |
+| `TypeError` | Incompatible arithmetic/comparison/concatenation operands, non-bool conditions or logical operands, invalid index/key types, indexing a non-collection, and appending to a non-list. |
+
+These match their named catch, `Error`, or an untyped catch. Their bindings
+contain the redacted diagnostic message prefixed with the exception name. A
+`catch (string $e)` does not match these errors just because the exposed message
+is a string. An unmatched typed catch preserves the original failure, source
+span, and stack trace. `throw $e` explicitly throws a new string value; it does
+not rethrow an exception object or preserve the original exception kind.
+
+```scr
+<?scr
+$number = 10;
+try {
+    $number /= 0;
+} catch (ArithmeticError $e) {
+    echo "Keeping the previous value\n";
+}
+echo str($number); // 10
+```
+
+This changes earlier behavior: these core errors used to bypass all catches.
+Uncaught errors still report E0401 with the original source span/trace and CLI
+exit status 1; their messages now include the exception name. Operand coercion,
+evaluation order, and collection bounds are unchanged. Failed operations do not
+commit a destination write; earlier target/RHS side effects remain visible.
+
+Other runtime failures, including undefined names and invalid call targets,
+remain outside catches. Core runtime cancellation, instruction/scope/value/source
+and call/value-depth limits, allocation failures, and output-stream failures
+also bypass catches. Existing named native exceptions (including helper
+`RangeError` and `ResourceLimitError`) retain their documented behavior; they are
+distinct from core runtime safety limits. Exit, return, break, and continue
 propagate through try/catch without triggering catches.
 
 The parser reports unexpected tokens, missing semicolons, unmatched braces and
@@ -413,8 +450,8 @@ new syntax. List removal, slicing, concatenation, membership, and homogeneous
 sorting preserve strict value semantics. `Map::has` and `Map::get` safely handle
 absent keys, while normal indexing still requires an existing key. Map keys and
 values can be projected in insertion order, and removal returns an independent
-map. Invalid helper arguments and bounds raise catchable native errors; this
-does not change core arithmetic or indexing errors. See the
+map. Invalid helper arguments and bounds raise catchable native errors; core
+indexing and arithmetic use the exception names documented above. See the
 [collection reference](standard-library.md#collections) for signatures and limits.
 
 Property access uses host native objects. A host may expose readable or writable

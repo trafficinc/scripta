@@ -183,9 +183,13 @@ or sorting scratch space. Cancellation is checked at native-call boundaries
 and during result traversal/copying; a sort can delay cancellation while it is
 ordering the result. Failed helpers leave assignment destinations unchanged.
 
-`Map::get` and `has` provide safe lookups today. Direct missing-key indexing
-and core arithmetic/indexing failures retain their existing behavior and bypass
-`catch`; changing that belongs to the next phase. Callback transforms and pop
+`Map::get` and `has` provide safe lookups without exceptions. Direct missing-key
+indexing and invalid list positions raise catchable core `IndexError`; invalid
+core operand/index types raise `TypeError`, and arithmetic overflow or division
+by zero raises `ArithmeticError`. Core runtime safety limits and cancellation
+remain outside catches. Existing helper `RangeError` and `ResourceLimitError`
+exceptions are unchanged. See the [exception contract](language-spec.md#statement-grammar)
+and [errors playground](../playground/errors.scr). Callback transforms and pop
 are deferred. Try the [collections playground](../playground/collections.scr)
 and [log analyzer](../playground/log-analyzer.scr) for complete examples.
 
