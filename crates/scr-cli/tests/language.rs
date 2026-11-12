@@ -94,7 +94,7 @@ fn diagnostics_count_unicode_columns() {
     let error = run(source).unwrap_err();
     let rendered = error.render("test.scr", source);
     assert!(rendered.contains("test.scr:2:6"));
-    assert!(rendered.contains("error[E0401]: concatenation requires two strings"));
+    assert!(rendered.contains("error[E0401]: TypeError: concatenation requires two strings"));
     assert!(rendered.contains("2 | echo \"*\" . 1;"));
 }
 

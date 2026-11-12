@@ -258,6 +258,20 @@ fn native_objects_return_read_only_properties_and_catch_property_errors() {
     }
     run(&mut runtime, "$unchanged = $result->code;").unwrap();
     assert_eq!(runtime.get_global("unchanged"), Some(&Value::Int(7)));
+    for (expression, kind) in [
+        ("$result->items[9]", "IndexError"),
+        ("$result->items[9] = 3", "IndexError"),
+        ("$result->items[null]", "TypeError"),
+    ] {
+        run(
+            &mut runtime,
+            &format!(
+                "$caught = false; try {{ {expression}; }} catch ({kind} $e) {{ $caught = true; }}"
+            ),
+        )
+        .unwrap();
+        assert_eq!(runtime.get_global("caught"), Some(&Value::Bool(true)));
+    }
 }
 
 #[derive(Clone)]

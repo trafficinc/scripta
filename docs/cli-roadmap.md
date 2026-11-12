@@ -5,17 +5,16 @@ transforming collections, handling failures, and reusing scripts. Each phase
 requires explicit approval before implementation starts. Completing one phase
 does not authorize the next.
 
-**Next action: review Phase 2 Collections and maps and its log analyzer.**
-Implementation is ready for review. Acceptance and approval to start Phase 3
-are pending.
+**Next action: review Phase 3 Recoverable errors.** Implementation is ready for
+review. Acceptance and approval to start Phase 4 are pending.
 
 ## Progress and approval record
 
 | Phase | Scope | Status | Approval to start | Completion accepted |
 | --- | --- | --- | --- | --- |
 | 1 | Strings | Accepted | Approved | Accepted |
-| 2 | Collections and maps | Ready for review | Approved | Pending |
-| 3 | Recoverable errors | Waiting for Phase 2 | Pending | Pending |
+| 2 | Collections and maps | Accepted | Approved | Accepted |
+| 3 | Recoverable errors | Ready for review | Approved | Pending |
 | 4 | Functions | Waiting for Phase 3 | Pending | Pending |
 | 5 | Math and formatting | Waiting for Phase 4 | Pending | Pending |
 | 6 | Cleanup and streaming | Waiting for Phase 5 | Pending | Pending |
@@ -120,7 +119,6 @@ Review the [strings playground](../playground/strings.scr) with the command abov
 Matching is literal and case-sensitive, substring positions count Unicode scalars
 rather than grapheme clusters, and configured byte limits are logical per-value
 limits. Regex, normalization, and string indexing are outside this phase.
-Changes remain local; this phase has not been committed or pushed.
 
 **Next approval after acceptance:** Phase 2 Collections and maps.
 
@@ -178,7 +176,10 @@ Support common data transformations and safe map access.
 This also accepts Phase 1. Approval applies only to Phase 2 and its log analyzer
 checkpoint.
 
-**Completion record:** Ready for review. All five List helpers and six Map
+**Acceptance record:** Accepted by the user's “continue” instruction after the
+Phase 2 completion summary.
+
+**Completion record:** Accepted. All five List helpers and six Map
 helpers are registered by default, bringing the standard library to 94 functions.
 The [reference](standard-library.md#collections), language specification, and
 README describe the APIs. Nine collection integration tests and two focused
@@ -202,7 +203,7 @@ Review the [collections playground](../playground/collections.scr) and
 `cargo build -p scr-cli --locked` before using the commands above on another
 checkout. Collection helpers return new values; sorting accepts homogeneous
 numeric or string lists. Byte budgets are logical per-value limits and do not
-bound sorting scratch space. Changes remain local and uncommitted.
+bound sorting scratch space.
 
 **Practical checkpoint:** Build a small log analyzer using the string and
 collection APIs. Review friction it exposes before approving Phase 3; any new
@@ -245,9 +246,61 @@ Let scripts recover from ordinary data and arithmetic failures.
   uncaught-error example documents the resulting exit status.
 - The shared phase checks pass.
 
-**Approval record:** Pending.
+**API contract**
 
-**Completion record:** Pending.
+- Core missing-key reads, out-of-bounds list reads/writes, and negative list
+  positions raise `IndexError`. Sparse list writes still fail.
+- Division/remainder by zero, checked integer overflow, unary negation overflow,
+  and non-finite float arithmetic results raise `ArithmeticError`.
+- Operator/condition type mismatches, invalid index/key types, indexing a scalar,
+  and appending to a non-list raise `TypeError`. Strict conversions are unchanged.
+- Named catches, `catch (Error $e)`, and untyped catches match these failures;
+  bindings contain redacted message strings, not exception objects. A string
+  typed catch does not match an exception merely because its message is a string.
+- Uncaught errors keep diagnostic code E0401, original spans and stack frames,
+  and CLI exit status 1, with the exception name prefixed to the message.
+- Core runtime cancellation, instruction/scope/value/source/depth limits, and
+  allocation failures remain outside catches. Existing native exceptions such
+  as helper `ResourceLimitError` retain their current behavior.
+- Failed operations do not commit a destination write. Earlier target/RHS side
+  effects remain visible, matching existing evaluation order and assignment rules.
+- Undefined names, invalid call targets, and other unrelated runtime failures
+  remain outside this phase.
+
+**Approval record:** Approved by the user's “continue” instruction after the
+Phase 2 completion summary. This also accepts Phase 2 and its checkpoint.
+
+**Completion record:** Ready for review. Core operators and indexing now return
+typed error categories, separating recoverable TypeError/IndexError/ArithmeticError
+from fatal resource failures without inspecting message text. Core exceptions
+reuse the original diagnostic span, source, redacted message, and stack frames.
+Existing native exception messages and explicit throws retain their prior
+semantics. No new standard-library functions were needed; the export count
+remains 94.
+
+Seven new runtime integration tests cover named and generic catches, negative
+and missing positions, both optimized and general reads, arithmetic boundaries,
+operator/condition types, compound writes, RHS side effects, unmatched catches,
+explicit string rethrows, diagnostic redaction, runtime reuse, and core safety
+limits/cancellation. Additional coverage checks native-property indexing,
+resource release during core-error unwinding, fatal allocation classification,
+and CLI recovery versus uncaught-error diagnostics and status.
+
+| Validation | Result |
+| --- | --- |
+| `cargo test --workspace --locked` | Passed, including the recoverable-error and playground tests. |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed. |
+| `cargo fmt --all -- --check` | Passed. |
+| `git diff --check` | Passed. |
+| `./target/debug/scr run playground/errors.scr` | Passed; recovered from missing-key, arithmetic, and operand-type errors, preserving the failed compound assignment's destination. |
+| `./target/debug/scr run playground/errors.scr --uncaught` | Expected exit status 1 with E0401, IndexError, source location, and a main stack frame. |
+
+Review [the errors playground](../playground/errors.scr) and the
+[exception contract](language-spec.md#statement-grammar). Previously fatal
+operator/index failures are now catchable, and their uncaught diagnostic
+messages gain an exception-name prefix. Core execution limits, cancellation,
+undefined names, invalid call targets, and unrelated fatal errors remain outside
+catches. Failed writes do not roll back earlier target/RHS side effects.
 
 **Next approval after acceptance:** Phase 4 Functions.
 

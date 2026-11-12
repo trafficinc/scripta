@@ -292,6 +292,34 @@ fn collection_playground_and_log_analyzer_run_without_external_programs() {
 }
 
 #[test]
+fn error_playground_recovers_and_uncaught_errors_exit_one_with_source_details() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/errors.scr");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    let formatted = scr_cli::formatter::format(&source).unwrap();
+    let mut output = Vec::new();
+    scr_cli::pipeline::run(&formatted, &mut output).unwrap();
+    let expected = "Missing key: recovered\nArithmetic: recovered\nPreserved value: 10\nType mismatch: recovered\nStill running\n";
+    assert_eq!(String::from_utf8(output).unwrap(), expected);
+    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert_eq!(success(output), expected);
+    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        .arg(&path)
+        .arg("--uncaught")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("error[E0401]: IndexError: list index out of bounds"));
+    assert!(error.contains("errors.scr:6:"));
+    assert!(error.contains("at <main>"));
+}
+
+#[test]
 fn health_example_runs_locally_and_reference_lists_all_exports() {
     let dir = tempfile::tempdir().unwrap();
     let output = success(run("server-health.scr", &[dir.path().as_os_str()]));

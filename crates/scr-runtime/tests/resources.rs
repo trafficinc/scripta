@@ -195,6 +195,12 @@ fn native_resources_in_uncaptured_scopes_drop_after_exceptions() {
     )
     .unwrap();
     assert_eq!(dropped.get(), 1);
+    run(
+        &mut runtime,
+        "function g() { $r=resource(); 1 / 0; } try { g(); } catch (ArithmeticError $e) {}",
+    )
+    .unwrap();
+    assert_eq!(dropped.get(), 2);
 }
 
 #[test]

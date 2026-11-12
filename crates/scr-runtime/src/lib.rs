@@ -71,6 +71,7 @@ enum Signal {
     Error(Box<RuntimeError>),
     TypeError(Box<RuntimeError>),
     NativeException(NativeError, Box<RuntimeError>),
+    OperationException(&'static str, Box<RuntimeError>),
     Interrupted(Box<RuntimeError>),
     Throw(Value, Box<RuntimeError>),
     Return(Value),
@@ -317,7 +318,8 @@ impl Runtime {
                 | Signal::TypeError(error)
                 | Signal::Interrupted(error)
                 | Signal::Throw(_, error)
-                | Signal::NativeException(_, error),
+                | Signal::NativeException(_, error)
+                | Signal::OperationException(_, error),
             ) => Err(*error),
             Err(_) => Err(*self.error(
                 "invalid control flow outside a function or loop",
@@ -365,9 +367,25 @@ impl Runtime {
     fn checked<T>(&self, result: std::result::Result<T, String>, span: Span) -> Result<T> {
         result.map_err(|message| Signal::Error(self.error(message, span)))
     }
+    fn operation<T>(&self, result: ops::Result<T>, span: Span) -> Result<T> {
+        result.map_err(|error| {
+            let (kind, message) = match error {
+                ops::Error::Type(message) => ("TypeError", message),
+                ops::Error::Index(message) => ("IndexError", message),
+                ops::Error::Arithmetic(message) => ("ArithmeticError", message),
+                ops::Error::Fatal(message) => return Signal::Error(self.error(message, span)),
+            };
+            let error = self.error(format!("{kind}: {message}"), span);
+            if kind == "TypeError" {
+                Signal::TypeError(error)
+            } else {
+                Signal::OperationException(kind, error)
+            }
+        })
+    }
     fn condition(&mut self, expr: &Expr, output: &mut impl Write) -> Result<bool> {
         let value = self.evaluate(expr, output)?;
-        self.checked(ops::boolean(value), expr.span)
+        self.operation(ops::boolean(value), expr.span)
     }
     fn statements(&mut self, statements: &[Statement], output: &mut impl Write) -> Result<()> {
         for statement in statements {
@@ -460,7 +478,7 @@ impl Runtime {
                     loop {
                         self.checkpoint(statement.span)?;
                         if let Some(value) = self.expressions(condition, output)? {
-                            if !self.checked(ops::boolean(value), statement.span)? {
+                            if !self.operation(ops::boolean(value), statement.span)? {
                                 break;
                             }
                         }
@@ -562,6 +580,7 @@ impl Runtime {
                 Err(
                     signal @ (Signal::Throw(..)
                     | Signal::TypeError(_)
+                    | Signal::OperationException(..)
                     | Signal::NativeException(..)),
                 ) => {
                     let (value, exception_type) = match &signal {
@@ -571,6 +590,9 @@ impl Runtime {
                         }
                         Signal::NativeException(error, _) => {
                             (Value::String(error.message.clone()), error.kind.clone())
+                        }
+                        Signal::OperationException(kind, error) => {
+                            (Value::String(error.message.clone()), (*kind).into())
                         }
                         _ => unreachable!(),
                     };
@@ -642,18 +664,18 @@ impl Runtime {
             ExprKind::Grouped(inner) => self.evaluate(inner, output),
             ExprKind::Unary(op, operand) => {
                 let value = self.evaluate(operand, output)?;
-                self.checked(ops::unary(*op, value), expr.span)
+                self.operation(ops::unary(*op, value), expr.span)
             }
             ExprKind::Binary(left, op, right) => {
                 let left = self.evaluate(left, output)?;
                 if matches!(op, BinaryOp::And | BinaryOp::Or) {
-                    let left = self.checked(ops::boolean(left), expr.span)?;
+                    let left = self.operation(ops::boolean(left), expr.span)?;
                     if (*op == BinaryOp::And && !left) || (*op == BinaryOp::Or && left) {
                         return Ok(Value::Bool(left));
                     }
                     let right = self.evaluate(right, output)?;
                     return self
-                        .checked(ops::boolean(right), expr.span)
+                        .operation(ops::boolean(right), expr.span)
                         .map(Value::Bool);
                 }
                 let right = self.evaluate(right, output)?;
@@ -670,7 +692,7 @@ impl Runtime {
                         }
                     }
                 }
-                self.checked(ops::binary(*op, left, right), expr.span)
+                self.operation(ops::binary(*op, left, right), expr.span)
             }
             ExprKind::Assignment(target, op, rhs) => {
                 self.assignment(target, *op, rhs, true, output)
@@ -705,7 +727,7 @@ impl Runtime {
             ExprKind::IndexAccess(base, index) => {
                 let base = self.evaluate(base, output)?;
                 let index = self.evaluate(index, output)?;
-                self.checked(ops::index(&base, &index), expr.span)
+                self.operation(ops::index(&base, &index), expr.span)
             }
             ExprKind::AppendAccess(_) => {
                 self.fail("cannot read from a list append target", expr.span)
@@ -724,7 +746,11 @@ impl Runtime {
                 let mut map = Vec::new();
                 for (key, value) in entries {
                     let key_value = self.evaluate(key, output)?;
-                    let key = self.checked(MapKey::from_value(key_value), key.span)?;
+                    let key = self.operation(
+                        MapKey::from_value(key_value)
+                            .map_err(|_| ops::Error::Type("map keys must be int or string")),
+                        key.span,
+                    )?;
                     let value = self.evaluate(value, output)?;
                     if let Some((_, old)) = map.iter_mut().find(|(candidate, _)| candidate == &key)
                     {
@@ -925,7 +951,10 @@ impl Runtime {
                     None => matches!(self.read_place(&place, base.span)?, Value::List(_)),
                 };
                 if !is_list {
-                    return self.fail("list append requires a list", target.span);
+                    return self.operation(
+                        Err(ops::Error::Type("list append requires a list")),
+                        target.span,
+                    );
                 }
                 place.append = true;
                 Ok(place)
@@ -960,7 +989,7 @@ impl Runtime {
                 Signal::Error(self.error(format!("undefined variable ${name}"), span))
             })?;
         for key in &place.path {
-            value = self.checked(ops::index_ref(value, key), span)?;
+            value = self.operation(ops::index_ref(value, key), span)?;
         }
         Ok(Some(value))
     }
@@ -981,7 +1010,7 @@ impl Runtime {
         self.checked(owned.validate(), span)?;
         let mut value = &owned;
         for key in &place.path {
-            value = self.checked(ops::index_ref(value, key), span)?;
+            value = self.operation(ops::index_ref(value, key), span)?;
         }
         Ok(value.clone())
     }
@@ -1033,8 +1062,10 @@ impl Runtime {
                 ) {
                     let value = self.evaluate(rhs, output)?;
                     let Value::String(suffix) = value else {
-                        return self.fail(
-                            "concatenation requires two strings; use str(value)",
+                        return self.operation(
+                            Err(ops::Error::Type(
+                                "concatenation requires two strings; use str(value)",
+                            )),
                             target.span,
                         );
                     };
@@ -1097,7 +1128,7 @@ impl Runtime {
                 AssignmentOp::Concat => BinaryOp::Concat,
                 AssignmentOp::Assign => unreachable!(),
             };
-            value = self.checked(ops::binary(binary, old, value), target.span)?;
+            value = self.operation(ops::binary(binary, old, value), target.span)?;
         }
         if retain {
             self.write_place(&place, value.clone(), target.span)?;
@@ -1131,7 +1162,7 @@ impl Runtime {
                         .get(name)
                         .unwrap()
                         .clone();
-                    self.checked(
+                    self.operation(
                         ops::set_index(&mut value, &place.path, replacement, place.append),
                         span,
                     )?;
@@ -1152,14 +1183,14 @@ impl Runtime {
                     replacement,
                     place.append,
                 );
-                self.checked(result, span)
+                self.operation(result, span)
             }
             Root::Property { object, name } => {
                 if place.path.is_empty() && !place.append {
                     return self.property_result(object.set_property(name, replacement), span);
                 }
                 let mut value = self.property_result(object.get_property(name), span)?;
-                self.checked(
+                self.operation(
                     ops::set_index(&mut value, &place.path, replacement, place.append),
                     span,
                 )?;

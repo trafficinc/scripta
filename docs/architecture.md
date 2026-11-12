@@ -90,8 +90,12 @@ cycles. A callable from one runtime cannot execute in another runtime.
 Internal control-flow signals carry return, break, continue, exit, explicit throw,
 and runtime failure through nested statements. Loop/function/catch boundaries
 handle only their own signals. Explicit throws, TypeErrors, native exceptions,
-and property errors are catchable; other runtime failures and host interruption
-are reported to the host.
+property errors, and core IndexError/ArithmeticError exceptions are catchable.
+Core operations return a typed error category independently of message wording;
+the runtime attaches the original span/trace and redacts the diagnostic before
+exposing a core error's message to a catch. Resource failures remain fatal,
+separate from recoverable data errors. Other runtime failures and host
+interruption are reported to the host.
 Top-level declarations are registered in a first pass before executing other
 statements. RuntimeOptions configures recursion depth, cancellation, and an
 optional checkpoint budget; loop back edges check interruption even with empty bodies. `Runtime::execute(&Program, &mut impl Write)` returns
