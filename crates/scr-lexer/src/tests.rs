@@ -40,6 +40,7 @@ fn every_keyword_and_keyword_boundaries() {
         ("continue", TokenKind::Continue),
         ("try", TokenKind::Try),
         ("catch", TokenKind::Catch),
+        ("finally", TokenKind::Finally),
         ("throw", TokenKind::Throw),
         ("exit", TokenKind::Exit),
     ] {

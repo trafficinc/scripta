@@ -35,12 +35,12 @@ Embedders opt in by calling `scr_stdlib::register(&mut runtime)?`. Registration
 returns `NativeResult<()>`; duplicate names produce `RegistryError` and preserve
 the existing registration. `echo` and `exit` remain language statements. Neither
 is registered as a native function; exit returns a code without terminating the
-embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Log`, `Json`, `Http`, `String`, `List`, and `Map` are
+embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Log`, `Json`, `Http`, `String`, `Math`, `List`, and `Map` are
 registered by default.
 
 ## Release 0.1.0 export index
 
-This reference covers all 94 registered functions in the default library, plus
+This reference covers all 104 registered functions in the default library, plus
 native response/entry properties and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -48,10 +48,11 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Module | Public functions | Details |
 | --- | --- | --- |
 | Globals | `str`, `int`, `float`, `bool`, `type`, `len`, `sleep` | Conversion table above |
-| String | `String::trim`, `String::split`, `String::join`, `String::contains`, `String::startsWith`, `String::endsWith`, `String::replace`, `String::substring`, `String::lower`, `String::upper` | [Strings](#strings) |
+| String | `String::trim`, `String::split`, `String::join`, `String::contains`, `String::startsWith`, `String::endsWith`, `String::replace`, `String::substring`, `String::lower`, `String::upper`, `String::format` | [Strings](#strings) |
+| Math | `Math::abs`, `Math::min`, `Math::max`, `Math::floor`, `Math::ceil`, `Math::round` | [Math](#math) |
 | List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort` | [Collections](#collections) |
 | Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove` | [Collections](#collections) |
-| File | `File::exists`, `File::read`, `File::write`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension` | [Filesystem](#filesystem-and-paths) |
+| File | `File::exists`, `File::read`, `File::write`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close` | [Filesystem](#filesystem-and-paths) |
 | Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
 | Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute` | [Paths](#filesystem-and-paths) |
 | Process | `Process::run`, `Process::spawn`, `Process::shell`, `Process::wait`, `Process::poll`, `Process::kill`, `Process::exists`, `Process::currentId` | [Processes](#processes) |
@@ -63,9 +64,9 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Json | `Json::encode`, `Json::decode`, `Json::pretty` | [JSON](#json) |
 | Http | `Http::get`, `Http::post`, `Http::request` | [HTTP](#http) |
 
-`DirEntry`, `ProcessResult`, `ProcessHandle`, `MemoryUsage`, `DiskUsage`, and
-`HttpResponse` are read-only native objects whose properties/methods are listed
-in their module sections. Convert selected properties into ordinary maps before
+`DirEntry`, `ProcessResult`, `ProcessHandle`, `MemoryUsage`, `DiskUsage`,
+`HttpResponse`, and `FileStream` are read-only native objects whose properties
+and methods are listed in their module sections. Convert selected properties into ordinary maps before
 JSON encoding. `require` and `require_once` are statements, not native functions;
 see [local script loading](language-spec.md#local-script-loading). There is no
 package manager or implicit remote module resolution.
@@ -80,11 +81,13 @@ collection transforms remain deferred; callbacks can be passed to script helpers
 ## Strings
 
 All helpers return new values and leave their arguments unchanged. Arguments
-have the exact types below; there is no implicit scalar-to-string conversion.
+have the exact types below. Only `format` explicitly accepts scalar values for
+string display; other helpers do not coerce scalar values to strings.
 Wrong argument counts or types raise catchable `TypeError` exceptions.
 
 | Function | Behavior |
 | --- | --- |
+| `String::format(template: string, values: list): string` | Replaces sequential `{}` placeholders with scalar display. `{{` and `}}` emit literal braces. See the formatting contract below. |
 | `String::trim(text: string): string` | Removes Unicode whitespace from both ends, preserving interior whitespace. Empty or all-whitespace input returns `""`. |
 | `String::split(text: string, separator: string): list` | Splits on literal, nonoverlapping separators and preserves leading, trailing, and consecutive empty fields. Empty text returns `[""]`; no match returns `[text]`. An empty separator raises `RangeError`. |
 | `String::join(items: list, separator: string): string` | Joins a list containing only strings. Empty input returns `""`, one item returns that item, and an empty separator concatenates items. Non-string elements raise `TypeError`. |
@@ -95,6 +98,16 @@ Wrong argument counts or types raise catchable `TypeError` exceptions.
 | `String::substring(text: string, start: int, length: int optional): string` | Takes nonnegative Unicode scalar positions. Omitted length returns the suffix. Start beyond `len(text)`, negative offsets, or length beyond the remaining text raise `RangeError`. Start at the end is valid with omitted length or length zero. Empty text accepts start zero with omitted length or length zero. Explicit null is not an omitted length. |
 | `String::lower(text: string): string` | Applies locale-independent Unicode lowercase, including contextual Greek final sigma. Empty input returns `""`. Mappings can expand a scalar, such as `İ` becoming `i` plus a combining dot. |
 | `String::upper(text: string): string` | Applies locale-independent Unicode uppercase. Empty input returns `""`. Mappings can expand scalars, such as `ß` becoming `SS`. |
+
+`String::format` accepts exactly one value per `{}` placeholder. Values may be
+null, bool, int, finite float, or string, with the same display as `str` (so 1.0
+prints as `1`). Replacement strings are inserted literally and never reparsed.
+For example, `String::format("{{{}}}: {}", ["café", 2])` returns `"{café}: 2"`.
+Empty templates with empty value lists return `""`. Unmatched braces, unsupported
+placeholder syntax, and missing or extra values raise `FormatError`; unsupported
+value types raise `TypeError`. There are no width, precision, positional, or named
+placeholders. Unicode is preserved without normalization. Output is preflighted
+before allocating the result and uses the byte budget described below.
 
 Matching is case-sensitive and literal, with no regular expressions or Unicode
 normalization. For example, precomposed `é` and `e` followed by a combining acute
@@ -131,6 +144,29 @@ result construction. A failed helper does not replace an assignment destination.
 
 Try [the strings playground](../playground/strings.scr) for a complete status
 record normalization example.
+
+## Math
+
+These pure helpers require no OS permissions. They accept only ints and finite
+floats, preserving the input type and requiring explicit conversions when mixing
+numeric types. Invalid types, non-finite values, and wrong arity raise `TypeError`.
+
+| Function | Behavior |
+| --- | --- |
+| `Math::abs(value: int or float): int or float` | Absolute value. i64 minimum raises `ArithmeticError` because its positive value cannot fit in i64. Float negative zero becomes positive zero. |
+| `Math::min(left, right): int or float` | Smaller of two ints or two finite floats. Equal values select the left argument, including signed zero. |
+| `Math::max(left, right): int or float` | Larger of two ints or two finite floats. Equal values select the left argument, including signed zero. |
+| `Math::floor(value: int or float): int or float` | Rounds toward negative infinity; ints are unchanged. `Math::floor(-1.2)` returns float -2.0. |
+| `Math::ceil(value: int or float): int or float` | Rounds toward positive infinity; ints are unchanged. `Math::ceil(-1.2)` returns float -1.0. |
+| `Math::round(value: int or float): int or float` | Nearest integer, with halfway ties away from zero: 2.5 becomes 3.0 and -2.5 becomes -3.0. Ints are unchanged. |
+
+Float rounding returns a float even outside i64 range and preserves signed zero
+where applicable. Use `int` explicitly for conversion, which still rejects
+out-of-range values. Rounding operates on the represented binary floating-point
+value. No decimal precision argument, power, or random API is provided.
+
+Try [the reporting playground](../playground/reporting.scr):
+`cargo run -p scr-cli --locked -- run playground/reporting.scr`.
 
 ## Collections
 
@@ -326,6 +362,9 @@ and does not affect other runtimes. Existing `DirEntry` snapshots keep their pat
 | `File::delete(path): null` | Deletes one regular file. Missing paths raise an exception. Never deletes directories or symlinks. |
 | `File::size(path): int` | Regular-file size in bytes, checked against i64 range. |
 | `File::modified(path): int` | Modification time in whole Unix seconds (floored), checked against i64 range. |
+| `File::openLines(path: string, maxLineBytes: int optional): FileStream` | Opens a UTF-8 line stream; default raw line limit is 1 MiB. See [bounded file streams](#bounded-file-streams). |
+| `File::readLine(stream: FileStream): string or null` | Returns the next line without LF/CRLF, or null at EOF. |
+| `File::close(stream: FileStream): null` | Idempotently closes the stream and all its aliases. |
 | `File::extension(path): string` | Lexical suffix without the dot, or empty string. Does not require the file to exist; same as `Path::extension`. |
 
 Copy/move destinations are protected with exclusive OS creation, so a destination
@@ -376,6 +415,69 @@ Path helpers and `File::extension` do no filesystem I/O and require no filesyste
 capability. Lexical normalization does not resolve symlinks; applying it before
 I/O can change the meaning of paths containing symlinks and `..`. Actual I/O
 preserves native path resolution.
+
+### Bounded file streams
+
+`File::openLines(path, maxLineBytes)` opens a regular file using the same read
+capability, policy roots, UTF-8 path rules, and final-symlink rejection as
+`File::read`. The optional maximum is a strictly positive int, defaulting to
+1048576 bytes (1 MiB). It counts each raw line including its LF or CRLF terminator.
+Wrong arities/types raise `TypeError`, and nonpositive maxima raise `RangeError`.
+
+`File::readLine(stream)` returns a UTF-8 string, removing a final LF and one CR
+immediately before it. Bare CRs and a UTF-8 BOM are preserved. Blank lines return
+`""`; empty files and EOF return null, including repeated reads at EOF. A final
+unterminated line is returned normally. Invalid UTF-8 raises `EncodingError`.
+Read errors use the filesystem error categories below. Oversized lines, output
+budget violations, and fallible line-buffer allocation failures raise
+`ResourceLimitError`. A read failure closes the stream; it never returns partial
+line data. Permission and argument failures before reading leave it unchanged.
+
+File streams have shared native identity, a shared cursor, and a read-only bool
+property `closed`. Assignment and collection copies retain the same handle.
+`File::close(stream)` drops the descriptor immediately for all aliases; repeated
+close calls succeed. Close requires no read permission, although native-call
+cancellation still applies. Reading a closed stream raises `StreamError`.
+Streams release automatically when their last reference is dropped, including
+runtime teardown unless the host retains aliases. Streams are not JSON values;
+serialize selected scalar results instead.
+
+Each stream belongs to its filesystem registration. Reading checks the runtime's
+`filesystem.read` permission and the registration's read policy. A stream passed
+by a host to another registration raises `TypeError` on read; closing a real
+stream remains available without read permission. Reads continue on the original
+open descriptor after renames or path replacement and do not resolve the path
+again. The root check applies at opening. Concurrent path replacement has the
+same documented limitations as other filesystem operations.
+
+Reads use an 8 KiB input buffer and retain only the current line. The logical
+result budget is one Value slot plus the UTF-8 payload after removing LF/CRLF;
+at most two extra terminator bytes are permitted during assembly. This bounds
+line assembly by both `maxLineBytes` and the configured value budget, independently
+of total file size. Fixed native buffers, allocator overhead, and arguments are
+outside the logical per-value limit. Cancellation is checked between buffered
+chunks and before returning a line; an interrupted active read closes the stream.
+OS reads remain synchronous, so cancellation cannot interrupt a blocked OS call.
+
+```scr
+<?scr
+$stream = File::openLines("events.txt", 65536);
+try {
+    while (($line = File::readLine($stream)) !== null) {
+        echo $line . "\n";
+    }
+} finally {
+    File::close($stream);
+}
+```
+
+Finally runs for normal completion and recoverable failures/control flow, under
+the ordinary execution limits. Fatal runtime failures and cancellation bypass
+script cleanup; dropping the last stream reference still closes its descriptor.
+Whole-file helpers remain available. There is no writable stream, iterator syntax,
+or asynchronous I/O. The [streaming playground](../playground/streaming.scr)
+counts sample log records with bounded per-line input and constant-size counters:
+`cargo run -p scr-cli --locked -- run playground/streaming.scr playground/sample-events.txt`.
 
 ### Permissions and exceptions
 

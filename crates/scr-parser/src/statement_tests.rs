@@ -269,7 +269,7 @@ fn try_catches_throw_and_exit() {
     let parsed = program(
         "try { throw $error; } catch (ProcessError $e) { echo str($e); } catch ($other) { throw $other; } exit; exit(); exit 1; exit(2);",
     );
-    let StatementKind::Try { body, catches } = &parsed.statements[0].kind else {
+    let StatementKind::Try { body, catches, .. } = &parsed.statements[0].kind else {
         panic!()
     };
     assert!(matches!(body.statements[0].kind, StatementKind::Throw(_)));
@@ -509,5 +509,34 @@ fn require_statements_parse_expressions_once_flags_and_semicolons() {
     ] {
         let tokens = scr_lexer::lex(source).unwrap();
         assert!(crate::parse(&tokens).is_err());
+    }
+}
+
+#[test]
+fn finally_parses_after_optional_catches_and_rejects_orphan_clauses() {
+    for source in [
+        "try {} finally {}",
+        "try {} catch ($e) {} finally {}",
+        "try {} catch (Error $e) {} catch ($e) {} finally {}",
+    ] {
+        let parsed = program(source);
+        let StatementKind::Try { finally, .. } = &parsed.statements[0].kind else {
+            panic!()
+        };
+        assert!(finally.is_some());
+    }
+    for body in [
+        "try {}",
+        "finally {}",
+        "try {} finally echo 'x';",
+        "try {} finally {} catch ($e) {}",
+        "try {} finally {} finally {}",
+        "try {} catch ($e) {} finally",
+    ] {
+        let source = format!("<?scr {body}");
+        assert!(
+            crate::parse(&scr_lexer::lex(&source).unwrap()).is_err(),
+            "{body}"
+        );
     }
 }

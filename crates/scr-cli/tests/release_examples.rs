@@ -338,6 +338,97 @@ fn functions_playground_runs_with_defaults_variadics_and_captured_callbacks() {
 }
 
 #[test]
+fn reporting_playground_runs_before_and_after_formatting() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/reporting.scr");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    let formatted = scr_cli::formatter::format(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&formatted).unwrap(), formatted);
+    let mut output = Vec::new();
+    scr_cli::pipeline::run(&formatted, &mut output).unwrap();
+    let expected = "Run summary: 4 jobs\nDuration: 8.6–19.5 ms; rounded average: 13 ms\nAverage bounds: 12–13 ms\nAbsolute adjustment: 2 ms\n{complete}: true\n";
+    assert_eq!(String::from_utf8(output).unwrap(), expected);
+    let dir = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        .arg("run")
+        .arg(path)
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(success(output), expected);
+}
+
+#[test]
+fn streaming_playground_handles_sample_crlf_empty_files_and_usage() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/streaming.scr");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    let formatted = scr_cli::formatter::format(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&formatted).unwrap(), formatted);
+    let dir = tempfile::tempdir().unwrap();
+    let sample = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/sample-events.txt"),
+    )
+    .unwrap();
+    let cases = [
+        (
+            sample.as_str(),
+            "Records: 5\ninfo: 3\nwarn: 1\nerror: 1\nMalformed: 1\nStream closed: true\n",
+        ),
+        (
+            "INFO|café|ok\r\n\r\n# comment\r\nwarn|worker|retry\r\nbad",
+            "Records: 2\ninfo: 1\nwarn: 1\nerror: 0\nMalformed: 1\nStream closed: true\n",
+        ),
+        (
+            "",
+            "Records: 0\ninfo: 0\nwarn: 0\nerror: 0\nMalformed: 0\nStream closed: true\n",
+        ),
+    ];
+    let formatted_path = dir.path().join("formatted.scr");
+    fs::write(&formatted_path, formatted).unwrap();
+    for (input, expected) in cases {
+        let input_path = dir.path().join("events.txt");
+        fs::write(&input_path, input).unwrap();
+        for script in [&path, &formatted_path] {
+            let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+                .arg("run")
+                .arg(script)
+                .arg(&input_path)
+                .current_dir(dir.path())
+                .output()
+                .unwrap();
+            assert_eq!(success(output), expected);
+        }
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        .arg("run")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .starts_with("Usage:")
+    );
+    for (bytes, error) in [
+        (vec![0xff, b'\n'], "EncodingError"),
+        (vec![b'x'; 65537], "ResourceLimitError"),
+    ] {
+        let input_path = dir.path().join("bad.txt");
+        fs::write(&input_path, bytes).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+            .arg("run")
+            .arg(&path)
+            .arg(input_path)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert!(String::from_utf8(output.stderr).unwrap().contains(error));
+    }
+}
+
+#[test]
 fn health_example_runs_locally_and_reference_lists_all_exports() {
     let dir = tempfile::tempdir().unwrap();
     let output = success(run("server-health.scr", &[dir.path().as_os_str()]));
@@ -350,7 +441,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
     let modules = [
         (
             "File",
-            "exists read write append copy move delete size modified extension",
+            "exists read write append copy move delete size modified extension openLines readLine close",
         ),
         (
             "Dir",
@@ -370,8 +461,9 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Http", "get post request"),
         (
             "String",
-            "trim split join contains startsWith endsWith replace substring lower upper",
+            "trim split join contains startsWith endsWith replace substring lower upper format",
         ),
+        ("Math", "abs min max floor ceil round"),
         ("List", "remove slice concat contains sort"),
         ("Map", "create has get keys values remove"),
     ];
@@ -385,5 +477,5 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 94);
+    assert_eq!(count, 104);
 }

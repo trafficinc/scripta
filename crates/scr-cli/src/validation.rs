@@ -47,10 +47,17 @@ fn nested(statement: &Statement, errors: &mut Vec<Diagnostic>) {
         StatementKind::While { body, .. }
         | StatementKind::For { body, .. }
         | StatementKind::Foreach { body, .. } => nested(body, errors),
-        StatementKind::Try { body, catches } => {
+        StatementKind::Try {
+            body,
+            catches,
+            finally,
+        } => {
             block(body, errors);
             for catch in catches {
                 block(&catch.body, errors);
+            }
+            if let Some(body) = finally {
+                block(body, errors);
             }
         }
         _ => {}

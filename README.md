@@ -97,6 +97,8 @@ cargo build -p scr-cli --locked
 ./target/debug/scr run playground/log-analyzer.scr playground/sample-events.txt
 ./target/debug/scr run playground/errors.scr
 ./target/debug/scr run playground/functions.scr
+./target/debug/scr run playground/reporting.scr
+./target/debug/scr run playground/streaming.scr playground/sample-events.txt
 ```
 
 | Script | What to try |
@@ -109,6 +111,8 @@ cargo build -p scr-cli --locked
 | [collections.scr](playground/collections.scr) | Filter, sort, and summarize records using list helpers and safe map lookups. |
 | [log-analyzer.scr](playground/log-analyzer.scr) | Analyze [sample events](playground/sample-events.txt), count log levels, list sorted services, and report malformed records. |
 | [errors.scr](playground/errors.scr) | Recover from indexing, arithmetic, and operand-type failures; add `--uncaught` to demonstrate a diagnostic and exit status 1. |
+| [streaming.scr](playground/streaming.scr) | Stream log records with a line-size limit and close the file in `finally`. |
+| [reporting.scr](playground/reporting.scr) | Summarize durations with Math helpers and bounded string formatting. |
 | [functions.scr](playground/functions.scr) | Try defaults, typed variadics, anonymous callbacks, captured counters, and independent collection defaults. |
 
 After editing, check a script with
@@ -356,18 +360,19 @@ examples and have not been deployment-tested in this checkout.
 
 ## Standard library
 
-The [complete reference](docs/standard-library.md) documents all **94 functions**,
+The [complete reference](docs/standard-library.md) documents all **104 functions**,
 return values, native objects, limits, and errors.
 
 | Modules | Use |
 | --- | --- |
-| `File`, `Dir`, `Path` | Read, write, list, copy, move, and organize files. |
+| `File`, `Dir`, `Path` | Read, write, stream bounded lines, list, copy, move, and organize files. |
 | `Process` | Run literal arguments, capture bounded output, manage child processes. |
 | `Env`, `Cli` | Environment values, script arguments, options, and prompts. |
 | `System` | Platform, CPU sampling, system memory, disk usage, and host details. |
 | `Date`, `Log` | UTC timestamps, parsing, sleep, and redacted local JSON logs. |
 | `Json`, `Http` | JSON conversion and bounded HTTP/HTTPS requests. |
-| `String` | Trim, split/join, search, replace, take substrings, and convert case. |
+| `String` | Trim, split/join, search, replace, take substrings, convert case, and format scalar values with `{}`. |
+| `Math` | Type-preserving abs, min/max, floor, ceil, and round (ties away from zero). |
 | `List`, `Map` | Slice, remove, concatenate, sort, test membership, construct maps, and safely look up keys. |
 | Global functions | Explicit conversions, `type`, `len`, and cancellable `sleep`. |
 
@@ -386,13 +391,15 @@ perform changes. The older `organize.scr` example moves files immediately.
 
 ## Current gaps in language basics
 
-The [CLI development phases and approvals](docs/cli-roadmap.md) organize the next
-work into six phases, each requiring approval before implementation begins.
+The six [CLI development phases](docs/cli-roadmap.md) are implemented and
+accepted. Further feature work requires a new scope decision; the roadmap records
+the CLI review and a proposed next phase.
 
 Scripta already has string and collection utilities, scalar values, lists/maps,
 nested indexing, list appends,
 conditions, `for` / `while` / `foreach`, functions with optional type annotations,
-lexical captures, `try` / `catch` / `throw`, local script loading, and JSON.
+lexical captures, `try` / `catch` / `finally` / `throw`, bounded file streams,
+local script loading, and JSON.
 The following review identifies useful additions for CLI automation. Priorities
 are suggestions, not release commitments; the
 [language specification](docs/language-spec.md) and
@@ -403,11 +410,11 @@ define current support.
 | --- | --- | --- |
 | Medium | Pop and callback-based map/filter/reduce | List removal, slicing, concatenation, sorting, and membership are implemented. Use loops and new lists to filter or rebuild collections. |
 | Lower | Null fallback syntax | `Map::has` and `Map::get` provide safe key lookups. No `??`, `isset`, or null-safe access syntax. Direct missing-key indexing raises catchable `IndexError`. |
-| Medium | Numeric helpers: abs, min/max, rounding, powers, random numbers | Arithmetic, remainder, comparisons, and explicit numeric conversions exist. There is no math/random module. |
+| Lower | Powers and random numbers | `Math` supplies abs, min/max, floor, ceil, and round; powers and random APIs remain deferred. |
 | Lower | Named arguments, arrow functions, and call-site unpacking | Default and variadic parameters and `function (...) { ... }` literals are supported. Calls still use positional arguments; `...` declares a variadic parameter and does not unpack arguments at a call site. |
-| Medium | String interpolation and formatting helpers | Build strings with `.` and explicit `str(value)` conversions. |
-| Medium | Guaranteed cleanup syntax | `try` / `catch` exists; `finally`, `defer`, and resource-management syntax do not. Cleanup must be arranged explicitly. |
-| Medium | Streaming file I/O and line iteration | `File::read` loads bounded whole files; file streams and a line iterator are absent. `Cli::prompt` supports interactive input. |
+| Lower | String interpolation and advanced formatting | `String::format(template, values)` supports sequential `{}` scalar placeholders and escaped braces. Interpolation, width, and precision syntax remain deferred. |
+| Lower | General resource-management syntax | `finally` supports cleanup for ordinary completion, failures, and control flow, under existing execution limits. Fatal limits and cancellation bypass script cleanup; `defer` and general resource-management syntax remain deferred. |
+| Lower | Writable streams and iterator syntax | `File::openLines`, `readLine`, and `close` support bounded UTF-8 line reading; whole-file helpers remain available. Writable streams and iterator syntax remain deferred. |
 | Lower | Convenience syntax: ternary expressions, `switch` / `match`, `++` / `--`, `%=` | Use `if` / `elseif` / `else`, `+= 1`, `-= 1`, and `$value = $value % divisor`. |
 
 String utilities are complete in [Phase 1](docs/cli-roadmap.md#phase-1-strings).
@@ -415,7 +422,10 @@ Collection helpers are complete in [Phase 2](docs/cli-roadmap.md#phase-2-collect
 Catchable core indexing, arithmetic, and operand-type errors are complete in
 [Phase 3](docs/cli-roadmap.md#phase-3-recoverable-errors). Default/variadic
 parameters and anonymous functions are implemented in
-[Phase 4](docs/cli-roadmap.md#phase-4-functions) and awaiting completion review.
+[Phase 4](docs/cli-roadmap.md#phase-4-functions). Math and bounded formatting are
+complete in [Phase 5](docs/cli-roadmap.md#phase-5-math-and-formatting). Cleanup and
+bounded line streams are implemented in
+[Phase 6](docs/cli-roadmap.md#phase-6-cleanup-and-streaming); all six phases are accepted.
 The playgrounds demonstrate each phase. Runtime safety limits and cancellation
 continue to bypass catches.
 Regex support, Unicode normalization, and string indexing remain outside these phases.

@@ -13,6 +13,7 @@ pub mod filesystem;
 pub mod http;
 mod json;
 pub mod log;
+mod math;
 mod paths;
 pub mod process;
 mod strings;
@@ -102,6 +103,7 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
     runtime.set_module_policy(move |path| module_policy.check_path(path, false));
     json::register(runtime)?;
     strings::register(runtime)?;
+    math::register(runtime)?;
     collections::register(runtime)?;
     http::register(runtime, options.http)?;
     filesystem::register(runtime, options.filesystem.clone())?;
