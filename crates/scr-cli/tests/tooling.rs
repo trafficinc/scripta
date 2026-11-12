@@ -23,6 +23,22 @@ fn formatter_snapshots_preserve_tokens_and_are_idempotent() {
     }
 }
 #[test]
+fn append_survives_check_format_and_execution() {
+    let source = "<?scr $items=[];$items[]=1;$items[len($items)]=2;$groups=[[]];$groups[0][]=3;echo Json::encode([$items,$groups]);";
+    pipeline::check(source).unwrap();
+    let formatted = formatter::format(source).unwrap();
+    assert_eq!(formatter::format(&formatted).unwrap(), formatted);
+    for script in [source, formatted.as_str()] {
+        let mut output = Vec::new();
+        pipeline::run(script, &mut output).unwrap();
+        assert_eq!(String::from_utf8(output).unwrap(), "[[1,2],[[3]]]");
+    }
+    for target in ["$items[]", "$items[] += 1", "$items[][0] = 1"] {
+        assert!(pipeline::check(&format!("<?scr {target};")).is_err());
+    }
+}
+
+#[test]
 fn check_validates_declarations_control_flow_and_legacy_syntax_without_execution() {
     for (source, code) in [
         ("<?scr function f() {} function f() {}", "E0301"),

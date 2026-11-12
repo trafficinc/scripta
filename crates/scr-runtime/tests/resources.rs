@@ -93,6 +93,36 @@ fn configured_bytes_scopes_steps_and_source_limits_are_enforced() {
     );
 }
 #[test]
+fn list_growth_obeys_value_budgets_without_partial_mutation() {
+    for assignment in ["$items[] = 3;", "$items[2] = 3;"] {
+        let mut runtime = Runtime::with_options(RuntimeOptions {
+            max_value_bytes: Some(3 * std::mem::size_of::<Value>()),
+            ..Default::default()
+        });
+        run(&mut runtime, "$items = [1]; $items[] = 2;").unwrap();
+        let error = run(&mut runtime, assignment).unwrap_err();
+        assert!(error.message.contains("byte limit"));
+        assert_eq!(
+            runtime.get_global("items"),
+            Some(&Value::List(vec![Value::Int(1), Value::Int(2)]))
+        );
+    }
+}
+
+#[test]
+fn list_append_obeys_nesting_limits_without_partial_mutation() {
+    let mut runtime = Runtime::new();
+    run(
+        &mut runtime,
+        "$nested = []; for ($i = 0; $i < 128; $i += 1) { $nested = [$nested]; } $items = [];",
+    )
+    .unwrap();
+    let error = run(&mut runtime, "$items[] = $nested;").unwrap_err();
+    assert!(error.message.contains("nesting exceeds 128"));
+    assert_eq!(runtime.get_global("items"), Some(&Value::List(vec![])));
+}
+
+#[test]
 fn retained_closure_scopes_can_be_limited() {
     let mut runtime = Runtime::with_options(RuntimeOptions {
         max_scopes: Some(12),

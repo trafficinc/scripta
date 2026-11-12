@@ -209,6 +209,89 @@ fn command_runner_preserves_literal_arguments_and_http_example_uses_loopback() {
 }
 
 #[test]
+fn strings_playground_normalizes_a_unicode_record_without_external_programs() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/strings.scr");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    let formatted = scr_cli::formatter::format(&source).unwrap();
+    let mut output = Vec::new();
+    scr_cli::pipeline::run(&formatted, &mut output).unwrap();
+    let expected = "info: café_api: READY\nService prefix: café\nContains api: true\nStarts with café: true\nEnds with _api: true\n";
+    assert_eq!(String::from_utf8(output).unwrap(), expected);
+    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+        .arg(path)
+        .current_dir(directory.path())
+        .env("PATH", directory.path())
+        .output()
+        .unwrap();
+    assert_eq!(success(result), expected);
+}
+
+#[test]
+fn collection_playground_and_log_analyzer_run_without_external_programs() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground");
+    for (name, args, expected) in [
+        (
+            "collections.scr",
+            vec![],
+            "Active: auth, café-api\nFirst: auth\nWithout first: [\"café-api\"]\nWith extra: [\"auth\",\"café-api\",\"queue\"]\nHas auth: true\nFields: active, total\nValues: [2,4]\nHas total: true\n",
+        ),
+        (
+            "log-analyzer.scr",
+            vec![root.join("sample-events.txt")],
+            "Services: auth, café-api, worker\ninfo: 3\nwarn: 1\nerror: 1\nMalformed: 1\n",
+        ),
+    ] {
+        let source = fs::read_to_string(root.join(name)).unwrap();
+        scr_cli::pipeline::check(&source).unwrap();
+        let formatted = scr_cli::formatter::format(&source).unwrap();
+        scr_cli::pipeline::check(&formatted).unwrap();
+        assert_eq!(scr_cli::formatter::format(&formatted).unwrap(), formatted);
+        let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+            .arg(root.join(name))
+            .args(args)
+            .current_dir(directory.path())
+            .env("PATH", directory.path())
+            .output()
+            .unwrap();
+        assert_eq!(success(output), expected, "{name}");
+    }
+    let input = directory.path().join("events.txt");
+    fs::write(&input, "# comment\r\n\r\nINFO | api | ok\r\nDEBUG | api | ignored\nerror||missing service\nwarn|api|\na|b|c|d\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        .arg(root.join("log-analyzer.scr"))
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert_eq!(
+        success(output),
+        "Services: api\ninfo: 1\nwarn: 0\nerror: 0\nMalformed: 4\n"
+    );
+    fs::write(&input, "").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        .arg(root.join("log-analyzer.scr"))
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert_eq!(
+        success(output),
+        "Services: \ninfo: 0\nwarn: 0\nerror: 0\nMalformed: 0\n"
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        .arg(root.join("log-analyzer.scr"))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .starts_with("Usage:")
+    );
+}
+
+#[test]
 fn health_example_runs_locally_and_reference_lists_all_exports() {
     let dir = tempfile::tempdir().unwrap();
     let output = success(run("server-health.scr", &[dir.path().as_os_str()]));
@@ -239,6 +322,12 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Log", "info warn error debug setFile"),
         ("Json", "encode decode pretty"),
         ("Http", "get post request"),
+        (
+            "String",
+            "trim split join contains startsWith endsWith replace substring lower upper",
+        ),
+        ("List", "remove slice concat contains sort"),
+        ("Map", "create has get keys values remove"),
     ];
     let mut count = 7;
     for (namespace, functions) in modules {
@@ -250,5 +339,5 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 73);
+    assert_eq!(count, 94);
 }

@@ -680,9 +680,19 @@ impl Parser<'_> {
             TokenKind::LeftParen => ExprKind::Call(Box::new(left), self.arguments()?),
             TokenKind::LeftBracket => {
                 self.pos += 1;
-                let index = self.expression(0)?;
-                self.expect(TokenKind::RightBracket)?;
-                ExprKind::IndexAccess(Box::new(left), Box::new(index))
+                if self.take(TokenKind::RightBracket) {
+                    if self.current().kind != TokenKind::Assign || !assignable(&left) {
+                        return Err(Diagnostic::new(
+                            "empty [] is only valid as a list append target with '='",
+                            Span::new(start, self.tokens[self.pos - 1].span.end),
+                        ));
+                    }
+                    ExprKind::AppendAccess(Box::new(left))
+                } else {
+                    let index = self.expression(0)?;
+                    self.expect(TokenKind::RightBracket)?;
+                    ExprKind::IndexAccess(Box::new(left), Box::new(index))
+                }
             }
             TokenKind::Arrow => {
                 self.pos += 1;
@@ -826,7 +836,7 @@ fn statement_start(token: &TokenKind) -> bool {
 fn assignable(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::Variable(_) | ExprKind::PropertyAccess(..) => true,
-        ExprKind::IndexAccess(base, _) => assignable(base),
+        ExprKind::IndexAccess(base, _) | ExprKind::AppendAccess(base) => assignable(base),
         _ => false,
     }
 }

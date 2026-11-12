@@ -82,6 +82,102 @@ fn all_scalar_expressions_and_arithmetic_operators() {
 }
 
 #[test]
+fn list_growth_supports_empty_nested_and_indexed_targets_with_value_semantics() {
+    let (runtime, _, _) = execute(
+        r#"
+        $items = []; $first = ($items[] = 10); $items[1] = 20;
+        $copy = $items; $items[] = 30; $items[0] = 11;
+        $groups = [[], ["values" => []]];
+        $groups[0][] = 7; $groups[1]["values"][] = 8;
+        $groups[0][1] = 9;
+        function extend($values) { $values[] = 40; return $values; }
+        $extended = extend($items);
+        $left = []; $right = []; $left[] = $right[] = 5;
+        $snapshot = [1, 2]; foreach ($snapshot as $value) { $snapshot[] = $value; }
+    "#,
+    );
+    assert_int(&runtime, "first", 10);
+    for (name, expected) in [
+        ("items", vec![11, 20, 30]),
+        ("copy", vec![10, 20]),
+        ("extended", vec![11, 20, 30, 40]),
+        ("left", vec![5]),
+        ("right", vec![5]),
+        ("snapshot", vec![1, 2, 1, 2]),
+    ] {
+        assert_eq!(
+            runtime.get_global(name),
+            Some(&Value::List(expected.into_iter().map(Value::Int).collect())),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        runtime.get_global("groups"),
+        Some(&Value::List(vec![
+            Value::List(vec![Value::Int(7), Value::Int(9)]),
+            Value::Map(vec![(
+                MapKey::String("values".into()),
+                Value::List(vec![Value::Int(8)])
+            )]),
+        ]))
+    );
+}
+
+#[test]
+fn append_evaluates_targets_once_and_uses_the_list_after_rhs_side_effects() {
+    let (runtime, _, _) = execute(
+        r#"
+        function build() {
+            $items = []; $nested = [[]]; $calls = 0;
+            function index() { $calls += 1; return 0; }
+            function add() { $items[] = 1; return 2; }
+            $nested[index()][] = 7;
+            $items[] = add();
+            return [$items, $nested, $calls];
+        }
+        $result = build();
+    "#,
+    );
+    assert_eq!(
+        runtime.get_global("result"),
+        Some(&Value::List(vec![
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+            Value::List(vec![Value::List(vec![Value::Int(7)])]),
+            Value::Int(1),
+        ]))
+    );
+}
+
+#[test]
+fn invalid_list_growth_does_not_create_variables_or_intermediate_collections() {
+    for (source, message) in [
+        ("$missing[] = 1;", "undefined variable"),
+        ("$items = null; $items[] = 1;", "append requires a list"),
+        ("$items = 1; $items[] = 1;", "append requires a list"),
+        ("$items = [0 => 1]; $items[] = 1;", "append requires a list"),
+        ("$items = []; $items[-1] = 1;", "nonnegative int"),
+        ("$items = []; $items[\"0\"] = 1;", "nonnegative int"),
+        ("$items = []; $items[1] = 1;", "out of bounds"),
+        ("$items = []; $items[0] += 1;", "out of bounds"),
+        ("$items = []; $items[0][] = 1;", "out of bounds"),
+        ("$items = []; $items[0][0] = 1;", "out of bounds"),
+        (
+            "$items = [\"existing\" => []]; $items[\"missing\"][] = 1;",
+            "map key not found",
+        ),
+    ] {
+        assert!(failure(source).message.contains(message), "{source}");
+    }
+    let mut runtime = Runtime::new();
+    run(&mut runtime, "$items = [1];", &mut Vec::new()).unwrap();
+    assert!(run(&mut runtime, "$items[] = 1 / 0;", &mut Vec::new()).is_err());
+    assert_eq!(
+        runtime.get_global("items"),
+        Some(&Value::List(vec![Value::Int(1)]))
+    );
+}
+
+#[test]
 fn strict_equality_comparisons_and_short_circuiting() {
     let (runtime, _, _) = execute(
         r#"
@@ -342,7 +438,7 @@ fn collection_access_and_mutation_errors_are_actionable() {
         ("$a = [1]; $a[-1];", "nonnegative int"),
         ("$a = [1]; $a[1];", "out of bounds"),
         ("$a = [1]; $a[\"0\"];", "nonnegative int"),
-        ("$a = [1]; $a[1] = 2;", "out of bounds"),
+        ("$a = [1]; $a[2] = 2;", "out of bounds"),
         ("$a = [\"x\" => 1]; $a[\"y\"];", "key not found"),
         ("[true => 1];", "map keys"),
         ("$a = 1; $a[0];", "list or map"),
@@ -536,6 +632,21 @@ fn native_calls_static_calls_properties_and_identity_values() {
     )
     .unwrap();
     assert_int(&runtime, "prop", 7);
+    run(
+        &mut runtime,
+        "$object->name[] = 8; $object->name[3] = 9;",
+        &mut Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        *object.name.borrow(),
+        Value::List(vec![
+            Value::Int(7),
+            Value::Int(2),
+            Value::Int(8),
+            Value::Int(9)
+        ])
+    );
 }
 
 #[test]

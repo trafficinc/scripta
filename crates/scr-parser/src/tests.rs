@@ -214,6 +214,44 @@ fn lists_maps_and_nesting() {
 }
 
 #[test]
+fn append_targets_are_write_only_and_keep_their_spans() {
+    for source in [
+        "$items[] = 1",
+        "$groups[0][] = $other[] = 2",
+        "$object->items[] = 3",
+    ] {
+        let expr = expression(source);
+        let ExprKind::Assignment(target, AssignmentOp::Assign, _) = expr.kind else {
+            panic!("expected assignment: {source}")
+        };
+        assert!(matches!(target.kind, ExprKind::AppendAccess(_)));
+        assert_eq!(
+            &source[..target.span.end - 6],
+            source.split(" =").next().unwrap()
+        );
+    }
+    for source in [
+        "$items[]",
+        "$items[] += 1",
+        "$items[] .= 'x'",
+        "$items[][] = 1",
+        "$items[][0] = 1",
+        "$items[]->name = 1",
+        "f($items[])",
+        "[1][] = 2",
+        "make()[] = 2",
+        "($items[]) = 1",
+    ] {
+        let tokens = scr_lexer::lex(&format!("<?scr {source}")).unwrap();
+        let error = parse_expression(&tokens).unwrap_err();
+        assert!(
+            error.message.contains("list append target"),
+            "{source}: {error:?}"
+        );
+    }
+}
+
+#[test]
 fn user_examples_parse_without_evaluation() {
     let source = r#"<?scr
 $count = 10;
@@ -274,7 +312,7 @@ fn syntax_errors_have_useful_spans_and_messages() {
         ("$a->1", "expected identifier", "1"),
         ("$a::run()", "namespace identifier", "$a"),
         ("Process::run", "expected LeftParen", ""),
-        ("$a[]", "expected expression", "]"),
+        ("$a[]", "list append target", "$a[]"),
         ("f(1,)", "expected expression", ")"),
         ("[1, 2 => 3]", "cannot mix", "=>"),
         ("[1 => 2, 3]", "expected FatArrow", "]"),

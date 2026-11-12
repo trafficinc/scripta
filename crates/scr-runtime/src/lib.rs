@@ -110,6 +110,7 @@ enum Root {
 struct Place {
     root: Root,
     path: Vec<Value>,
+    append: bool,
 }
 
 impl Runtime {
@@ -706,6 +707,9 @@ impl Runtime {
                 let index = self.evaluate(index, output)?;
                 self.checked(ops::index(&base, &index), expr.span)
             }
+            ExprKind::AppendAccess(_) => {
+                self.fail("cannot read from a list append target", expr.span)
+            }
             ExprKind::List(items) => {
                 let value = Value::List(
                     items
@@ -905,12 +909,25 @@ impl Runtime {
                     name: name.clone(),
                 },
                 path: Vec::new(),
+                append: false,
             }),
             ExprKind::IndexAccess(base, index) => {
                 let mut place = self.place(base, output)?;
                 // Reading the base rejects implicit creation of indexed variables.
                 self.check_place(&place, base.span)?;
                 place.path.push(self.evaluate(index, output)?);
+                Ok(place)
+            }
+            ExprKind::AppendAccess(base) => {
+                let mut place = self.place(base, output)?;
+                let is_list = match self.variable_ref(&place, base.span)? {
+                    Some(value) => matches!(value, Value::List(_)),
+                    None => matches!(self.read_place(&place, base.span)?, Value::List(_)),
+                };
+                if !is_list {
+                    return self.fail("list append requires a list", target.span);
+                }
+                place.append = true;
                 Ok(place)
             }
             ExprKind::PropertyAccess(base, name) => {
@@ -923,6 +940,7 @@ impl Runtime {
                         name: name.clone(),
                     },
                     path: Vec::new(),
+                    append: false,
                 })
             }
             _ => self.fail("invalid assignment target", target.span),
@@ -999,6 +1017,12 @@ impl Runtime {
         output: &mut impl Write,
     ) -> Result<Value> {
         let place = self.place(target, output)?;
+        if place.append && op != AssignmentOp::Assign {
+            return self.fail(
+                "list append requires plain assignment with '='",
+                target.span,
+            );
+        }
         // Only pure RHS expressions can use the existing string buffer: a call
         // or assignment could mutate the LHS after its original value was read.
         if !retain && op == AssignmentOp::Concat && pure(rhs) && place.path.is_empty() {
@@ -1084,10 +1108,14 @@ impl Runtime {
         }
     }
     fn write_place(&mut self, place: &Place, replacement: Value, span: Span) -> Result<()> {
-        self.validate_value(&replacement, place.path.len(), span)?;
+        self.validate_value(
+            &replacement,
+            place.path.len() + usize::from(place.append),
+            span,
+        )?;
         match &place.root {
             Root::Variable { scope, name } => {
-                if place.path.is_empty() {
+                if place.path.is_empty() && !place.append {
                     self.environments
                         .scope_mut(*scope)
                         .variables
@@ -1103,7 +1131,10 @@ impl Runtime {
                         .get(name)
                         .unwrap()
                         .clone();
-                    self.checked(ops::set_index(&mut value, &place.path, replacement), span)?;
+                    self.checked(
+                        ops::set_index(&mut value, &place.path, replacement, place.append),
+                        span,
+                    )?;
                     self.validate_value(&value, 0, span)?;
                     self.environments
                         .scope_mut(*scope)
@@ -1119,15 +1150,19 @@ impl Runtime {
                         .unwrap(),
                     &place.path,
                     replacement,
+                    place.append,
                 );
                 self.checked(result, span)
             }
             Root::Property { object, name } => {
-                if place.path.is_empty() {
+                if place.path.is_empty() && !place.append {
                     return self.property_result(object.set_property(name, replacement), span);
                 }
                 let mut value = self.property_result(object.get_property(name), span)?;
-                self.checked(ops::set_index(&mut value, &place.path, replacement), span)?;
+                self.checked(
+                    ops::set_index(&mut value, &place.path, replacement, place.append),
+                    span,
+                )?;
                 self.validate_value(&value, 0, span)?;
                 self.property_result(object.set_property(name, value), span)
             }

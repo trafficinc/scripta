@@ -1,0 +1,14 @@
+<?scr
+
+// Parse a small status record and normalize it for a CLI report.
+$raw = "  INFO | café-api | ready  ";
+$fields = String::split(String::trim($raw), " | ");
+$level = String::lower($fields[0]);
+$service = String::replace($fields[1], "-", "_");
+$message = String::upper($fields[2]);
+
+echo String::join([$level, $service, $message], ": ") . "\n";
+echo "Service prefix: " . String::substring($service, 0, 4) . "\n";
+echo "Contains api: " . str(String::contains($service, "api")) . "\n";
+echo "Starts with café: " . str(String::startsWith($service, "café")) . "\n";
+echo "Ends with _api: " . str(String::endsWith($service, "_api")) . "\n";

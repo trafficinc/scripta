@@ -1,0 +1,7 @@
+# Sample data for log-analyzer.scr
+INFO | café-api | started
+warn | worker | retry scheduled
+ERROR | café-api | upstream unavailable
+info | auth | login accepted
+info | worker | finished
+malformed record

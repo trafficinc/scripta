@@ -6,6 +6,7 @@ use scr_runtime::{
 };
 use std::time::{Duration, Instant};
 mod cli;
+mod collections;
 mod date;
 mod environment;
 pub mod filesystem;
@@ -14,6 +15,7 @@ mod json;
 pub mod log;
 mod paths;
 pub mod process;
+mod strings;
 mod system;
 pub use filesystem::FilesystemPolicy;
 
@@ -99,6 +101,8 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
     let module_policy = options.filesystem.clone().prepare()?;
     runtime.set_module_policy(move |path| module_policy.check_path(path, false));
     json::register(runtime)?;
+    strings::register(runtime)?;
+    collections::register(runtime)?;
     http::register(runtime, options.http)?;
     filesystem::register(runtime, options.filesystem.clone())?;
     system::register(runtime, options.filesystem.clone())?;

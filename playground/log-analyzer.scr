@@ -1,0 +1,41 @@
+<?scr
+
+// Usage: scr run playground/log-analyzer.scr playground/sample-events.txt
+$path = Cli::arg(0);
+if ($path === null) {
+    echo "Usage: scr run playground/log-analyzer.scr <events-file>\n";
+    exit(2);
+}
+
+$counts = Map::create();
+$services = [];
+$malformed = 0;
+$lines = String::split(File::read($path), "\n");
+foreach ($lines as $line) {
+    $line = String::trim($line);
+    if ($line === "" || String::startsWith($line, "#")) {
+        continue;
+    }
+    $fields = String::split($line, "|");
+    if (len($fields) !== 3) {
+        $malformed += 1;
+        continue;
+    }
+    $level = String::lower(String::trim($fields[0]));
+    $service = String::trim($fields[1]);
+    $message = String::trim($fields[2]);
+    if (!List::contains(["info", "warn", "error"], $level) || $service === "" || $message === "") {
+        $malformed += 1;
+        continue;
+    }
+    $counts[$level] = Map::get($counts, $level, 0) + 1;
+    if (!List::contains($services, $service)) {
+        $services[] = $service;
+    }
+}
+
+echo "Services: " . String::join(List::sort($services), ", ") . "\n";
+foreach (["info", "warn", "error"] as $level) {
+    echo $level . ": " . str(Map::get($counts, $level, 0)) . "\n";
+}
+echo "Malformed: " . str($malformed) . "\n";

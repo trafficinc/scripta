@@ -138,22 +138,36 @@ pub(crate) fn set_index(
     value: &mut Value,
     path: &[Value],
     replacement: Value,
+    append: bool,
 ) -> Result<(), String> {
     let Some((key, rest)) = path.split_first() else {
+        if append {
+            let Value::List(items) = value else {
+                return Err("list append requires a list".into());
+            };
+            items.try_reserve(1).map_err(|_| "list allocation failed")?;
+            items.push(replacement);
+            return Ok(());
+        }
         *value = replacement;
         return Ok(());
     };
     match value {
         Value::List(items) => {
             let index = list_index(key)?;
+            if index == items.len() && rest.is_empty() && !append {
+                items.try_reserve(1).map_err(|_| "list allocation failed")?;
+                items.push(replacement);
+                return Ok(());
+            }
             let item = items.get_mut(index).ok_or("list index out of bounds")?;
-            set_index(item, rest, replacement)
+            set_index(item, rest, replacement, append)
         }
         Value::Map(entries) => {
             let key = crate::MapKey::from_value(key.clone())?;
             if let Some((_, item)) = entries.iter_mut().find(|(candidate, _)| candidate == &key) {
-                set_index(item, rest, replacement)
-            } else if rest.is_empty() {
+                set_index(item, rest, replacement, append)
+            } else if rest.is_empty() && !append {
                 entries.push((key, replacement));
                 Ok(())
             } else {
