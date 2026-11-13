@@ -1,5 +1,9 @@
 # Standard library
 
+The optional [SQLite extension](sqlite.md) registers `Sqlite::open`, `execute`,
+`query`, and `close` when the CLI is built with `--features sqlite`. These four
+functions are separate from the default standard-library export index below.
+
 The standard library registers functions through the public runtime native API.
 Scalar built-ins take exactly one positional argument. Invalid counts, types, and
 conversion values raise catchable `TypeError` exceptions with script call spans

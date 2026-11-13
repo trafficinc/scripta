@@ -33,6 +33,9 @@ pub fn run_with_options(
     });
     scr_stdlib::register(&mut runtime)
         .map_err(|error| Diagnostic::new(error.to_string(), Default::default()))?;
+    #[cfg(feature = "sqlite")]
+    scr_ext_sqlite::register(&mut runtime)
+        .map_err(|error| Diagnostic::new(error.to_string(), Default::default()))?;
     runtime.execute_source(source, output)
 }
 

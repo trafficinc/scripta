@@ -39,12 +39,17 @@ fn main() -> ExitCode {
         }
         Command::VersionVerbose => {
             println!(
-                "scr {}\ntarget: {}\nprofile: {}\ncompiler: {}\ncommit: {}",
+                "scr {}\ntarget: {}\nprofile: {}\ncompiler: {}\ncommit: {}\nextensions: {}",
                 env!("CARGO_PKG_VERSION"),
                 env!("SCR_TARGET"),
                 env!("SCR_PROFILE"),
                 env!("SCR_COMPILER"),
-                env!("SCR_COMMIT")
+                env!("SCR_COMMIT"),
+                if cfg!(feature = "sqlite") {
+                    "sqlite"
+                } else {
+                    "none"
+                }
             );
             return ExitCode::SUCCESS;
         }

@@ -604,8 +604,6 @@ callback-based collection transforms and pop remain future work.
 List and map helpers for removal, slicing, concatenation, membership, sorting,
 construction, projection, and safe lookup are implemented.
 List growth through `[] =` and assignment at the current length is implemented.
-See the [basics review](../README.md#current-gaps-in-language-basics) for suggested
-priorities within the CLI automation direction.
 
 
 ## Local script loading

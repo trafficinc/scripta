@@ -54,7 +54,14 @@ fn run() -> Result<()> {
         }
     }
     let allowed: &[&str] = match command.as_str() {
-        "package" => &["--binary", "--target", "--out-dir", "--epoch", "--tag"],
+        "package" => &[
+            "--binary",
+            "--target",
+            "--out-dir",
+            "--epoch",
+            "--tag",
+            "--features",
+        ],
         "verify" | "smoke" => &["--archive"],
         "checksums" | "verify-checksums" => &["--dir"],
         "version" => &[],
@@ -87,6 +94,7 @@ fn run() -> Result<()> {
                 target,
                 Path::new(required(&args, "--out-dir")?),
                 epoch,
+                args.get("--features").map(String::as_str),
             )?;
             println!("{}", output.display());
         }
@@ -163,18 +171,24 @@ fn supplemental_notices(
     );
     Ok(entries.len())
 }
-fn notices(files: &mut BTreeMap<String, Vec<u8>>, target: &str) -> Result<()> {
-    let output = Command::new("cargo")
-        .current_dir(root())
-        .args([
-            "metadata",
-            "--locked",
-            "--format-version",
-            "1",
-            "--filter-platform",
-            target,
-        ])
-        .output()?;
+fn notices(
+    files: &mut BTreeMap<String, Vec<u8>>,
+    target: &str,
+    features: Option<&str>,
+) -> Result<()> {
+    let mut command = Command::new("cargo");
+    command.current_dir(root()).args([
+        "metadata",
+        "--locked",
+        "--format-version",
+        "1",
+        "--filter-platform",
+        target,
+    ]);
+    if let Some(features) = features {
+        command.args(["--features", &format!("scr-cli/{features}")]);
+    }
+    let output = command.output()?;
     if !output.status.success() {
         return Err(fail(
             "cargo metadata failed while collecting dependency notices",
@@ -299,7 +313,16 @@ fn notices(files: &mut BTreeMap<String, Vec<u8>>, target: &str) -> Result<()> {
     files.insert("THIRD_PARTY_NOTICES.txt".into(), index.into_bytes());
     Ok(())
 }
-fn package(binary: &Path, target: &str, out: &Path, epoch: u32) -> Result<PathBuf> {
+fn package(
+    binary: &Path,
+    target: &str,
+    out: &Path,
+    epoch: u32,
+    features: Option<&str>,
+) -> Result<PathBuf> {
+    if features.is_some_and(|features| features != "sqlite") {
+        return Err(fail("supported optional release features: sqlite"));
+    }
     let mut files = BTreeMap::new();
     let name = if target.contains("windows") {
         "scr.exe"
@@ -312,12 +335,17 @@ fn package(binary: &Path, target: &str, out: &Path, epoch: u32) -> Result<PathBu
     }
     collect(&root().join("docs"), "docs", &mut files)?;
     collect(&root().join("examples"), "examples", &mut files)?;
-    notices(&mut files, target)?;
+    notices(&mut files, target, features)?;
     let inventory: BTreeMap<_, _> = files
         .iter()
         .map(|(name, data)| (name.clone(), digest(data)))
         .collect();
-    let manifest = json!({"version":VERSION,"target":target,"binary":name,"binary_sha256":digest(&files[name]),"source_date_epoch":epoch,"files":inventory,"validation":"see the per-target validation record; archive creation alone is not platform support"});
+    let extensions = if features == Some("sqlite") {
+        vec!["sqlite"]
+    } else {
+        vec![]
+    };
+    let manifest = json!({"version":VERSION,"target":target,"binary":name,"binary_sha256":digest(&files[name]),"source_date_epoch":epoch,"extensions":extensions,"files":inventory,"validation":"see the per-target validation record; archive creation alone is not platform support"});
     files.insert(
         "release.json".into(),
         [serde_json::to_vec_pretty(&manifest)?, vec![b'\n']].concat(),
@@ -483,6 +511,11 @@ fn read_verified(path: &Path) -> Result<(String, Value, BTreeMap<String, Vec<u8>
     if !TARGETS.contains(&target) || prefix != format!("scripta-{version}-{target}/") {
         return Err(fail("invalid release identity"));
     }
+    if let Some(extensions) = manifest.get("extensions") {
+        if extensions != &json!([]) && extensions != &json!(["sqlite"]) {
+            return Err(fail("invalid release extension list"));
+        }
+    }
     let inventory = manifest["files"].as_object().ok_or("inventory missing")?;
     if files.len() != inventory.len() + 1 {
         return Err(fail("release file inventory differs"));
@@ -595,6 +628,23 @@ fn smoke(path: &Path) -> Result<()> {
     {
         return Err(fail("executable target/version differs from manifest"));
     }
+    if let Some(extensions) = manifest["extensions"].as_array() {
+        let expected = if extensions.is_empty() {
+            "extensions: none"
+        } else {
+            "extensions: sqlite"
+        };
+        if !text.lines().any(|line| line == expected) {
+            return Err(fail(
+                "executable extensions differ from manifest; package with matching --features",
+            ));
+        }
+        if !extensions.is_empty()
+            && execute(&["run", "examples/sqlite.scr"])?.stdout != "1: Ada\n2: 世界\n".as_bytes()
+        {
+            return Err(fail("packaged SQLite example output differs"));
+        }
+    }
     for (name, expected) in [
         ("hello.scr", "Hello, Scripta!\n"),
         ("variables.scr", "Checking Production...\nDisk usage: 85%\n"),
@@ -652,6 +702,22 @@ mod tests {
             });
             fs::write(&path, first)?;
             read_verified(&path)?;
+            for (extensions, valid) in [
+                (json!([]), true),
+                (json!(["sqlite"]), true),
+                (json!(["unknown"]), false),
+                (json!("sqlite"), false),
+            ] {
+                let mut declared = manifest.clone();
+                declared["extensions"] = extensions;
+                files.insert("release.json".into(), serde_json::to_vec(&declared)?);
+                fs::write(
+                    &path,
+                    archive(&files, &base, target.contains("windows"), 1234)?,
+                )?;
+                assert_eq!(read_verified(&path).is_ok(), valid);
+            }
+            files.insert("release.json".into(), serde_json::to_vec(&manifest)?);
             files.insert(binary.into(), b"corrupted".to_vec());
             fs::write(
                 &path,
