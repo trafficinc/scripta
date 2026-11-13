@@ -26,6 +26,72 @@ fn error(runtime: &mut Runtime, source: &str, kind: &str) {
         "{source}: {failure}"
     );
 }
+
+#[test]
+fn terminal_queries_report_process_handles_without_consuming_injected_input() {
+    use std::io::IsTerminal;
+    let mut rt = runtime(&["--color=never"]);
+    rt.set_input_stream(Cursor::new(b"still available\n".to_vec()));
+    rt.set_error_stream(Vec::new());
+    let mut output = Vec::new();
+    run(
+        &mut rt,
+        r#"Env::set("NO_COLOR", "1");
+        $input = Cli::isTerminal("stdin");
+        $output = Cli::isTerminal("stdout");
+        $error = Cli::isTerminal("stderr");
+        $line = Cli::readLine();"#,
+        &mut output,
+    )
+    .unwrap();
+    for (name, expected) in [
+        ("input", std::io::stdin().is_terminal()),
+        ("output", std::io::stdout().is_terminal()),
+        ("error", std::io::stderr().is_terminal()),
+    ] {
+        assert_eq!(rt.get_global(name), Some(&Value::Bool(expected)));
+    }
+    assert_eq!(
+        rt.get_global("line"),
+        Some(&Value::String("still available".into()))
+    );
+    assert!(output.is_empty());
+}
+
+#[test]
+fn terminal_queries_validate_stream_names_types_and_arity() {
+    let mut rt = runtime(&[]);
+    for source in [
+        r#"Cli::isTerminal("");"#,
+        r#"Cli::isTerminal("STDOUT");"#,
+        r#"Cli::isTerminal(" stdout");"#,
+        r#"Cli::isTerminal("stdout ");"#,
+        r#"Cli::isTerminal("file");"#,
+        "Cli::isTerminal();",
+        "Cli::isTerminal(1);",
+        "Cli::isTerminal(null);",
+        "Cli::isTerminal(true);",
+        "Cli::isTerminal([]);",
+        r#"Cli::isTerminal("stdout", "stderr");"#,
+    ] {
+        error(&mut rt, source, "TypeError");
+    }
+}
+
+#[test]
+fn terminal_queries_do_not_require_input_or_prompt_permissions() {
+    let mut options = RuntimeOptions::default();
+    options.context.permissions.allowed.remove("cli.read");
+    options.context.permissions.allowed.remove("cli.prompt");
+    let mut rt = Runtime::with_options(options);
+    scr_stdlib::register(&mut rt).unwrap();
+    run(
+        &mut rt,
+        r#"Cli::isTerminal("stdin"); Cli::isTerminal("stdout"); Cli::isTerminal("stderr");"#,
+        &mut Vec::new(),
+    )
+    .unwrap();
+}
 #[test]
 fn environment_roundtrip_removal_and_snapshot_are_runtime_local() {
     let original = std::env::var_os("SCR_PHASE9_LOCAL_TEST");
