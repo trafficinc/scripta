@@ -1,0 +1,21 @@
+<?scr
+// Build with: cargo run -p scr-cli --features sqlite -- examples/sqlite.scr
+$db = Sqlite::open(":memory:");
+try {
+    Sqlite::execute($db, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");
+    Sqlite::execute($db, "BEGIN");
+    try {
+        Sqlite::execute($db, "INSERT INTO users (name) VALUES (?)", ["Ada"]);
+        Sqlite::execute($db, "INSERT INTO users (name) VALUES (?)", ["世界"]);
+        Sqlite::execute($db, "COMMIT");
+    } catch ($error) {
+        Sqlite::execute($db, "ROLLBACK");
+        throw $error;
+    }
+    $rows = Sqlite::query($db, "SELECT id, name FROM users ORDER BY id");
+    foreach ($rows as $row) {
+        echo str($row["id"]) . ": " . $row["name"] . "\n";
+    }
+} finally {
+    Sqlite::close($db);
+}

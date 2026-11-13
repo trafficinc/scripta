@@ -10,6 +10,7 @@ package or source checkout; sample input directories must already exist.
 | variables.scr | `scr examples/variables.scr` | Explicit values, concatenation and conversion. |
 | loops.scr | `scr examples/loops.scr` | Prints 1, 2, 3 on separate lines. |
 | functions.scr | `scr examples/functions.scr` | Typed function arguments/returns; greeting and addition. |
+| sqlite.scr | `cargo run -p scr-cli --features sqlite -- examples/sqlite.scr` | Optional built-in SQLite: in-memory database, bound parameters, transaction, and query rows. |
 | file-organizer.scr | `scr examples/file-organizer.scr downloads organized` | Previews shallow file moves grouped by extension; --apply performs them, refusing collisions. |
 | log-cleaner.scr | `scr examples/log-cleaner.scr logs --days=30` | Previews regular .log files older than the threshold; --apply deletes only those files. |
 | directory-backup.scr | `scr examples/directory-backup.scr documents backup-new` | Previews recursive copying to a new destination with an existing parent, outside the source tree; --apply copies bytes without overwrite. |

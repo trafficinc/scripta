@@ -39,6 +39,9 @@ includes `str`, `int`, `float`, `bool`, `type`, `len`, and `sleep`. See the
 [registration guide](standard-library.md#registering-rust-modules) for new Rust modules.
 For a complete crate, optional Cargo feature, CLI wiring, and testing walkthrough,
 see [Writing built-in extensions](writing-extensions.md).
+The [SQLite extension](sqlite.md) is the first optional built-in crate; use
+`--features sqlite` for CLI builds and `--all-features` for extension-inclusive
+workspace validation. SQLite-enabled builds need a C compiler.
 `File`, `Dir`, and `Path` provide filesystem operations and optional root policies;
 filesystem tests live in `crates/scr-stdlib/tests` and use temporary directories.
 Process/Env/Cli now support owned children, literal arguments, bounded output,

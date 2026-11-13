@@ -51,6 +51,44 @@ The `examples/packages` demonstration installs with `--locked --offline`, prints
 `Hello, packages!`, and both scripts pass `scr fmt --check`. Linux/Windows
 execution remains for CI; these results do not establish a passing CI run.
 
+### SQLite built-in extension (separate approved scope)
+
+**Approval to start:** The user said "ok do it" after approving the plan for an
+optional built-in SQLite crate, bound parameters, queries, transactions, resource
+cleanup, permissions, limits, tests, and release instructions. This does not
+approve proposed Phase 7.
+
+**Status:** Ready for review.
+
+`scr-ext-sqlite` now provides `Sqlite::open`, `execute`, `query`, and `close`.
+The CLI's disabled-by-default `sqlite` feature includes bundled SQLite and
+registers the functions per runtime. See [SQLite](sqlite.md) for types, error
+categories, read-only mode, root policies, bounded/cancellable statements, and
+unsupported SQL features. `examples/sqlite.scr` demonstrates parameters and a
+transaction. Verbose version output reports extensions; the release packager
+accepts `--features sqlite`, includes matching notices, records extensions, and
+checks the enabled SQL example during smoke validation.
+
+**Validation:** On macOS ARM64, both
+`cargo test --workspace --all-features --locked --offline` and
+`cargo test --workspace --no-default-features --locked --offline` passed, run
+sequentially so CLI binaries from different feature configurations do not race.
+Existing HTTP fixtures require local port access. Eleven extension integration
+tests cover conversions, parameter binding, constraints, transaction counts,
+read-only connections, locking, roots and symlinks, denied SQL, limits,
+cancellation, cleanup, and handle ownership. CLI tests cover both feature
+configurations and repeat pipeline registration.
+
+`cargo +1.85.0 check -p scr-ext-sqlite --locked --offline`,
+`cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings`,
+`cargo fmt --all -- --check`, `git diff --check`, and the SQLite example's
+`scr fmt --check` passed. Targeted release/extension tests passed after adding
+extension-list archive validation and dangling-symlink coverage. A local archive
+made from the debug SQLite-enabled binary passed verify and offline smoke;
+its declared extensions and rusqlite/libsqlite3-sys license inventories were
+checked. This is local development evidence, not a dist-profile release or
+Linux/Windows CI result.
+
 ## Work already implemented
 
 List growth supports `$items[] = value`, assignment at exactly the list's current

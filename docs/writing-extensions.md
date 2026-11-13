@@ -5,6 +5,9 @@ Scripta's existing native registration API to expose functions and host objects.
 There is no additional extension framework to implement or runtime loader to
 configure. The standard library uses this same API.
 
+The optional [SQLite extension](sqlite.md), implemented in `crates/scr-ext-sqlite`,
+provides a complete stateful example with runtime-owned handles and resource limits.
+
 This guide adds a small optional `Greeting::hello(name)` extension in a source
 checkout. The crate, feature, and function below are tutorial additions; they
 are not shipped or enabled by the current CLI. Keep the pinned Rust toolchain
@@ -319,7 +322,7 @@ cargo build -p scr-cli --release --locked --features greeting
 Users need that rebuilt `scr` executable. Installing a script library with
 `scr add` cannot enable a Cargo feature, compile a native extension, or replace
 the interpreter. Document which extensions each binary includes; the current CLI
-does not provide a general extension-list command. Scripts using an unavailable
+reports built-in extensions in `scr version --verbose`. Scripts using an unavailable
 extension fail when they call its native functions.
 
 Built-in extension crates can live in this repository or in separate repositories

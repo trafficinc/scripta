@@ -51,6 +51,8 @@ generated HTML or JSON through an existing web server when you need a dashboard.
   captures, local `require` / `require_once`, and versioned Git/local packages.
 - **Developer tools:** syntax checks, a comment-preserving formatter, error codes,
   source locations, and runtime stack traces.
+- **Optional SQLite:** build with `--features sqlite` for parameterized SQL,
+  transactions, and bounded query results. See the [SQLite extension](docs/sqlite.md).
 - **A standalone interpreter:** the installed executable uses platform system
   libraries. Local scripts need no Python, Node.js, PHP, Docker, Rust, or network.
 
@@ -402,51 +404,6 @@ The [example guide](examples/README.md) also covers file organizing, log cleanup
 directory backups, server health, HTTP requests, and command execution.
 File-changing automation examples preview their work and require `--apply` to
 perform changes. The older `organize.scr` example moves files immediately.
-
-## Current gaps in language basics
-
-The six [CLI development phases](docs/cli-roadmap.md) are implemented and
-accepted. Further feature work requires a new scope decision; the roadmap records
-the CLI review and a proposed next phase.
-
-Scripta already has string and collection utilities, scalar values, lists/maps,
-nested indexing, list appends,
-conditions, `for` / `while` / `foreach`, functions with optional type annotations,
-lexical captures, `try` / `catch` / `finally` / `throw`, bounded file streams,
-local script loading, and JSON.
-The following review identifies useful additions for CLI automation. Priorities
-are suggestions, not release commitments; the
-[language specification](docs/language-spec.md) and
-[standard-library index](docs/standard-library.md#release-010-export-index)
-define current support.
-
-| Suggested priority | Missing basics | Current behavior or workaround |
-| --- | --- | --- |
-| Medium | Pop and callback-based map/filter/reduce | List removal, slicing, concatenation, sorting, and membership are implemented. Use loops and new lists to filter or rebuild collections. |
-| Lower | Null fallback syntax | `Map::has` and `Map::get` provide safe key lookups. No `??`, `isset`, or null-safe access syntax. Direct missing-key indexing raises catchable `IndexError`. |
-| Lower | Powers and random numbers | `Math` supplies abs, min/max, floor, ceil, and round; powers and random APIs remain deferred. |
-| Lower | Named arguments, arrow functions, and call-site unpacking | Default and variadic parameters and `function (...) { ... }` literals are supported. Calls still use positional arguments; `...` declares a variadic parameter and does not unpack arguments at a call site. |
-| Lower | String interpolation and advanced formatting | `String::format(template, values)` supports sequential `{}` scalar placeholders and escaped braces. Interpolation, width, and precision syntax remain deferred. |
-| Lower | General resource-management syntax | `finally` supports cleanup for ordinary completion, failures, and control flow, under existing execution limits. Fatal limits and cancellation bypass script cleanup; `defer` and general resource-management syntax remain deferred. |
-| Lower | Writable streams and iterator syntax | `File::openLines`, `readLine`, and `close` support bounded UTF-8 line reading; whole-file helpers remain available. Writable streams and iterator syntax remain deferred. |
-| Lower | Convenience syntax: ternary expressions, `switch` / `match`, `++` / `--`, `%=` | Use `if` / `elseif` / `else`, `+= 1`, `-= 1`, and `$value = $value % divisor`. |
-
-String utilities are complete in [Phase 1](docs/cli-roadmap.md#phase-1-strings).
-Collection helpers are complete in [Phase 2](docs/cli-roadmap.md#phase-2-collections-and-maps).
-Catchable core indexing, arithmetic, and operand-type errors are complete in
-[Phase 3](docs/cli-roadmap.md#phase-3-recoverable-errors). Default/variadic
-parameters and anonymous functions are implemented in
-[Phase 4](docs/cli-roadmap.md#phase-4-functions). Math and bounded formatting are
-complete in [Phase 5](docs/cli-roadmap.md#phase-5-math-and-formatting). Cleanup and
-bounded line streams are implemented in
-[Phase 6](docs/cli-roadmap.md#phase-6-cleanup-and-streaming); all six phases are accepted.
-The playgrounds demonstrate each phase. Runtime safety limits and cancellation
-continue to bypass catches.
-Regex support, Unicode normalization, and string indexing remain outside these phases.
-
-Strict booleans, explicit conversions, collection value semantics, and block
-scope are existing language choices. Classes and a web
-runtime are separate scope decisions rather than prerequisites for CLI scripts.
 
 ## Limits and diagnostics
 

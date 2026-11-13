@@ -23,7 +23,7 @@ The workflow remaps the checkout path, embeds the commit supplied explicitly by
 SCR_BUILD_COMMIT, and normalizes archive metadata. A local build without an explicit
 commit reports `unknown`, rather than implying a clean/reproducible source revision.
 `scr version` retains the simple version line; `scr version --verbose` adds target,
-Cargo's base profile, compiler, and explicit commit metadata.
+Cargo's base profile, compiler, explicit commit metadata, and built-in extensions.
 
 Archives sort file entries, normalize permissions/ownership, and use a numeric
 SOURCE_DATE_EPOCH (the commit timestamp in CI; default 0 locally). Gzip header
@@ -82,6 +82,13 @@ candidate names are rejected. `--tag v0.1.0` validates tag/version agreement.
 `--epoch NUMBER` overrides the archive epoch for reproducibility testing. The
 maintainer-only scr-release tool requires Rust and cached/fetched crate metadata;
 it is not included in or required by the installed scr interpreter.
+
+For a SQLite-enabled variant, build the CLI with `--features sqlite` and pass
+`--features sqlite` to the `scr-release package` subcommand as well. This selects
+the matching dependency notices and records the extension in `release.json`.
+Smoke checks the executable's reported extension list and runs the SQLite example
+for enabled archives. Use a separate output directory for each variant; archive
+names do not encode features. See the [SQLite release instructions](sqlite.md#validation-and-release-builds).
 
 SHA-256 sidecars contain `hex  filename` in the standard checksum format.
 `checksums --dir` writes a sorted manifest for every archive in that directory;
