@@ -45,7 +45,7 @@ pub struct RuntimeOptions {
     /// Optional execution budget, reset for each execute call.
     pub instruction_limit: Option<u64>,
     pub context: ContextOptions,
-    /// Logical bytes per value, including collection slots and string contents.
+    /// Logical bytes per value, including collection slots, string/byte contents, and reported native payloads.
     /// None preserves unrestricted payload sizes; this is not a process heap cap.
     pub max_value_bytes: Option<usize>,
     /// Live lexical scopes, including retained closure environments and globals.
@@ -91,9 +91,9 @@ pub struct Runtime {
     error_stream: Option<Box<dyn Write>>,
     input_stream: Option<Box<dyn std::io::BufRead>>,
     source: Option<Arc<SourceFile>>,
-    loaded_modules: std::collections::HashSet<std::path::PathBuf>,
     active_modules: Vec<std::path::PathBuf>,
     module_policy: Option<Rc<modules::ModulePolicy>>,
+    module_resolver: Option<Rc<modules::ModuleResolver>>,
 }
 
 /// A resolved assignment target. Index expressions and object receivers are
@@ -146,8 +146,17 @@ impl Runtime {
                 self.error("execution instruction limit exceeded", span),
             ));
         }
+        self.environments.collect_if_needed();
         self.steps = self.steps.saturating_add(1);
         Ok(())
+    }
+
+    /// Reclaim unreachable captured lexical scopes and return the number reclaimed.
+    /// Globals, active calls, and callable Values retained by hosts stay alive.
+    /// Native-held callbacks are conservative roots; opaque native ownership cycles
+    /// are not collected. Freed storage may remain resident in the allocator.
+    pub fn collect_garbage(&mut self) -> usize {
+        self.environments.collect()
     }
 
     /// Register a native implementation with a required positional signature.
@@ -206,6 +215,14 @@ impl Runtime {
                 "RegistryError",
                 format!("invalid native function name {name}"),
             ));
+        }
+        if let Some((namespace, _)) = name.split_once("::") {
+            if self.environments.has_alias(namespace) {
+                return Err(NativeError::new(
+                    "RegistryError",
+                    format!("namespace {namespace} is already a module alias"),
+                ));
+            }
         }
         let functions = &mut self.environments.scope_mut(0).functions;
         if functions.contains_key(&name) {
@@ -271,6 +288,7 @@ impl Runtime {
         program: &Program,
         output: &mut impl Write,
     ) -> std::result::Result<u8, RuntimeError> {
+        self.collect_garbage();
         self.steps = 0;
         if self
             .options
@@ -331,9 +349,10 @@ impl Runtime {
         if let Some(path) = entry {
             self.active_modules.pop();
             if result.is_ok() {
-                self.loaded_modules.insert(path);
+                self.environments.scope_mut(0).loaded_modules.insert(path);
             }
         }
+        self.collect_garbage();
         result
     }
 
@@ -415,7 +434,7 @@ impl Runtime {
     fn statement(&mut self, statement: &Statement, output: &mut impl Write) -> Result<()> {
         self.checkpoint(statement.span)?;
         match &statement.kind {
-            StatementKind::Require { path, once } => {
+            StatementKind::Require { path, once, alias } => {
                 let value = self.evaluate(path, output)?;
                 let Value::String(path_value) = value else {
                     return Err(self.native_error(
@@ -423,7 +442,7 @@ impl Runtime {
                         path.span,
                     ));
                 };
-                self.require_module(&path_value, *once, statement.span, output)?;
+                self.require_module(&path_value, *once, alias.as_ref(), statement.span, output)?;
             }
             StatementKind::Expression(expr) => {
                 if let ExprKind::Assignment(target, op, rhs) = &expr.kind {
@@ -715,9 +734,26 @@ impl Runtime {
                 arguments,
             } => {
                 let ExprKind::Identifier(namespace) = &namespace.kind else {
-                    return self.fail("invalid native namespace", expr.span);
+                    return self.fail("invalid namespace", expr.span);
                 };
-                let callable = self.function(&format!("{namespace}::{name}"), expr.span)?;
+                let callable = if let Some(alias) = self.environments.find_alias(namespace) {
+                    self.environments
+                        .scope(alias.scope)
+                        .functions
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| {
+                            self.native_error(
+                                NativeError::new(
+                                    "ModuleError",
+                                    format!("module alias {namespace} has no function {name}"),
+                                ),
+                                expr.span,
+                            )
+                        })?
+                } else {
+                    self.function(&format!("{namespace}::{name}"), expr.span)?
+                };
                 self.call(callable, arguments, expr.span, output)
             }
             ExprKind::PropertyAccess(base, name) => {
@@ -776,6 +812,15 @@ impl Runtime {
 
     fn function(&self, name: &str, span: Span) -> Result<Value> {
         let Some(scope) = self.environments.find(name, true) else {
+            // Isolated modules have no caller/global lexical parent. Only host
+            // native registrations remain visible across that boundary.
+            if let Some(value @ Value::Callable(callable)) =
+                self.environments.scope(0).functions.get(name)
+            {
+                if matches!(callable.0.as_ref(), Function::Native { .. }) {
+                    return Ok(value.clone());
+                }
+            }
             return self.fail(format!("undefined function {name}"), span);
         };
         Ok(self.environments.scope(scope).functions[name].clone())
@@ -805,12 +850,14 @@ impl Runtime {
             }
         }
         self.environments.capture();
-        Ok(Value::Callable(Callable(Rc::new(Function::User {
+        let function = Rc::new(Function::User {
             declaration: declaration.clone(),
             environment: self.environments.current,
             owner: self.identity.clone(),
             source: self.source.clone(),
-        }))))
+        });
+        self.environments.track_function(&function);
+        Ok(Value::Callable(Callable(function)))
     }
 
     fn call(
@@ -1105,6 +1152,13 @@ impl Runtime {
             .map(|_| ())
     }
     fn enter_scope(&mut self, parent: usize, span: Span) -> Result<usize> {
+        if self
+            .options
+            .max_scopes
+            .is_some_and(|limit| self.environments.live >= limit)
+        {
+            self.collect_garbage();
+        }
         if self
             .options
             .max_scopes

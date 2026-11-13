@@ -18,8 +18,8 @@ Save `report.scr` outside the directory you will publish:
 ```scr
 <?scr
 $report = ["status" => "ok", "generatedAt" => Date::now()];
-File::write("public/status.json", Json::pretty($report) . "\n");
-File::write("public/index.html", "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Scripta report</title><h1>Scripta report</h1><p>Status: OK</p></html>\n");
+File::writeAtomic("public/status.json", Json::pretty($report) . "\n");
+File::writeAtomic("public/index.html", "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Scripta report</title><h1>Scripta report</h1><p>Status: OK</p></html>\n");
 ```
 
 From the directory containing `report.scr`, create the output directory and run
@@ -28,6 +28,8 @@ it with an installed executable. On macOS/Linux:
 ```sh
 mkdir -p public
 scr run report.scr
+# Public reports only: allow the web-server account to read these new files.
+chmod 644 public/status.json public/index.html
 ```
 
 On Windows in PowerShell:
@@ -50,9 +52,15 @@ Visit `/` and `/status.json` on that configured site. The files remain unchanged
 until the script runs again. For recurring generation, invoke the same fixed
 command from your existing scheduler; scr does not create a background daemon.
 Keep scripts, logs, credentials, and the source checkout outside the document
-root. Only publish fields intended for visitors. File::write replaces files;
-for concurrent readers, a real deployment should generate a new directory and
-switch it into place after successful generation.
+root. Only publish fields intended for visitors. `File::writeAtomic` publishes a
+complete replacement of each file, so a concurrent reader sees old or new contents.
+New Unix files start private; the first-run chmod above makes these public reports
+readable, and later replacements preserve those ordinary permission bits. Windows
+files inherit directory ACLs; configure the web-server account's access on that
+directory. Replacement does not preserve custom ACLs or ownership. If HTML and JSON
+must update as one consistent set, use a versioned output directory and an external
+publication mechanism; the two writes are independent. See the
+[atomic-write contract](standard-library.md#atomic-file-replacement).
 
 ## Optional Apache CGI demonstration on macOS/Linux
 

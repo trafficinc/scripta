@@ -18,7 +18,7 @@ locations as a filename, one-based line, and one-based character column.
 ## Public application interfaces
 
 `scr_cli::args::parse` consumes arguments excluding the executable name and
-returns `Result<Command, UsageError>`. `Command` has `Help`, `Version`,
+returns `Result<Command, UsageError>`. `Command` has `Help`, `CommandHelp`, `RunStdin { arguments }`, `Version`,
 `Run { path: PathBuf, arguments: Vec<OsString> }`, `Check(PathBuf)`, and
 `Format { path: PathBuf, check: bool }` variants. Parsing performs no I/O and never
 exits the process. `args::HELP` is the shared CLI usage text. File paths preserve
@@ -33,6 +33,11 @@ runtime with standard-library
 functions registered. The caller supplies a `Write` destination. File loading
 and exit codes belong to the executable, so embedding callers can provide their
 own source and error handling.
+
+`scr_cli::pipeline::run_with_input(source, output, options, input)` accepts an
+owned buffered input reader. The CLI uses an empty reader after consuming stdin
+as source so script input stays at EOF. File-backed execution retains process
+stdin for pipeline records.
 
 The existing crate-root interfaces remain public: `scr_lexer::lex`,
 `scr_parser::{parse, parse_with_diagnostics, parse_expression}`,
@@ -77,8 +82,8 @@ expression. Runtime errors stop execution and preserve output already written.
 Lexing and parsing complete before execution starts.
 
 The evaluator walks owned AST values using safe Rust (`unsafe_code` is forbidden).
-Values include owned lists/maps plus reference-counted native objects and
-callables. Strict equality is implemented by value for scalars/collections and
+Values include UTF-8 strings, immutable reference-counted byte slices, owned
+lists/maps, and reference-counted native objects and callables. Strict equality is implemented by value for scalars/collections and
 by identity for native objects/callables. Arithmetic, ordering, and conditions
 reject implicit conversions.
 
@@ -94,9 +99,30 @@ scope, with the definition source active. Variadic annotations check elements,
 then the collected list is validated against depth/value budgets. Anonymous
 and named nested functions share capture, ownership, and source retention rules;
 they do not acquire access to global variables. Uncaptured scopes are released
-on all control-flow paths and their slots reused. Captured environments are conservatively retained
-until the runtime is dropped, avoiding reference-counted environment/function
-cycles. A callable from one runtime cannot execute in another runtime.
+on all control-flow paths and their slots reused. Captured environments use a
+small stop-the-world tracing collector. Globals and all active scopes (including
+suspended callers) are roots; tracing follows lexical parents and callable values
+inside lists/maps, variables, and function bindings. Unreachable captured scopes,
+including recursive environment/function cycles, are dropped and slots reused.
+A callable from one runtime cannot execute in another runtime.
+
+A weak user-function registry supports host/evaluator roots without changing the
+public Value API: the collector counts callable references in every arena value,
+then compares those counts with each function's Rc strong count, discounting its
+own temporary upgrade. Any remaining reference conservatively roots the captured
+environment. This protects host-held callbacks, expression temporaries, and
+callbacks hidden in native objects or native function implementations. Native
+property getters and callback bodies are never invoked during tracing. Opaque
+native ownership cycles are not collected and can retain environments; hosts
+must break those cycles themselves.
+
+Collection runs at execute entry/exit, at statement/loop checkpoints after a
+threshold of user-function allocations, and before a scope limit rejects an
+allocation. The initial threshold is 256 function allocations and grows with the
+surviving scope/function population to amortize scans. Hosts can also call
+`Runtime::collect_garbage()`, which returns the number of reclaimed scopes.
+Collection is synchronous; no bounded pause-time guarantee or hard RSS ceiling
+is provided. Arena/allocator capacity can remain at its high-water mark.
 
 Internal control-flow signals carry return, break, continue, exit, explicit throw,
 and runtime failure through nested statements. Loop/function/catch boundaries
@@ -132,8 +158,10 @@ modules depend on this public runtime API; the runtime never imports modules or
 matches their names. See [registration guide](standard-library.md#registering-rust-modules).
 
 Calls are limited to 64 active script/native frames, with configurable lower
-limits. Optional checkpoint budgets and host cancellation bound execution;
-allocation and wall-clock limits remain future work.
+limits. Optional checkpoint, logical-value byte, and live-scope budgets plus host
+cancellation bound execution. These do not impose an aggregate allocation/RSS
+ceiling or an interpreter-wide wall-clock deadline; individual native operations
+such as HTTP requests and subprocesses have their own timeouts.
 
 
 ## Filesystem modules
@@ -176,7 +204,7 @@ monitors; interrupted execution reports 130 after dropping runtime resources.
 Platform-specific child behavior and limitations are documented in the
 [standard library](standard-library.md#processes). Integration tests use fixture
 executables, bounded temporary capture, injected input/environment, and real CLI
-subprocesses. Local macOS results do not establish Windows/Linux CI success.
+subprocesses. Local macOS results do not establish Windows/Linux validation.
 
 The process backend uses the [process-wrap 8.2.2 API](https://docs.rs/crate/process-wrap/8.2.2)
 with the standard-library frontend. Application-owned setup guards precede the
@@ -190,10 +218,29 @@ JSON conversion lives in scr-stdlib and rejects unsupported values before serde_
 serialization. HTTP uses a blocking ureq/Rustls client with explicit timeout,
 redirect, and response-size limits. HttpResponse returns native callables for its
 methods through `Value::native_function`, using the existing callable evaluator.
+Responses retain raw bytes; default text mode validates UTF-8, and binary mode
+leaves decoding explicit. Native objects can report retained payload size through
+`NativeObject::payload_bytes`; HTTP uses this for body/header accounting.
+Downloads use bounded buffers, filesystem policy checks, same-directory temporary
+files, and exclusive publication after a successful transfer.
+
+CSV combines a bounded, strict record scanner with the Rust `csv` parser/writer.
+File readers retain descriptors and return complete records across line breaks.
+Regex uses a small API backed by Rust's `regex` crate with fixed pattern/compiled
+size limits. Explicit grapheme helpers use `unicode-segmentation`; existing scalar
+length and substring operations are unchanged.
 
 Local loading is a runtime statement. The loader canonicalizes identity, tracks
-active/completed files, consults a host policy, and evaluates each parsed file in
-the current lexical scope. SourceFile references on user functions, runtime errors,
+active files, consults a host policy, and evaluates each parsed file in the current
+lexical scope unless `as Alias` requests an isolated lexical root. Unaliased once
+completion belongs to the enclosing root; successful isolated instances are
+cached by canonical entry path. Lexical alias bindings reference module scope IDs,
+and qualified calls select functions directly from the target module scope.
+Isolated roots have no caller parent; native registrations use a native-only
+fallback. The tracing collector follows alias edges and treats cached module
+roots as runtime-lifetime roots, including modules without functions. Aliased
+`require` publishes a fresh instance only after success; old aliases/callbacks
+can retain previous instances. Scope limits include cached module roots. SourceFile references on user functions, runtime errors,
 and stack frames retain original file text for cross-file diagnostics and relative
 requires after module initialization. Internal runtime error payloads are boxed to
 keep the recursive interpreter's stack bounded as diagnostic metadata grows.
@@ -227,8 +274,11 @@ that can outlive the caller’s Program. Value validation is iterative and bound
 at depth 128; map duplicate validation uses typed hashed keys.
 
 RuntimeOptions exposes source, instruction, per-value logical-byte, and live-scope
-budgets. Retained closure environments are still released at runtime drop, with
-a configurable ceiling rather than a new collector. Runtime error redaction is
+budgets. The tracing collector described above reclaims unreachable captured
+environments during execution and at execution boundaries, including before a
+scope allocation is rejected at its configured limit. Host-retained callables
+remain roots; opaque native ownership cycles require host cleanup. Collection
+does not enforce an aggregate RSS ceiling. Runtime error redaction is
 separate from script exception values. Process waiters receive monitor completion
 notifications while timeout/cancellation/capture checks remain bounded polling.
 See [measurements and safety details](performance.md).

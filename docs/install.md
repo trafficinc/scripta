@@ -3,7 +3,7 @@
 ## Choose a verified release candidate
 
 Use an archive whose target is marked verified in the release's compatibility
-matrix and whose associated native CI/test records are green. See
+matrix and whose associated native test records show passing results. See
 [compatibility.md](compatibility.md) for the current evidence; configured targets
 that are still pending are not supported-download promises. This work prepares
 release candidates and does not itself publish a GitHub Release.
@@ -14,11 +14,16 @@ checks file integrity; it does not replace trust in the release source/signing.
 There is no curl-to-shell installer or automatic privileged installation.
 
 The extracted directory contains the standalone executable, LICENSE, dependency
-notices, examples, reference documentation, and release.json with file hashes.
+notices, examples, runnable playgrounds and their fixtures, reference
+documentation, and release.json with file hashes.
 Only the executable needs to be on PATH. Python, Node.js, PHP, Docker, Rust, Cargo,
 and a network connection are not needed to run local scripts after installation.
 Archive extraction/checksum utilities are installation tools, not interpreter
 runtime dependencies.
+
+Developer documentation can link to benchmark harnesses and raw measurements in
+the source repository. Those source-checkout files are not included in the
+binary archive; runnable examples and playground fixtures are included.
 
 ## Optional local browser playground
 

@@ -5,8 +5,8 @@
 Measured on 2026-11-12: macOS-27.0.1-arm64-arm-64bit, 8 logical CPUs,
 Rust 1.99.1, default Cargo release profile (no custom LTO/strip settings),
 Python 3.9.6, and GNU bash, version 3.2.57(1)-release (arm64-apple-darwin26).
-Only macOS arm64 measurements are reported. Linux/Windows have CI compatibility
-coverage; this report contains no Raspberry Pi, VPS, Linux, or Windows estimates.
+Only macOS arm64 measurements are reported. This report contains no Raspberry Pi,
+VPS, Linux, or Windows estimates.
 
 The runner takes two warmups followed by 11 measured launches for each fixture/
 language, validates every output checksum, and records every observation plus
@@ -118,7 +118,9 @@ collection arguments such as repeated `len($list)`, but changing the public Valu
 representation would affect every native module and host consumer. The measured
 hot paths can be improved without that change, so owned values remain. Map lookup
 is still linear and equality is still order-insensitive with quadratic matching;
-no VM, JIT, hash-map representation migration, or new collector was introduced.
+no VM, JIT, hash-map representation migration, or new collector was introduced
+in that measured optimization work. The tracing collector described below was
+added later; these historical measurements do not measure its overhead.
 
 ## Implemented targeted changes
 
@@ -179,12 +181,20 @@ budget; File::copy already streams. Without a configured byte limit, File::read
 retains its existing whole-file behavior. OS/container memory limits are still
 needed when enforcing a hard process memory ceiling.
 
-Captured lexical environments remain in the runtime arena until runtime drop;
-unreachable closures are not garbage-collected during a long-lived runtime.
-The new live-scope ceiling bounds that retention when configured. Resources still
-referenced by globals/captured environments intentionally remain owned until those
-references/runtime are dropped; an exception does not erase globals. Uncaptured
-transient scopes unwind immediately. No daemon or new GC architecture is added.
+Captured lexical environments now use a synchronous tracing collector. It reclaims
+unreachable captures during long executions, at execution boundaries, and before
+rejecting a scope allocation at its configured limit. Globals, active callers,
+evaluator temporaries, host-held callable values, and successful cached module
+roots remain protected. Replacing a cached module instance does not discard
+older instances that are still reachable through aliases or callables. Hosts may
+request collection with `Runtime::collect_garbage()` (reclaimed scope count).
+Opaque native ownership cycles are conservatively retained; hosts must break
+those cycles. Uncaptured transient scopes still unwind immediately. Collection
+can pause execution, and freed storage may stay resident in the allocator.
+See [architecture](architecture.md) for roots and scheduling, and the
+[memory soak harness](../benchmarks/README.md#long-running-memory-behavior) for
+current RSS measurements. The historical performance tables above predate this
+collector and are not measurements of its overhead.
 
 Diagnostic redaction is conservative and can hide benign credential-shaped text.
 It cannot identify every arbitrary unmarked secret embedded in a user-thrown
@@ -197,6 +207,10 @@ ordinary string operations. Raw host access to SourceFile.text is trusted and
 intentionally still available.
 
 ## Reproduction and evidence
+
+The benchmark harness and raw data below are source-checkout material and are
+not included in interpreter archives. These links require the repository;
+the packaged interpreter and shipped examples do not need the harness.
 
 See [benchmark instructions](../benchmarks/README.md). Raw evidence includes
 [initial baseline](../benchmarks/results/baseline.json),

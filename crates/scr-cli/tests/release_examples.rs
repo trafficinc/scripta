@@ -39,6 +39,10 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
         "server-health.scr",
         "http-client.scr",
         "command-runner.scr",
+        "atomic-report.scr",
+        "data-handling.scr",
+        "csv-reader.scr",
+        "download.scr",
     ];
     for name in names {
         scr_cli::pipeline::check(&fs::read_to_string(example(name)).unwrap()).unwrap();
@@ -236,7 +240,41 @@ fn collection_playground_and_log_analyzer_run_without_external_programs() {
         (
             "collections.scr",
             vec![],
-            "Active: auth, café-api\nFirst: auth\nWithout first: [\"café-api\"]\nWith extra: [\"auth\",\"café-api\",\"queue\"]\nHas auth: true\nFields: active, total\nValues: [2,4]\nHas total: true\n",
+            r#"Active: auth, café-api
+First: auth
+Without first: ["café-api"]
+With extra: ["auth","café-api","queue"]
+Has auth: true
+Fields: active, total
+Values: [2,4]
+Has total: true
+Next: frontend
+Last: queue
+Edited: ["frontend","replacement","café-api","queue"]
+Removed: ["auth"]
+Reversed: ["queue","café-api","auth","frontend"]
+Chunks: [["frontend","auth"],["café-api","queue"]]
+Filled: ["pending","pending","pending"]
+Unique: [1,1.0,null]
+Auth index: 1
+Sum: 9
+Product: 24
+Added: ["frontend","queue"]
+Shared: ["auth","café-api"]
+Merged: {"region":"local","retries":3,"timeout":20}
+Replaced: {"retries":3,"timeout":20}
+Combined: {"a":3,"b":2}
+Flipped keys: [1,"1"]
+Flipped values: ["last","second"]
+Timeout key: timeout
+Reverse keys: ["region","timeout","retries"]
+Different values: {"region":"local","timeout":20}
+Shared values: {"retries":3}
+New keys: {"region":"local"}
+Existing keys: {"retries":3,"timeout":20}
+Durations: [12,8,15]
+By job: {"api":15,"worker":8}
+"#,
         ),
         (
             "log-analyzer.scr",
@@ -441,7 +479,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
     let modules = [
         (
             "File",
-            "exists read write append copy move delete size modified extension openLines readLine close",
+            "exists read readBytes writeBytes appendBytes write writeAtomic append copy move delete size modified extension openLines readLine close",
         ),
         (
             "Dir",
@@ -450,7 +488,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Path", "join filename extension parent normalize absolute"),
         ("Process", "run spawn shell wait poll kill exists currentId"),
         ("Env", "get set has remove all"),
-        ("Cli", "args arg has option prompt"),
+        ("Cli", "args arg has option prompt readLine"),
         (
             "System",
             "platform architecture hostname cpuUsage memoryUsage diskUsage uptime homeDirectory tempDirectory",
@@ -458,10 +496,13 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Date", "now format parse sleep"),
         ("Log", "info warn error debug setFile"),
         ("Json", "encode decode pretty"),
-        ("Http", "get post request"),
+        ("Http", "get post request download"),
+        ("Bytes", "encodeUtf8 decodeUtf8 slice"),
+        ("Csv", "parse encode open readRow close"),
+        ("Regex", "isMatch findAll replace"),
         (
             "String",
-            "trim split join contains startsWith endsWith replace substring lower upper format",
+            "trim split join contains startsWith endsWith replace substring lower upper format graphemeLength graphemeSubstring",
         ),
         ("Math", "abs min max floor ceil round"),
         ("List", "remove slice concat contains sort"),
@@ -477,5 +518,110 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 104);
+    assert_eq!(count, 123);
+}
+
+#[test]
+fn atomic_report_previews_and_publishes_complete_json_before_and_after_formatting() {
+    let source = fs::read_to_string(example("atomic-report.scr")).unwrap();
+    let formatted = scr_cli::formatter::format(&source).unwrap();
+    assert_eq!(source, formatted);
+    for source in [source, formatted] {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("report.scr");
+        let destination = dir.path().join("report.json");
+        fs::write(&script, source).unwrap();
+        let invoke = |apply: bool| {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_scr"));
+            command
+                .current_dir(dir.path())
+                .arg(&script)
+                .arg(&destination)
+                .env("PATH", dir.path());
+            if apply {
+                command.arg("--apply");
+            }
+            success(command.output().unwrap())
+        };
+        assert!(invoke(false).starts_with("Would atomically write:"));
+        assert!(!destination.exists());
+        assert!(invoke(true).starts_with("Updated report:"));
+        fs::write(&destination, "obsolete contents").unwrap();
+        invoke(true);
+        let mut rt = scr_runtime::Runtime::new();
+        scr_stdlib::register(&mut rt).unwrap();
+        rt.set_global(
+            "json",
+            scr_runtime::Value::String(fs::read_to_string(&destination).unwrap()),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        rt.execute_source("<?scr $report=Json::decode($json); echo $report['status']; echo type($report['generatedAt']);", &mut output).unwrap();
+        assert_eq!(output, b"okint");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+}
+
+#[test]
+fn data_and_csv_examples_run_without_external_programs() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        .arg(example("data-handling.scr"))
+        .current_dir(directory.path())
+        .env("PATH", directory.path())
+        .output()
+        .unwrap();
+    let text = success(output);
+    assert!(text.starts_with("UTF-8 bytes: 14\nFirst grapheme: 👍🏽\n👍🏽 café\n"));
+    assert!(text.ends_with("[\"job-12\",\"job-34\"]\nwarning: retry\n"));
+    let file = directory.path().join("records.csv");
+    fs::write(&file, "name,note\r\nAda,\"first\nsecond\"\r\n").unwrap();
+    assert_eq!(
+        success(run("csv-reader.scr", &[file.as_os_str()])),
+        "[\"name\",\"note\"]\n[\"Ada\",\"first\\nsecond\"]\n"
+    );
+    for name in ["csv-reader.scr", "download.scr"] {
+        let output = run(name, &[]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .starts_with("Usage:")
+        );
+    }
+}
+
+#[test]
+fn download_example_saves_binary_bytes() {
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("download.bin");
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/file", listener.local_addr().unwrap());
+    let worker = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let mut buffer = [0; 4096];
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut request = Vec::new();
+        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            let count = socket.read(&mut buffer).unwrap();
+            assert_ne!(count, 0);
+            request.extend_from_slice(&buffer[..count]);
+        }
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n\x00\xffPK",
+            )
+            .unwrap();
+    });
+    assert_eq!(
+        success(run(
+            "download.scr",
+            &[url.as_ref(), destination.as_os_str()]
+        )),
+        "Downloaded 4 bytes\n"
+    );
+    worker.join().unwrap();
+    assert_eq!(fs::read(destination).unwrap(), b"\x00\xffPK");
 }

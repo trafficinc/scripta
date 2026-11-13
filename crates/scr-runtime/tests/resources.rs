@@ -129,7 +129,7 @@ fn retained_closure_scopes_can_be_limited() {
         instruction_limit: Some(1000),
         ..Default::default()
     });
-    let error=run(&mut runtime,"function factory() { function inner() { return 1; } return inner; } for ($i=0;$i<100;$i+=1) { $f=factory(); }").unwrap_err();
+    let error=run(&mut runtime,"function factory() { function inner() { return 1; } return inner; } $kept=[]; for ($i=0;$i<100;$i+=1) { $kept[]=factory(); }").unwrap_err();
     assert!(error.message.contains("scope limit"));
 }
 #[test]

@@ -232,7 +232,7 @@ fn variadic_wrapping_and_captured_scopes_obey_runtime_limits() {
         max_scopes: Some(12),
         ..Default::default()
     });
-    let error = run(&mut scopes, "function factory() { return function () {}; } for ($i = 0; $i < 100; $i += 1) { $f = factory(); }").unwrap_err();
+    let error = run(&mut scopes, "function factory() { return function () {}; } $kept=[]; for ($i = 0; $i < 100; $i += 1) { $kept[]=factory(); }").unwrap_err();
     assert!(error.message.contains("scope limit"));
     let mut recursion = Runtime::with_options(RuntimeOptions {
         recursion_limit: 4,

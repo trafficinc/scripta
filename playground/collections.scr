@@ -1,12 +1,6 @@
 <?scr
-
 // Filter records with a loop, then sort and summarize the retained names.
-$records = [
-    ["name" => "café-api", "active" => true],
-    ["name" => "worker", "active" => false],
-    ["name" => "auth", "active" => true],
-    ["name" => "cache"]
-];
+$records = [["name" => "café-api", "active" => true], ["name" => "worker", "active" => false], ["name" => "auth", "active" => true], ["name" => "cache"]];
 $names = [];
 foreach ($records as $record) {
     if (Map::get($record, "active", false)) {
@@ -19,7 +13,6 @@ echo "First: " . String::join(List::slice($names, 0, 1), ", ") . "\n";
 echo "Without first: " . Json::encode(List::remove($names, 0)) . "\n";
 echo "With extra: " . Json::encode(List::concat($names, ["queue"])) . "\n";
 echo "Has auth: " . str(List::contains($names, "auth")) . "\n";
-
 $summary = Map::create();
 $summary["active"] = len($names);
 $summary["total"] = len($records);
@@ -28,3 +21,39 @@ $summary = Map::remove($summary, "temporary");
 echo "Fields: " . String::join(Map::keys($summary), ", ") . "\n";
 echo "Values: " . Json::encode(Map::values($summary)) . "\n";
 echo "Has total: " . str(Map::has($summary, "total")) . "\n";
+// Helpers return copies; pop, shift, and splice package both results in a map.
+$queue = List::push(List::unshift($names, "frontend"), "queue");
+$next = List::shift($queue);
+echo "Next: " . $next["value"] . "\n";
+$last = List::pop($next["items"]);
+echo "Last: " . $last["value"] . "\n";
+$edited = List::splice($queue, 1, 1, ["replacement"]);
+echo "Edited: " . Json::encode($edited["items"]) . "\n";
+echo "Removed: " . Json::encode($edited["removed"]) . "\n";
+echo "Reversed: " . Json::encode(List::reverse($queue)) . "\n";
+echo "Chunks: " . Json::encode(List::chunk($queue, 2)) . "\n";
+echo "Filled: " . Json::encode(List::fill(3, "pending")) . "\n";
+echo "Unique: " . Json::encode(List::unique([1, 1.0, 1, null, null])) . "\n";
+echo "Auth index: " . str(List::search($queue, "auth")) . "\n";
+echo "Sum: " . str(List::sum([2, 3, 4])) . "\n";
+echo "Product: " . str(List::product([2, 3, 4])) . "\n";
+echo "Added: " . Json::encode(List::diff($queue, $names)) . "\n";
+echo "Shared: " . Json::encode(List::intersect($queue, $names)) . "\n";
+$defaults = ["retries" => 3, "timeout" => 10];
+$overrides = ["timeout" => 20, "region" => "local"];
+$config = Map::merge($defaults, $overrides);
+echo "Merged: " . Json::encode($config) . "\n";
+echo "Replaced: " . Json::encode(Map::replace($defaults, $overrides)) . "\n";
+echo "Combined: " . Json::encode(Map::combine(["a", "b", "a"], [1, 2, 3])) . "\n";
+$flipped = Map::flip(["first" => 1, "second" => "1", "last" => 1]);
+echo "Flipped keys: " . Json::encode(Map::keys($flipped)) . "\n";
+echo "Flipped values: " . Json::encode(Map::values($flipped)) . "\n";
+echo "Timeout key: " . str(Map::search($config, 20)) . "\n";
+echo "Reverse keys: " . Json::encode(Map::keys(Map::reverse($config))) . "\n";
+echo "Different values: " . Json::encode(Map::diff($config, $defaults)) . "\n";
+echo "Shared values: " . Json::encode(Map::intersect($config, $defaults)) . "\n";
+echo "New keys: " . Json::encode(Map::diffKeys($config, $defaults)) . "\n";
+echo "Existing keys: " . Json::encode(Map::intersectKeys($config, $defaults)) . "\n";
+$jobs = [["id" => "api", "duration" => 12], ["id" => "worker", "duration" => 8], ["id" => "api", "duration" => 15]];
+echo "Durations: " . Json::encode(List::column($jobs, "duration")) . "\n";
+echo "By job: " . Json::encode(Map::column($jobs, "duration", "id")) . "\n";

@@ -1,0 +1,11 @@
+<?scr
+// Network and file writes happen only when both arguments are provided.
+$url = Cli::arg(0);
+$destination = Cli::arg(1);
+if ($url === null || $destination === null) {
+    echo "Usage: scr download.scr URL NEW_DESTINATION\n";
+    exit(2);
+}
+// The default host HTTP ceiling is 8 MiB, including for downloads.
+$result = Http::download($url, $destination, ["timeoutMs" => 30000]);
+echo "Downloaded " . str($result["bytesWritten"]) . " bytes\n";

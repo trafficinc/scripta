@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "worker": {
+    "path": "/Users/admin/Documents/projects/scripta/target/release/examples/collector_bench",
+    "sha256": "f459e74fe3ea5b897edc7225a71b704af1930a9d4c8e601a8b84c5f15fa1bddb"
+  },
+  "reference": {
+    "path": "/Users/admin/Documents/projects/scripta/target/release/examples/collector_bench",
+    "sha256": "f459e74fe3ea5b897edc7225a71b704af1930a9d4c8e601a8b84c5f15fa1bddb"
+  },
+  "warmups": 1,
+  "samples": 3,
+  "timing_thresholds_enforced": false,
+  "measurements": [
+    {
+      "candidate": {
+        "case": "live",
+        "size": 10,
+        "phase": "collect",
+        "debug_assertions": false,
+        "observations_ns": [
+          4792,
+          2583,
+          2292
+        ],
+        "reclaimed_scopes": [
+          0,
+          0,
+          0
+        ],
+        "median_ns": 2583,
+        "p95_ns": 4792,
+        "max_ns": 4792,
+        "median_ns_per_item": 258.3
+      },
+      "reference": {
+        "case": "live",
+        "size": 10,
+        "phase": "collect",
+        "debug_assertions": false,
+        "observations_ns": [
+          4709,
+          2584,
+          2375
+        ],
+        "reclaimed_scopes": [
+          0,
+          0,
+          0
+        ],
+        "median_ns": 2584,
+        "p95_ns": 4709,
+        "max_ns": 4709,
+        "median_ns_per_item": 258.4
+      },
+      "median_ratio": 0.9996130030959752
+    },
+    {
+      "reference": {
+        "case": "live",
+        "size": 100,
+        "phase": "collect",
+        "debug_assertions": false,
+        "observations_ns": [
+          20125,
+          15375,
+          14833
+        ],
+        "reclaimed_scopes": [
+          0,
+          0,
+          0
+        ],
+        "median_ns": 15375,
+        "p95_ns": 20125,
+        "max_ns": 20125,
+        "median_ns_per_item": 153.75
+      },
+      "candidate": {
+        "case": "live",
+        "size": 100,
+        "phase": "collect",
+        "debug_assertions": false,
+        "observations_ns": [
+          21875,
+          17125,
+          15833
+        ],
+        "reclaimed_scopes": [
+          0,
+          0,
+          0
+        ],
+        "median_ns": 17125,
+        "p95_ns": 21875,
+        "max_ns": 21875,
+        "median_ns_per_item": 171.25
+      },
+      "median_ratio": 1.113821138211382
+    }
+  ],
+  "memory": null
+}

@@ -234,3 +234,150 @@ fn windows_environment_names_are_ascii_case_insensitive() {
     };
     assert_eq!(all.len(), 1);
 }
+
+#[test]
+fn read_lines_preserve_unicode_empty_lines_bom_and_bare_cr_without_output() {
+    let mut rt = runtime(&[]);
+    rt.set_input_stream(std::io::BufReader::with_capacity(
+        2,
+        Cursor::new("\u{feff}é🦀\r\n\nlast\r".as_bytes().to_vec()),
+    ));
+    let mut output = Vec::new();
+    run(&mut rt, "$a = Cli::readLine(); $b = Cli::readLine(); $c = Cli::readLine(); $d = Cli::readLine(); $e = Cli::readLine();", &mut output).unwrap();
+    for (name, value) in [("a", "\u{feff}é🦀"), ("b", ""), ("c", "last\r")] {
+        assert_eq!(rt.get_global(name), Some(&Value::String(value.into())));
+    }
+    assert_eq!(rt.get_global("d"), Some(&Value::Null));
+    assert_eq!(rt.get_global("e"), Some(&Value::Null));
+    assert!(output.is_empty());
+}
+
+#[test]
+fn read_line_limits_encoding_and_failure_state() {
+    for input in [b"abc\nnext\n".to_vec(), vec![b'x'; 1024 * 1024 + 1]] {
+        let mut rt = runtime(&[]);
+        rt.set_input_stream(Cursor::new(input));
+        error(&mut rt, "Cli::readLine(3);", "ResourceLimitError");
+        error(&mut rt, "Cli::readLine();", "InputError");
+        error(&mut rt, "Cli::prompt(\"\");", "InputError");
+    }
+    let mut rt = runtime(&[]);
+    rt.set_input_stream(Cursor::new(vec![0xff, b'\n', b'x']));
+    error(&mut rt, "Cli::readLine();", "EncodingError");
+    error(&mut rt, "Cli::readLine();", "InputError");
+    let mut rt = runtime(&[]);
+    rt.set_input_stream(Cursor::new(b"ab\n".to_vec()));
+    for script in ["Cli::readLine(0);", "Cli::readLine(-1);"] {
+        error(&mut rt, script, "RangeError");
+    }
+    for script in [
+        "Cli::readLine(null);",
+        "Cli::readLine(1.0);",
+        "Cli::readLine(1, 2);",
+    ] {
+        error(&mut rt, script, "TypeError");
+    }
+    run(&mut rt, "$value = Cli::readLine(3);", &mut Vec::new()).unwrap();
+    assert_eq!(rt.get_global("value"), Some(&Value::String("ab".into())));
+}
+
+#[test]
+fn read_line_value_budget_and_separate_permission() {
+    for input in ["é🦀\n", "é🦀\r\n", "é🦀"] {
+        for enough in [true, false] {
+            let mut rt = Runtime::with_options(RuntimeOptions {
+                max_value_bytes: Some(
+                    std::mem::size_of::<Value>() + "é🦀".len() - usize::from(!enough),
+                ),
+                ..Default::default()
+            });
+            scr_stdlib::register(&mut rt).unwrap();
+            rt.set_input_stream(std::io::BufReader::with_capacity(
+                2,
+                Cursor::new(input.as_bytes().to_vec()),
+            ));
+            if enough {
+                run(&mut rt, "$x = Cli::readLine();", &mut Vec::new()).unwrap();
+                assert_eq!(rt.get_global("x"), Some(&Value::String("é🦀".into())));
+            } else {
+                error(&mut rt, "Cli::readLine();", "ResourceLimitError");
+            }
+        }
+    }
+    let mut options = RuntimeOptions::default();
+    options.context.permissions.allowed.remove("cli.read");
+    let mut rt = Runtime::with_options(options);
+    scr_stdlib::register(&mut rt).unwrap();
+    rt.set_input_stream(Cursor::new(b"ok\n".to_vec()));
+    error(&mut rt, "Cli::readLine();", "PermissionError");
+    run(&mut rt, "$x = Cli::prompt(\"\");", &mut Vec::new()).unwrap();
+    assert_eq!(rt.get_global("x"), Some(&Value::String("ok".into())));
+    let mut options = RuntimeOptions::default();
+    options.context.permissions.allowed.remove("cli.prompt");
+    let mut rt = Runtime::with_options(options);
+    scr_stdlib::register(&mut rt).unwrap();
+    rt.set_input_stream(Cursor::new(b"ok\n".to_vec()));
+    run(&mut rt, "$x = Cli::readLine();", &mut Vec::new()).unwrap();
+}
+
+#[test]
+fn read_line_io_failure_and_mid_read_cancellation_disable_input() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    struct Reader {
+        flag: Option<Arc<AtomicBool>>,
+    }
+    impl std::io::Read for Reader {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            unreachable!()
+        }
+    }
+    impl std::io::BufRead for Reader {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            if let Some(flag) = &self.flag {
+                flag.store(true, Ordering::Relaxed);
+                Ok(b"partial")
+            } else {
+                Err(std::io::Error::other("injected input failure"))
+            }
+        }
+        fn consume(&mut self, _: usize) {}
+    }
+    let mut rt = runtime(&[]);
+    rt.set_input_stream(Reader { flag: None });
+    error(&mut rt, "Cli::readLine();", "IoError");
+    error(&mut rt, "Cli::readLine();", "InputError");
+    let flag = Arc::new(AtomicBool::new(false));
+    let mut rt = Runtime::with_options(RuntimeOptions {
+        interrupt_flag: Some(flag.clone()),
+        ..Default::default()
+    });
+    scr_stdlib::register(&mut rt).unwrap();
+    rt.set_input_stream(Reader {
+        flag: Some(flag.clone()),
+    });
+    let failure = run(&mut rt, "Cli::readLine();", &mut Vec::new()).unwrap_err();
+    assert!(failure.message.contains("interrupt"), "{failure}");
+    flag.store(false, Ordering::Relaxed);
+    error(&mut rt, "Cli::readLine();", "InputError");
+}
+
+#[test]
+fn read_line_default_limit_and_shared_prompt_cursor() {
+    let mut rt = runtime(&[]);
+    rt.set_input_stream(Cursor::new(vec![b'x'; 1024 * 1024 + 1]));
+    error(&mut rt, "Cli::readLine();", "ResourceLimitError");
+    let mut rt = runtime(&[]);
+    rt.set_input_stream(Cursor::new(b"first\nsecond\r\nthird".to_vec()));
+    run(
+        &mut rt,
+        "$a = Cli::readLine(); $b = Cli::prompt(\"\"); $c = Cli::readLine();",
+        &mut Vec::new(),
+    )
+    .unwrap();
+    for (name, text) in [("a", "first"), ("b", "second"), ("c", "third")] {
+        assert_eq!(rt.get_global(name), Some(&Value::String(text.into())));
+    }
+}

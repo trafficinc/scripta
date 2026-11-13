@@ -1,4 +1,4 @@
-//! Local source loading with canonical identity and retained definition sources.
+//! Shared-scope includes and isolated aliased modules with canonical identity.
 use super::*;
 use scr_diagnostics::Diagnostic;
 use std::{
@@ -7,8 +7,18 @@ use std::{
 };
 
 pub(crate) type ModulePolicy = dyn Fn(&Path) -> NativeResult<()>;
+pub(crate) type ModuleResolver = dyn Fn(&Path, &str) -> NativeResult<Option<PathBuf>>;
 
 impl Runtime {
+    /// Resolve package names relative to the including file. Local files win.
+    /// Called only after the filesystem.read permission check; the resolved path
+    /// still passes through the host's module policy.
+    pub fn set_module_resolver(
+        &mut self,
+        resolver: impl Fn(&Path, &str) -> NativeResult<Option<PathBuf>> + 'static,
+    ) {
+        self.module_resolver = Some(Rc::new(resolver));
+    }
     /// Additional host path restriction. filesystem.read is always required.
     pub fn set_module_policy(&mut self, policy: impl Fn(&Path) -> NativeResult<()> + 'static) {
         self.module_policy = Some(Rc::new(policy));
@@ -71,6 +81,7 @@ impl Runtime {
         &mut self,
         value: &str,
         once: bool,
+        alias: Option<&scr_ast::Binding>,
         span: Span,
         output: &mut impl Write,
     ) -> Result<()> {
@@ -97,7 +108,14 @@ impl Runtime {
                     .and_then(Path::parent)
                     .filter(|p| !p.as_os_str().is_empty())
                     .unwrap_or(&self.options.context.working_directory);
-                base.join(path)
+                let local = base.join(path);
+                if local.is_file() {
+                    local
+                } else if let Some(resolver) = &self.module_resolver {
+                    resolver(base, value)?.unwrap_or(local)
+                } else {
+                    local
+                }
             };
             if let Some(policy) = &self.module_policy {
                 policy(&path)?;
@@ -110,6 +128,36 @@ impl Runtime {
             })
         })()
         .map_err(|error| self.native_error(error, span))?;
+        if let Some(alias) = alias {
+            if self.environments.scope(0).functions.keys().any(|name| {
+                name.split_once("::")
+                    .is_some_and(|(namespace, _)| namespace == alias.name)
+            }) {
+                return Err(self.native_error(
+                    NativeError::new(
+                        "ModuleAliasError",
+                        format!("alias {} conflicts with a registered namespace", alias.name),
+                    ),
+                    alias.span,
+                ));
+            }
+            if let Some(existing) = self.environments.find_alias(&alias.name) {
+                if existing.path != result {
+                    return Err(self.native_error(
+                        NativeError::new(
+                            "ModuleAliasError",
+                            format!(
+                                "alias {} is already bound to {}; cannot bind {}",
+                                alias.name,
+                                existing.path.display(),
+                                result.display()
+                            ),
+                        ),
+                        alias.span,
+                    ));
+                }
+            }
+        }
         if self.active_modules.contains(&result) {
             return Err(self.native_error(
                 NativeError::new(
@@ -119,8 +167,30 @@ impl Runtime {
                 span,
             ));
         }
-        if once && self.loaded_modules.contains(&result) {
-            return Ok(());
+        let module_root = self.environments.module_root();
+        if once {
+            if let Some(alias) = alias {
+                if let Some(&scope) = self.environments.module_cache.get(&result) {
+                    self.environments
+                        .scope_mut(self.environments.current)
+                        .aliases
+                        .insert(
+                            alias.name.clone(),
+                            environment::ModuleAlias {
+                                path: result,
+                                scope,
+                            },
+                        );
+                    return Ok(());
+                }
+            } else if self
+                .environments
+                .scope(module_root)
+                .loaded_modules
+                .contains(&result)
+            {
+                return Ok(());
+            }
         }
         if self.stack.len().saturating_sub(1)
             >= self.options.recursion_limit.min(MAX_RECURSION_LIMIT)
@@ -145,6 +215,17 @@ impl Runtime {
                 .map_err(|_| NativeError::new("EncodingError", "required file is not UTF-8"))
         })()
         .map_err(|error| self.native_error(error, span))?;
+        let isolated = if alias.is_some() {
+            let previous = self.enter_scope(0, span)?;
+            // Native functions use a dedicated fallback; no caller/global script
+            // names or variable writes cross this lexical root.
+            self.environments
+                .scope_mut(self.environments.current)
+                .parent = None;
+            Some((previous, self.environments.current))
+        } else {
+            None
+        };
         self.stack.push(StackFrame {
             function: if once { "require_once" } else { "require" }.into(),
             span,
@@ -157,15 +238,40 @@ impl Runtime {
         self.active_modules.push(result.clone());
         let execution = (|| {
             let program = self.parse_source(&self.source.as_ref().unwrap().text)?;
-            // No extra block: declarations/assignments belong to the caller's scope.
+            // No extra block: use the caller scope, or the isolated root for an alias.
             // Unlike the entry program, included declarations execute in source order.
             self.statements(&program.statements, output)
         })();
         self.active_modules.pop();
         self.source = previous;
         self.stack.pop();
-        if execution.is_ok() {
-            self.loaded_modules.insert(result);
+        if let Some((previous, scope)) = isolated {
+            if execution.is_ok() {
+                // Even a module with no functions must remain a valid cached scope.
+                let root = self.environments.scope_mut(scope);
+                root.captured = true;
+                root.loaded_modules.insert(result.clone());
+                self.environments.module_cache.insert(result.clone(), scope);
+            }
+            self.environments.leave(previous);
+            if execution.is_ok() {
+                let alias = alias.expect("isolated load has an alias");
+                self.environments
+                    .scope_mut(self.environments.current)
+                    .aliases
+                    .insert(
+                        alias.name.clone(),
+                        environment::ModuleAlias {
+                            path: result,
+                            scope,
+                        },
+                    );
+            }
+        } else if execution.is_ok() {
+            self.environments
+                .scope_mut(module_root)
+                .loaded_modules
+                .insert(result);
         }
         execution
     }

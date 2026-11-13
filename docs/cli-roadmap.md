@@ -5,8 +5,8 @@ transforming collections, handling failures, and reusing scripts. Each phase
 requires explicit approval before implementation starts. Completing one phase
 does not authorize the next.
 
-**Next action: choose the next scope after the CLI review below.** All six
-phases are accepted. The proposed Phase 7 remains unapproved.
+**Next action: review Phase 7 below.** All six
+phases are accepted. Phase 7 is approved and implemented; completion is ready for review.
 
 ## Progress and approval record
 
@@ -18,12 +18,155 @@ phases are accepted. The proposed Phase 7 remains unapproved.
 | 4 | Functions | Accepted | Approved | Accepted |
 | 5 | Math and formatting | Accepted | Approved | Accepted |
 | 6 | Cleanup and streaming | Accepted | Approved | Accepted |
+| 7 | CLI pipelines and help | Ready for review | Approved | Pending |
 
 Record explicit approvals here as they arrive. Use the statuses Waiting,
 Approved, In progress, Ready for review, and Accepted. Record the approving
 instruction and any scope changes with the relevant phase. Approval to start
 and acceptance of completed work are separate decisions; one message may give
 both acceptance of a finished phase and approval to start the next.
+
+### Package management (separate approved scope)
+
+**Approval to start:** The user requested, "ok implement the package mamanger",
+following the design for CLI-integrated package management in this repository.
+This does not approve proposed Phase 7.
+
+**Status:** Ready for review.
+
+The CLI now provides `init`, `add`, `install`, and `update`, using `scripta.toml`,
+versioned `scripta.lock` files, local snapshots, Git semantic-version tags or
+revision pins, SHA-256 checksums, and private transitive dependencies. Script
+loading resolves declared package names without downloading or changing the
+existing shared-scope include behavior. See [packages](packages.md) for the API,
+limits, failure behavior, and deferred registry/publishing features.
+
+**Validation:** `cargo test --workspace --locked`,
+`cargo clippy --workspace --all-targets --locked -- -D warnings`,
+`cargo fmt --all -- --check`, and `git diff --check` pass locally on macOS.
+Workspace tests need local port access for the existing loopback HTTP fixtures.
+Seven package integration tests cover Git version selection/pins, transitive
+isolation, local snapshots, offline installs, integrity checks, cycles, failed
+installation preservation, path validation, and runtime permissions/policies.
+The `examples/packages` demonstration installs with `--locked --offline`, prints
+`Hello, packages!`, and both scripts pass `scr fmt --check`. Linux/Windows
+execution remains unverified by these local results.
+
+### Aliased requires (separate approved scope)
+
+**Approval to start:** The user requested “ok do this then” after choosing
+`require_once "helpers" as Helpers;` with `Helpers::function()` calls, isolated
+module scopes, and unchanged unaliased includes.
+
+**Status:** Ready for review.
+
+The optional `as Alias` works with both require forms and local files or installed
+packages. Module functions/variables are isolated from the caller; aliases are
+lexical and cannot shadow registered namespaces or bind a different file.
+`require_once` shares a cached canonical-path instance, while `require` initializes
+a fresh scope and publishes it on success. Dependencies retain source-relative
+resolution and installed versions stay isolated. Alias and cache references are
+traced by the collector, and cached roots count toward scope limits. Failed
+initialization restores runtime state and preserves previous bindings; external
+effects and already initialized dependencies are not rolled back. See
+[package aliases](packages.md#package-aliases-and-isolation).
+
+**Validation:** Local macOS ARM64 workspace tests passed with both
+`--all-features` and `--no-default-features`, using `--locked --offline` and running
+sequentially outside the sandbox for existing loopback HTTP/TLS fixtures. Eleven
+focused module-alias tests cover duplicate names, scope isolation, shared once
+state, fresh requires, conflict errors, nested includes/aliases, GC/callback
+retention, cached empty modules, retry/fatal/exit cleanup, permissions/policy,
+scope pressure, canonical identity, source diagnostics, and formatter/check
+behavior. Installed-package tests verify two private dependency versions with
+identical function and alias names, plus checksum enforcement. Parser tests cover
+valid expressions/aliases and malformed bindings. The final self-entry once-state
+fix also passed focused tests and the no-default-features workspace suite.
+
+All-feature Clippy with warnings denied, Rust formatting, `git diff --check`, and
+the package example's `scr fmt --check` passed. The local package example installed
+with `--locked --offline` and printed `Hello, packages!`. No standard-library
+exports were added. These are local results, not Linux/Windows validation.
+
+### Atomic file replacement (separate approved scope)
+
+**Approval to start:** The user requested “ok do the plan” for
+`File::writeAtomic(path, contents)`, sibling staging, explicit commit semantics,
+permissions/policy checks, cleanup, failure/concurrency tests, and updated report
+guidance. This does not authorize a separate source-file replace API.
+
+**Status:** Ready for review.
+
+`File::writeAtomic` stages bounded UTF-8 writes in the destination directory,
+synchronizes/closes the staged file, and publishes through tempfile's native
+same-filesystem replacement without a delete/copy fallback. Existing regular
+files need write access; final symlinks, nonregular and read-only targets are
+rejected. Unix ordinary mode bits are preserved (special bits stripped), new
+Unix files start private, and Windows uses directory-inherited ACLs. Other
+metadata is not preserved. Precommit failures/cancellation remove staging files
+and preserve the destination; successful publication has no postcommit
+cancellation check. There is no directory synchronization, hard durability
+promise, multi-file transaction, or adversarial path-race sandbox.
+
+The library now has 106 exports. The report example previews unless `--apply`
+is given, and the static-web guide uses atomic writes with first-run reader
+permissions. See the [contract](standard-library.md#atomic-file-replacement).
+
+**Validation:** On macOS ARM64, `cargo test --workspace --all-features --locked
+--offline` passed outside the sandbox for the existing loopback HTTP/TLS fixtures.
+Five focused unit tests cover injected partial writes, commit failures,
+precommit/postcommit cancellation, destination revalidation, and actual cleanup
+failure propagation. Six filesystem integration tests cover Unicode/empty
+creation/replacement, strict signatures, invalid targets, write/root permissions,
+read-only files, Unix modes/symlinks/open descriptors, and concurrent-reader
+old/new snapshots. The improved cleanup-failure test also passed its targeted
+unit run after the workspace run. A Windows-only test holds a handle without
+delete sharing and checks replacement failure preserves the original; this test
+has not been executed on Windows here.
+
+The CLI report example passed preview/no-write, create/replace, parsed JSON,
+formatter equivalence, and no-staging-file checks. The export reference test now
+expects 106 functions. All-feature Clippy with warnings denied, Rust formatting,
+`git diff --check`, and `scr fmt --check examples/atomic-report.scr` passed.
+These are local macOS results, not Linux/Windows validation.
+
+### SQLite built-in extension (separate approved scope)
+
+**Approval to start:** The user said "ok do it" after approving the plan for an
+optional built-in SQLite crate, bound parameters, queries, transactions, resource
+cleanup, permissions, limits, tests, and release instructions. This does not
+approve proposed Phase 7.
+
+**Status:** Ready for review.
+
+`scr-ext-sqlite` now provides `Sqlite::open`, `execute`, `query`, and `close`.
+The CLI's disabled-by-default `sqlite` feature includes bundled SQLite and
+registers the functions per runtime. See [SQLite](sqlite.md) for types, error
+categories, read-only mode, root policies, bounded/cancellable statements, and
+unsupported SQL features. `examples/sqlite.scr` demonstrates parameters and a
+transaction. Verbose version output reports extensions; the release packager
+accepts `--features sqlite`, includes matching notices, records extensions, and
+checks the enabled SQL example during smoke validation.
+
+**Validation:** On macOS ARM64, both
+`cargo test --workspace --all-features --locked --offline` and
+`cargo test --workspace --no-default-features --locked --offline` passed, run
+sequentially so CLI binaries from different feature configurations do not race.
+Existing HTTP fixtures require local port access. Eleven extension integration
+tests cover conversions, parameter binding, constraints, transaction counts,
+read-only connections, locking, roots and symlinks, denied SQL, limits,
+cancellation, cleanup, and handle ownership. CLI tests cover both feature
+configurations and repeat pipeline registration.
+
+`cargo +1.85.0 check -p scr-ext-sqlite --locked --offline`,
+`cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings`,
+`cargo fmt --all -- --check`, `git diff --check`, and the SQLite example's
+`scr fmt --check` passed. Targeted release/extension tests passed after adding
+extension-list archive validation and dangling-symlink coverage. A local archive
+made from the debug SQLite-enabled binary passed verify and offline smoke;
+its declared extensions and rusqlite/libsqlite3-sys license inventories were
+checked. This is local development evidence, not a dist-profile release or
+Linux/Windows validation result.
 
 ## Work already implemented
 
@@ -623,7 +766,7 @@ work explicitly. There is no automatically authorized next phase.
 completion summary. This review completes the next decision checkpoint; new feature work
 still requires an explicit scope approval.
 
-**Findings from the current debug CLI**
+**Historical findings before Phase 7**
 
 | Workflow | Observed result |
 | --- | --- |
@@ -649,31 +792,52 @@ passes all six matching playground tests. Both new playgrounds pass
 `scr fmt --check`. `cargo fmt --all -- --check` and `git diff --check` pass.
 The CLI probes used temporary scripts/input and did not change public APIs.
 
-## Proposed Phase 7 CLI pipelines and help
+## Phase 7 CLI pipelines and help
 
-**Status:** Proposed; approval to start is pending. This is the recommended next
-scope, not an automatically authorized continuation.
+**Approval to start:** The user requested “fix:2. Proper shell-pipeline support”
+and explicitly identified missing bounded stdin input, source from stdin, and
+command-local help. This authorizes Phase 7 plus source-from-stdin execution.
 
-**Proposed scope**
+**Status:** Ready for review.
 
-- Support `scr help run|check|fmt` and command-local `--help`/`-h` before the
-  source path, printing relevant help to stdout with exit 0. Preserve literal
-  paths after `--`, usage errors, and all arguments after the script path.
-- Add `Cli::readLine(maxLineBytes: int optional): string or null` for bounded
-  UTF-8 input from the runtime's existing buffered stdin, without printing or
-  flushing a prompt. Reuse file-stream conventions for LF/CRLF, empty lines,
-  EOF, raw-byte maxima, logical output limits, and cancellation. Define the
-  input capability and recovery behavior after read/encoding/limit errors in
-  the API contract before implementation.
-- Let the streaming playground accept `-` as its data-input argument while
-  preserving its filename mode and missing-argument usage. Keep script source
-  in a file; source-from-stdin parsing is a separate future decision.
-- Add end-to-end pipe/help tests and focused input boundary tests, update the
-  reference/export counts and README, and run the shared phase checks.
+**Implemented API and behavior**
 
-Callback transforms, precision formatting, writable streams, source from stdin,
-and new language syntax remain separate possible scopes.
+- `scr help run|check|fmt` and command-local `--help`/`-h` print relevant help to
+  stdout with exit 0. Escaped paths and arguments after the source path stay literal.
+- `Cli::readLine(maxLineBytes: int optional): string or null` reads buffered UTF-8
+  stdin without a prompt or output flush. It defaults to 1 MiB raw lines, including
+  terminators, and requires the independent default-enabled `cli.read` capability.
+  LF/CRLF, blank lines, final unterminated lines, and repeated EOF follow the file
+  stream conventions. Signature/range/permission failures do not consume input.
+  Read failures disable further readLine/prompt calls for that registration;
+  logical result budgets and cancellation checks apply during bounded assembly.
+- The streaming playground accepts `-` for piped data and retains file mode,
+  usage errors, and explicit file cleanup.
+- `scr run - [arguments...]` reads source through EOF with UTF-8 and source-budget
+  validation. Tags remain required. Includes and packages resolve from the working
+  directory, diagnostics use `<stdin>`, and subsequent script input observes EOF.
+  `scr run -- -` continues to address a literal filename.
 
-**Approval record:** Pending.
+See the [input contract](standard-library.md#script-arguments-and-prompts) and
+[README pipeline examples](../README.md#shell-pipelines). The default library now
+exports 105 functions. Input reads are synchronous; cancellation waits for a
+blocked read to return. Source-from-stdin is consumed before runtime execution.
 
-**Completion record:** Not started.
+**Validation:** On macOS ARM64, `cargo test --workspace --all-features --locked
+--offline` passed, including four new CLI pipeline/help tests and five new input
+integration tests. The suite ran outside the sandbox because existing HTTP/TLS
+fixtures bind loopback ports. Coverage includes Unicode split across buffers,
+blank lines/EOF, shared prompt cursors, raw/default/logical limits, strict inputs,
+separate permissions, read failures, mid-read cancellation, failed input state,
+stdin-source tags/UTF-8/budget/diagnostics, arguments, relative includes, literal
+paths, and streaming file/pipe parity.
+
+`cargo clippy --workspace --all-targets --all-features --locked --offline -- -D
+warnings`, `cargo fmt --all -- --check`, `git diff --check`, and the streaming
+playground's `scr fmt --check` passed. Direct CLI help and stdin-source smoke
+checks passed. These are local results, not Linux/Windows validation.
+
+Callback transforms, precision formatting, writable streams, and new language
+syntax remain separate possible scopes.
+
+**Completion acceptance:** Pending.

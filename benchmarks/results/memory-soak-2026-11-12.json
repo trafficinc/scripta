@@ -1,0 +1,572 @@
+{
+  "schema_version": 1,
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "worker": "/Users/admin/Documents/projects/scripta/target/release/examples/memory_soak",
+  "warmup_batches": 3,
+  "measured_batches": 20,
+  "iterations_per_batch": 500,
+  "rss_method": "ps_rss",
+  "thresholds_enforced": false,
+  "workloads": [
+    {
+      "workload": "transient",
+      "expected_behavior": "Memory should settle after warmup; allocator retention may remain.",
+      "operations_per_batch": 500,
+      "growth_from_baseline_bytes": 81920,
+      "samples": [
+        {
+          "phase": "baseline",
+          "batch": 0,
+          "elapsed_seconds": 0.07618475000000001,
+          "rss_bytes": 2441216
+        },
+        {
+          "phase": "sample",
+          "batch": 1,
+          "elapsed_seconds": 0.082106,
+          "rss_bytes": 2441216
+        },
+        {
+          "phase": "sample",
+          "batch": 2,
+          "elapsed_seconds": 0.08724433399999999,
+          "rss_bytes": 2441216
+        },
+        {
+          "phase": "sample",
+          "batch": 3,
+          "elapsed_seconds": 0.09239474999999998,
+          "rss_bytes": 2457600
+        },
+        {
+          "phase": "sample",
+          "batch": 4,
+          "elapsed_seconds": 0.097098417,
+          "rss_bytes": 2473984
+        },
+        {
+          "phase": "sample",
+          "batch": 5,
+          "elapsed_seconds": 0.1017415,
+          "rss_bytes": 2473984
+        },
+        {
+          "phase": "sample",
+          "batch": 6,
+          "elapsed_seconds": 0.10636233399999999,
+          "rss_bytes": 2490368
+        },
+        {
+          "phase": "sample",
+          "batch": 7,
+          "elapsed_seconds": 0.11099766700000001,
+          "rss_bytes": 2490368
+        },
+        {
+          "phase": "sample",
+          "batch": 8,
+          "elapsed_seconds": 0.115879459,
+          "rss_bytes": 2506752
+        },
+        {
+          "phase": "sample",
+          "batch": 9,
+          "elapsed_seconds": 0.120373875,
+          "rss_bytes": 2506752
+        },
+        {
+          "phase": "sample",
+          "batch": 10,
+          "elapsed_seconds": 0.12490824999999998,
+          "rss_bytes": 2506752
+        },
+        {
+          "phase": "sample",
+          "batch": 11,
+          "elapsed_seconds": 0.12922420899999998,
+          "rss_bytes": 2506752
+        },
+        {
+          "phase": "sample",
+          "batch": 12,
+          "elapsed_seconds": 0.13355841699999998,
+          "rss_bytes": 2506752
+        },
+        {
+          "phase": "sample",
+          "batch": 13,
+          "elapsed_seconds": 0.13784770899999998,
+          "rss_bytes": 2506752
+        },
+        {
+          "phase": "sample",
+          "batch": 14,
+          "elapsed_seconds": 0.14206266699999998,
+          "rss_bytes": 2523136
+        },
+        {
+          "phase": "sample",
+          "batch": 15,
+          "elapsed_seconds": 0.146293709,
+          "rss_bytes": 2523136
+        },
+        {
+          "phase": "sample",
+          "batch": 16,
+          "elapsed_seconds": 0.150613459,
+          "rss_bytes": 2523136
+        },
+        {
+          "phase": "sample",
+          "batch": 17,
+          "elapsed_seconds": 0.15616950000000002,
+          "rss_bytes": 2523136
+        },
+        {
+          "phase": "sample",
+          "batch": 18,
+          "elapsed_seconds": 0.16121362499999997,
+          "rss_bytes": 2523136
+        },
+        {
+          "phase": "sample",
+          "batch": 19,
+          "elapsed_seconds": 0.16604875000000002,
+          "rss_bytes": 2523136
+        },
+        {
+          "phase": "sample",
+          "batch": 20,
+          "elapsed_seconds": 0.170637875,
+          "rss_bytes": 2523136
+        },
+        {
+          "phase": "dropped",
+          "batch": 20,
+          "elapsed_seconds": 0.174706584,
+          "rss_bytes": 2523136
+        }
+      ]
+    },
+    {
+      "workload": "errors",
+      "expected_behavior": "Memory should settle after warmup; allocator retention may remain.",
+      "operations_per_batch": 1000,
+      "growth_from_baseline_bytes": 163840,
+      "samples": [
+        {
+          "phase": "baseline",
+          "batch": 0,
+          "elapsed_seconds": 0.030764750000000007,
+          "rss_bytes": 2539520
+        },
+        {
+          "phase": "sample",
+          "batch": 1,
+          "elapsed_seconds": 0.04419066700000002,
+          "rss_bytes": 2539520
+        },
+        {
+          "phase": "sample",
+          "batch": 2,
+          "elapsed_seconds": 0.05725591699999999,
+          "rss_bytes": 2539520
+        },
+        {
+          "phase": "sample",
+          "batch": 3,
+          "elapsed_seconds": 0.06970062500000002,
+          "rss_bytes": 2555904
+        },
+        {
+          "phase": "sample",
+          "batch": 4,
+          "elapsed_seconds": 0.08250958400000002,
+          "rss_bytes": 2572288
+        },
+        {
+          "phase": "sample",
+          "batch": 5,
+          "elapsed_seconds": 0.095033584,
+          "rss_bytes": 2572288
+        },
+        {
+          "phase": "sample",
+          "batch": 6,
+          "elapsed_seconds": 0.10743929200000002,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 7,
+          "elapsed_seconds": 0.11973133400000002,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 8,
+          "elapsed_seconds": 0.132047584,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 9,
+          "elapsed_seconds": 0.14436945900000003,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 10,
+          "elapsed_seconds": 0.156718042,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 11,
+          "elapsed_seconds": 0.16967620900000002,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 12,
+          "elapsed_seconds": 0.181873375,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 13,
+          "elapsed_seconds": 0.194103625,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 14,
+          "elapsed_seconds": 0.206162542,
+          "rss_bytes": 2703360
+        },
+        {
+          "phase": "sample",
+          "batch": 15,
+          "elapsed_seconds": 0.218101875,
+          "rss_bytes": 2703360
+        },
+        {
+          "phase": "sample",
+          "batch": 16,
+          "elapsed_seconds": 0.23002487500000002,
+          "rss_bytes": 2703360
+        },
+        {
+          "phase": "sample",
+          "batch": 17,
+          "elapsed_seconds": 0.24205150000000003,
+          "rss_bytes": 2703360
+        },
+        {
+          "phase": "sample",
+          "batch": 18,
+          "elapsed_seconds": 0.254479584,
+          "rss_bytes": 2703360
+        },
+        {
+          "phase": "sample",
+          "batch": 19,
+          "elapsed_seconds": 0.26668025,
+          "rss_bytes": 2703360
+        },
+        {
+          "phase": "sample",
+          "batch": 20,
+          "elapsed_seconds": 0.278885542,
+          "rss_bytes": 2703360
+        },
+        {
+          "phase": "dropped",
+          "batch": 20,
+          "elapsed_seconds": 0.282125459,
+          "rss_bytes": 2703360
+        }
+      ]
+    },
+    {
+      "workload": "closures",
+      "expected_behavior": "Captured environments remain until runtime drop; growth is expected.",
+      "operations_per_batch": 500,
+      "growth_from_baseline_bytes": 48234496,
+      "samples": [
+        {
+          "phase": "baseline",
+          "batch": 0,
+          "elapsed_seconds": 0.004942082999999986,
+          "rss_bytes": 9289728
+        },
+        {
+          "phase": "sample",
+          "batch": 1,
+          "elapsed_seconds": 0.009660374999999943,
+          "rss_bytes": 11616256
+        },
+        {
+          "phase": "sample",
+          "batch": 2,
+          "elapsed_seconds": 0.013812417000000021,
+          "rss_bytes": 13910016
+        },
+        {
+          "phase": "sample",
+          "batch": 3,
+          "elapsed_seconds": 0.018006042,
+          "rss_bytes": 16220160
+        },
+        {
+          "phase": "sample",
+          "batch": 4,
+          "elapsed_seconds": 0.02205216700000001,
+          "rss_bytes": 18546688
+        },
+        {
+          "phase": "sample",
+          "batch": 5,
+          "elapsed_seconds": 0.026012707999999996,
+          "rss_bytes": 20856832
+        },
+        {
+          "phase": "sample",
+          "batch": 6,
+          "elapsed_seconds": 0.029918792000000027,
+          "rss_bytes": 23166976
+        },
+        {
+          "phase": "sample",
+          "batch": 7,
+          "elapsed_seconds": 0.03368391699999995,
+          "rss_bytes": 25493504
+        },
+        {
+          "phase": "sample",
+          "batch": 8,
+          "elapsed_seconds": 0.03751883300000003,
+          "rss_bytes": 27787264
+        },
+        {
+          "phase": "sample",
+          "batch": 9,
+          "elapsed_seconds": 0.04145199999999993,
+          "rss_bytes": 30097408
+        },
+        {
+          "phase": "sample",
+          "batch": 10,
+          "elapsed_seconds": 0.045253125000000005,
+          "rss_bytes": 32423936
+        },
+        {
+          "phase": "sample",
+          "batch": 11,
+          "elapsed_seconds": 0.049293417000000006,
+          "rss_bytes": 34734080
+        },
+        {
+          "phase": "sample",
+          "batch": 12,
+          "elapsed_seconds": 0.05368345799999996,
+          "rss_bytes": 37044224
+        },
+        {
+          "phase": "sample",
+          "batch": 13,
+          "elapsed_seconds": 0.05812445799999999,
+          "rss_bytes": 39354368
+        },
+        {
+          "phase": "sample",
+          "batch": 14,
+          "elapsed_seconds": 0.06233074999999999,
+          "rss_bytes": 43646976
+        },
+        {
+          "phase": "sample",
+          "batch": 15,
+          "elapsed_seconds": 0.06615075000000004,
+          "rss_bytes": 45957120
+        },
+        {
+          "phase": "sample",
+          "batch": 16,
+          "elapsed_seconds": 0.06990987500000001,
+          "rss_bytes": 48283648
+        },
+        {
+          "phase": "sample",
+          "batch": 17,
+          "elapsed_seconds": 0.073748292,
+          "rss_bytes": 50593792
+        },
+        {
+          "phase": "sample",
+          "batch": 18,
+          "elapsed_seconds": 0.07768654200000003,
+          "rss_bytes": 52887552
+        },
+        {
+          "phase": "sample",
+          "batch": 19,
+          "elapsed_seconds": 0.08149745799999997,
+          "rss_bytes": 55214080
+        },
+        {
+          "phase": "sample",
+          "batch": 20,
+          "elapsed_seconds": 0.08525420799999994,
+          "rss_bytes": 57524224
+        },
+        {
+          "phase": "dropped",
+          "batch": 20,
+          "elapsed_seconds": 0.09256679199999995,
+          "rss_bytes": 57540608
+        }
+      ]
+    },
+    {
+      "workload": "recreate",
+      "expected_behavior": "Memory should settle after warmup; allocator retention may remain.",
+      "operations_per_batch": 500,
+      "growth_from_baseline_bytes": 442368,
+      "samples": [
+        {
+          "phase": "baseline",
+          "batch": 0,
+          "elapsed_seconds": 0.0065932080000000726,
+          "rss_bytes": 2490368
+        },
+        {
+          "phase": "sample",
+          "batch": 1,
+          "elapsed_seconds": 0.011371917000000065,
+          "rss_bytes": 2523136
+        },
+        {
+          "phase": "sample",
+          "batch": 2,
+          "elapsed_seconds": 0.01593858300000006,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 3,
+          "elapsed_seconds": 0.020657125000000054,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 4,
+          "elapsed_seconds": 0.02545712500000008,
+          "rss_bytes": 2621440
+        },
+        {
+          "phase": "sample",
+          "batch": 5,
+          "elapsed_seconds": 0.030136708000000012,
+          "rss_bytes": 2686976
+        },
+        {
+          "phase": "sample",
+          "batch": 6,
+          "elapsed_seconds": 0.03458841700000004,
+          "rss_bytes": 2736128
+        },
+        {
+          "phase": "sample",
+          "batch": 7,
+          "elapsed_seconds": 0.03917137500000001,
+          "rss_bytes": 2785280
+        },
+        {
+          "phase": "sample",
+          "batch": 8,
+          "elapsed_seconds": 0.043785875000000085,
+          "rss_bytes": 2818048
+        },
+        {
+          "phase": "sample",
+          "batch": 9,
+          "elapsed_seconds": 0.048625458000000066,
+          "rss_bytes": 2883584
+        },
+        {
+          "phase": "sample",
+          "batch": 10,
+          "elapsed_seconds": 0.05300162500000005,
+          "rss_bytes": 2883584
+        },
+        {
+          "phase": "sample",
+          "batch": 11,
+          "elapsed_seconds": 0.05739879200000009,
+          "rss_bytes": 2883584
+        },
+        {
+          "phase": "sample",
+          "batch": 12,
+          "elapsed_seconds": 0.061825958000000014,
+          "rss_bytes": 2883584
+        },
+        {
+          "phase": "sample",
+          "batch": 13,
+          "elapsed_seconds": 0.06629795800000005,
+          "rss_bytes": 2899968
+        },
+        {
+          "phase": "sample",
+          "batch": 14,
+          "elapsed_seconds": 0.071368667,
+          "rss_bytes": 2916352
+        },
+        {
+          "phase": "sample",
+          "batch": 15,
+          "elapsed_seconds": 0.07638304200000001,
+          "rss_bytes": 2916352
+        },
+        {
+          "phase": "sample",
+          "batch": 16,
+          "elapsed_seconds": 0.08137787500000004,
+          "rss_bytes": 2916352
+        },
+        {
+          "phase": "sample",
+          "batch": 17,
+          "elapsed_seconds": 0.08623833300000006,
+          "rss_bytes": 2916352
+        },
+        {
+          "phase": "sample",
+          "batch": 18,
+          "elapsed_seconds": 0.09100104200000003,
+          "rss_bytes": 2932736
+        },
+        {
+          "phase": "sample",
+          "batch": 19,
+          "elapsed_seconds": 0.09598800000000007,
+          "rss_bytes": 2932736
+        },
+        {
+          "phase": "sample",
+          "batch": 20,
+          "elapsed_seconds": 0.10093950000000007,
+          "rss_bytes": 2932736
+        },
+        {
+          "phase": "dropped",
+          "batch": 20,
+          "elapsed_seconds": 0.104129625,
+          "rss_bytes": 2932736
+        }
+      ]
+    }
+  ]
+}
