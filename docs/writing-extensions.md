@@ -295,6 +295,17 @@ input sizes, result counts, and buffers before allocating large amounts of memor
 The greeting example uses a fixed small input bound; it is not a template for
 unbounded data processing.
 
+Binary APIs can accept or return `Value::Bytes(Rc<[u8]>)` with
+`NativeType::Bytes`. These values have content equality, no implicit text
+conversion, and payload-aware runtime value limits. Check output budgets before
+allocating byte buffers, as for strings.
+
+For objects retaining in-memory data, implement `NativeObject::payload_bytes`
+to report retained logical payload bytes beyond the outer Value slot. The default
+is zero; HTTP response objects report raw body and header storage. This hook
+should be cheap, side-effect-free, and must not execute script code. It does not
+replace allocation checks inside native work or provide an aggregate heap limit.
+
 For stateful handles, return `Value::NativeObject(Rc<dyn NativeObject>)` and use
 `NativeType::Object("YourType")` in signatures. Native objects currently expose
 properties through `get_property` and optional `set_property`; methods on script

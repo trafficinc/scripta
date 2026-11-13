@@ -1,10 +1,17 @@
 //! Synchronous bounded HTTP with verified Rustls HTTPS and local response objects.
-use crate::json;
+use crate::{
+    bytes::{budget, grow, resource},
+    filesystem::FilesystemPolicy,
+    json, paths,
+};
 use scr_runtime::{
     MapKey, NativeError, NativeFunction, NativeObject, NativeResult, NativeSignature, NativeType,
-    Runtime, Value,
+    Runtime, RuntimeContext, Value,
 };
 use std::{
+    io::{Read, Write},
+    mem::size_of,
+    path::Path,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -34,9 +41,46 @@ impl Default for HttpConfig {
 struct Response {
     status: u16,
     headers: Value,
-    body: Rc<String>,
+    body: Rc<[u8]>,
+    binary: bool,
+}
+fn header_bytes(headers: &Value) -> usize {
+    let Value::Map(entries) = headers else {
+        unreachable!()
+    };
+    size_of::<Value>()
+        + entries
+            .iter()
+            .map(|(key, values)| {
+                let MapKey::String(key) = key else {
+                    unreachable!()
+                };
+                let Value::List(values) = values else {
+                    unreachable!()
+                };
+                size_of::<MapKey>()
+                    + key.len()
+                    + size_of::<Value>()
+                    + values
+                        .iter()
+                        .map(|value| {
+                            let Value::String(value) = value else {
+                                unreachable!()
+                            };
+                            size_of::<Value>() + value.len()
+                        })
+                        .sum::<usize>()
+            })
+            .sum::<usize>()
+}
+fn decode(bytes: &[u8]) -> NativeResult<&str> {
+    std::str::from_utf8(bytes)
+        .map_err(|_| NativeError::new("EncodingError", "HTTP response body is not UTF-8"))
 }
 impl NativeObject for Response {
+    fn payload_bytes(&self) -> usize {
+        self.body.len().saturating_add(header_bytes(&self.headers))
+    }
     fn type_name(&self) -> &str {
         "HttpResponse"
     }
@@ -44,8 +88,9 @@ impl NativeObject for Response {
         Ok(match name {
             "status" => Value::Int(i64::from(self.status)),
             "headers" => self.headers.clone(),
-            "body" => Value::String((*self.body).clone()),
-            "ok" | "json" | "text" => {
+            "body" if self.binary => Value::Bytes(self.body.clone()),
+            "body" => Value::String(decode(&self.body).map_err(|e| e.to_string())?.into()),
+            "ok" | "json" | "text" | "bytes" => {
                 let name = name.to_owned();
                 let body = self.body.clone();
                 let status = self.status;
@@ -57,13 +102,18 @@ impl NativeObject for Response {
                             match name.as_str() {
                                 "ok" => NativeType::Bool,
                                 "text" => NativeType::String,
+                                "bytes" => NativeType::Bytes,
                                 _ => NativeType::Any,
                             },
                         ),
-                        move |_, _| match name.as_str() {
+                        move |context, _| match name.as_str() {
                             "ok" => Ok(Value::Bool((200..300).contains(&status))),
-                            "text" => Ok(Value::String((*body).clone())),
-                            _ => json::decode(&body),
+                            "bytes" => Ok(Value::Bytes(body.clone())),
+                            "text" => {
+                                crate::bytes::payload(context, body.len())?;
+                                Ok(Value::String(decode(&body)?.into()))
+                            }
+                            _ => json::decode(decode(&body)?),
                         },
                     ),
                 )
@@ -97,7 +147,8 @@ struct Options {
     limit: u64,
     redirects: u32,
     headers: Vec<(HeaderName, HeaderValue)>,
-    body: String,
+    body: Rc<[u8]>,
+    binary: bool,
 }
 fn options(value: Option<&Value>, config: &HttpConfig) -> NativeResult<Options> {
     let mut result = Options {
@@ -105,7 +156,8 @@ fn options(value: Option<&Value>, config: &HttpConfig) -> NativeResult<Options> 
         limit: config.max_response_bytes,
         redirects: config.max_redirects,
         headers: vec![],
-        body: String::new(),
+        body: Rc::from([]),
+        binary: false,
     };
     let entries = match value {
         None => return Ok(result),
@@ -137,7 +189,15 @@ fn options(value: Option<&Value>, config: &HttpConfig) -> NativeResult<Options> 
                 result.redirects = *count as u32
             }
             (MapKey::String(key), Value::String(body)) if key == "body" => {
-                result.body = body.clone()
+                result.body = Rc::from(body.as_bytes())
+            }
+            (MapKey::String(key), Value::Bytes(body)) if key == "body" => {
+                result.body = body.clone();
+            }
+            (MapKey::String(key), Value::String(mode))
+                if key == "responseType" && matches!(mode.as_str(), "text" | "bytes") =>
+            {
+                result.binary = mode == "bytes";
             }
             (MapKey::String(key), Value::List(headers))
                 if key == "headers" && headers.is_empty() => {}
@@ -178,7 +238,12 @@ fn options(value: Option<&Value>, config: &HttpConfig) -> NativeResult<Options> 
     }
     Ok(result)
 }
-pub(crate) fn register(runtime: &mut Runtime, config: HttpConfig) -> NativeResult<()> {
+pub(crate) fn register(
+    runtime: &mut Runtime,
+    config: HttpConfig,
+    policy: FilesystemPolicy,
+) -> NativeResult<()> {
+    let policy = policy.prepare()?;
     if config.timeout.is_zero()
         || Instant::now().checked_add(config.timeout).is_none()
         || config.max_response_bytes > i64::MAX as u64
@@ -187,24 +252,40 @@ pub(crate) fn register(runtime: &mut Runtime, config: HttpConfig) -> NativeResul
             "invalid host HTTP timeout or response limit",
         ));
     }
-    for operation in ["get", "post", "request"] {
+    for operation in ["get", "post", "request", "download"] {
+        let policy = policy.clone();
         let config = config.clone();
         let params = if operation == "get" {
             vec![NativeType::String]
+        } else if operation == "post" {
+            vec![
+                NativeType::String,
+                NativeType::OneOf(vec![NativeType::String, NativeType::Bytes]),
+            ]
         } else {
             vec![NativeType::String, NativeType::String]
         };
         runtime.register(
             format!("Http::{operation}"),
             NativeFunction::new(
-                NativeSignature::new(params, NativeType::Object("HttpResponse")).with_optional(
-                    vec![NativeType::OneOf(vec![NativeType::List, NativeType::Map])],
-                ),
+                NativeSignature::new(
+                    params,
+                    if operation == "download" {
+                        NativeType::Map
+                    } else {
+                        NativeType::Object("HttpResponse")
+                    },
+                )
+                .with_optional(vec![NativeType::OneOf(vec![
+                    NativeType::List,
+                    NativeType::Map,
+                ])]),
                 move |context, args| {
                     context.permissions.require("http.request")?;
                     let (method, url, option_index) = match operation {
                         "get" => ("GET", string(&args[0]), 1),
                         "post" => ("POST", string(&args[0]), 2),
+                        "download" => ("GET", string(&args[0]), 2),
                         _ => (string(&args[0]), string(&args[1]), 2),
                     };
                     let mut options = options(args.get(option_index), &config)?;
@@ -219,8 +300,29 @@ pub(crate) fn register(runtime: &mut Runtime, config: HttpConfig) -> NativeResul
                                 ));
                             }
                         }
-                        options.body = string(&args[1]).into();
+                        options.body = match &args[1] {
+                            Value::String(body) => Rc::from(body.as_bytes()),
+                            Value::Bytes(body) => body.clone(),
+                            _ => unreachable!(),
+                        };
                     }
+                    let destination = if operation == "download" {
+                        if let Some(Value::Map(entries)) = args.get(option_index) {
+                            if entries
+                                .iter()
+                                .any(|(key, _)| matches!(key, MapKey::String(key) if key == "body"))
+                            {
+                                return Err(NativeError::type_error(
+                                    "download does not accept a request body",
+                                ));
+                            }
+                        }
+                        let path = paths::resolve(context, string(&args[1]))?;
+                        check_destination(context, &policy, &path)?;
+                        Some(path)
+                    } else {
+                        None
+                    };
                     let uri: http::Uri = url
                         .parse()
                         .map_err(|_| NativeError::type_error("invalid HTTP URL"))?;
@@ -244,7 +346,7 @@ pub(crate) fn register(runtime: &mut Runtime, config: HttpConfig) -> NativeResul
                         builder = builder.header(key, value);
                     }
                     let request = builder
-                        .body(options.body.as_str())
+                        .body(options.body.as_ref())
                         .map_err(|_| NativeError::type_error("invalid HTTP request"))?;
                     let agent: ureq::Agent = ureq::Agent::config_builder()
                         .http_status_as_error(false)
@@ -279,20 +381,54 @@ pub(crate) fn register(runtime: &mut Runtime, config: HttpConfig) -> NativeResul
                             .collect::<NativeResult<Vec<_>>>()?;
                         headers.push((MapKey::String(key.as_str().into()), Value::List(values)));
                     }
-                    let bytes = response
+                    let headers = Value::Map(headers);
+                    if let Some(destination) = destination {
+                        if !(200..300).contains(&status) {
+                            return Err(NativeError::new(
+                                "HttpStatusError",
+                                format!("download returned HTTP {status}"),
+                            ));
+                        }
+                        return download(
+                            context,
+                            &policy,
+                            &destination,
+                            &mut response,
+                            options.limit,
+                            status,
+                            headers,
+                        );
+                    }
+                    let mut size = size_of::<Value>();
+                    grow(context, &mut size, header_bytes(&headers))?;
+                    let mut reader = response
                         .body_mut()
                         .with_config()
                         .limit(options.limit)
-                        .read_to_vec()
-                        .map_err(failure)?;
+                        .reader();
+                    let mut bytes = Vec::new();
+                    let mut buffer = [0; 64 * 1024];
+                    loop {
+                        context.check_cancelled()?;
+                        let count = reader.read(&mut buffer).map_err(|e| failure(e.into()))?;
+                        if count == 0 {
+                            break;
+                        }
+                        grow(context, &mut size, count)?;
+                        bytes
+                            .try_reserve(count)
+                            .map_err(|_| resource("HTTP body allocation failed"))?;
+                        bytes.extend_from_slice(&buffer[..count]);
+                    }
                     context.check_cancelled()?;
-                    let body = String::from_utf8(bytes).map_err(|_| {
-                        NativeError::new("EncodingError", "HTTP response body is not UTF-8")
-                    })?;
+                    if !options.binary {
+                        decode(&bytes)?;
+                    }
                     Ok(Value::NativeObject(Rc::new(Response {
                         status,
-                        headers: Value::Map(headers),
-                        body: Rc::new(body),
+                        headers,
+                        body: bytes.into(),
+                        binary: options.binary,
                     })))
                 },
             ),
@@ -305,4 +441,112 @@ fn string(value: &Value) -> &str {
         unreachable!()
     };
     value
+}
+
+fn check_destination(
+    context: &RuntimeContext<'_>,
+    policy: &FilesystemPolicy,
+    path: &Path,
+) -> NativeResult<()> {
+    policy.check(context, path, true)?;
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Err(NativeError::new(
+            "AlreadyExistsError",
+            "download destination already exists",
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(NativeError::new("FilesystemError", e.to_string())),
+    }
+}
+fn download(
+    context: &RuntimeContext<'_>,
+    policy: &FilesystemPolicy,
+    path: &Path,
+    response: &mut ureq::http::Response<ureq::Body>,
+    limit: u64,
+    status: u16,
+    headers: Value,
+) -> NativeResult {
+    let parent = path
+        .parent()
+        .ok_or_else(|| NativeError::new("PathError", "download destination needs a parent"))?;
+    policy.check(context, parent, true)?;
+    // Preflight the complete metadata result before creating or publishing a file.
+    let result_size = size_of::<Value>()
+        + header_bytes(&headers)
+        + 2 * size_of::<Value>()
+        + 3 * size_of::<MapKey>()
+        + "status".len()
+        + "headers".len()
+        + "bytesWritten".len();
+    budget(context, result_size)?;
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".scripta-download-")
+        .tempfile_in(parent)
+        .map_err(|e| NativeError::new("FilesystemError", e.to_string()))?;
+    let transfer: NativeResult<u64> = (|| {
+        let mut reader = response.body_mut().with_config().limit(limit).reader();
+        let mut buffer = [0; 64 * 1024];
+        let mut count = 0u64;
+        loop {
+            context.check_cancelled()?;
+            let size = reader.read(&mut buffer).map_err(|e| failure(e.into()))?;
+            if size == 0 {
+                break;
+            }
+            context.check_cancelled()?;
+            temporary
+                .write_all(&buffer[..size])
+                .map_err(|e| NativeError::new("FilesystemError", e.to_string()))?;
+            count += size as u64;
+        }
+        temporary
+            .as_file()
+            .sync_all()
+            .map_err(|e| NativeError::new("FilesystemError", e.to_string()))?;
+        check_destination(context, policy, path)?;
+        Ok(count)
+    })();
+    let count = match transfer {
+        Ok(count) => count,
+        Err(mut error) => {
+            if let Err(cleanup) = temporary.close() {
+                error
+                    .message
+                    .push_str(&format!("; download cleanup failed: {cleanup}"));
+            }
+            return Err(error);
+        }
+    };
+    let result = Value::Map(vec![
+        (
+            MapKey::String("status".into()),
+            Value::Int(i64::from(status)),
+        ),
+        (MapKey::String("headers".into()), headers),
+        (
+            MapKey::String("bytesWritten".into()),
+            Value::Int(count as i64),
+        ),
+    ]);
+    temporary
+        .into_temp_path()
+        .persist_noclobber(path)
+        .map_err(|e| {
+            let mut error = NativeError::new(
+                if e.error.kind() == std::io::ErrorKind::AlreadyExists {
+                    "AlreadyExistsError"
+                } else {
+                    "FilesystemError"
+                },
+                e.error.to_string(),
+            );
+            if let Err(cleanup) = e.path.close() {
+                error
+                    .message
+                    .push_str(&format!("; download cleanup failed: {cleanup}"));
+            }
+            error
+        })?;
+    Ok(result)
 }

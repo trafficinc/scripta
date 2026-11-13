@@ -16,13 +16,13 @@ conditions, string concatenation, or output.
 | `int(value): int` | Int is unchanged; bool becomes 0/1; a finite integral float within i64 range is converted exactly; strings must parse as signed decimal i64 without whitespace or fractional/exponent notation. |
 | `float(value): float` | Finite floats are unchanged; ints convert to f64 (large values may round); bool becomes 0.0/1.0; strings must parse as finite floating-point numbers without whitespace. |
 | `bool(value): bool` | Bool is unchanged; numeric 0/1 become false/true; exactly `"false"`/`"true"` become false/true. Other values are errors. |
-| `type(value): string` | Returns `null`, `bool`, `int`, `float`, `string`, `list`, `map`, or `callable`. Native objects return their host-defined type name. |
-| `len(value): int` | Counts Unicode scalar values in a string (not bytes or grapheme clusters), or entries in a list/map. Other values are errors. |
+| `type(value): string` | Returns `null`, `bool`, `int`, `float`, `string`, `bytes`, `list`, `map`, or `callable`. Native objects return their host-defined type name. |
+| `len(value): int` | Counts Unicode scalar values in a string (not bytes or grapheme clusters), bytes in a byte value, or entries in a list/map. Other values are errors. |
 | `sleep(milliseconds): null` | Requires a nonnegative int duration in milliseconds and the `sleep` capability, allowed by default. Zero returns immediately; long sleeps check cancellation in chunks of at most 10 ms of requested sleep. OS scheduling can delay observation. |
 
 `int(1.5)` raises an error rather than truncating. `bool(2)`, `bool("")`, and
 `bool("1")` raise errors rather than applying truthiness. Null is accepted only by
-`str`, not by the numeric or bool conversions. Collections, native objects, and
+`str`, not by the numeric or bool conversions. Bytes, collections, native objects, and
 callables are not accepted by any conversion. Non-finite floats are never valid.
 Float string display need not retain a decimal point (`str(1.0)` is `"1"`), while
 the original numeric types remain distinct for strict equality.
@@ -39,12 +39,12 @@ Embedders opt in by calling `scr_stdlib::register(&mut runtime)?`. Registration
 returns `NativeResult<()>`; duplicate names produce `RegistryError` and preserve
 the existing registration. `echo` and `exit` remain language statements. Neither
 is registered as a native function; exit returns a code without terminating the
-embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Log`, `Json`, `Http`, `String`, `Math`, `List`, and `Map` are
+embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Log`, `Json`, `Http`, `String`, `Math`, `List`, `Map`, `Bytes`, `Csv`, and `Regex` are
 registered by default.
 
 ## Release 0.1.0 export index
 
-This reference covers all 106 registered functions in the default library, plus
+This reference covers all 123 registered functions in the default library, plus
 native response/entry properties and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -52,11 +52,11 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Module | Public functions | Details |
 | --- | --- | --- |
 | Globals | `str`, `int`, `float`, `bool`, `type`, `len`, `sleep` | Conversion table above |
-| String | `String::trim`, `String::split`, `String::join`, `String::contains`, `String::startsWith`, `String::endsWith`, `String::replace`, `String::substring`, `String::lower`, `String::upper`, `String::format` | [Strings](#strings) |
+| String | `String::trim`, `String::split`, `String::join`, `String::contains`, `String::startsWith`, `String::endsWith`, `String::replace`, `String::substring`, `String::lower`, `String::upper`, `String::format`, `String::graphemeLength`, `String::graphemeSubstring` | [Strings](#strings) |
 | Math | `Math::abs`, `Math::min`, `Math::max`, `Math::floor`, `Math::ceil`, `Math::round` | [Math](#math) |
 | List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort` | [Collections](#collections) |
 | Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove` | [Collections](#collections) |
-| File | `File::exists`, `File::read`, `File::write`, `File::writeAtomic`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close` | [Filesystem](#filesystem-and-paths) |
+| File | `File::exists`, `File::read`, `File::readBytes`, `File::writeBytes`, `File::appendBytes`, `File::write`, `File::writeAtomic`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close` | [Filesystem](#filesystem-and-paths) |
 | Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
 | Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute` | [Paths](#filesystem-and-paths) |
 | Process | `Process::run`, `Process::spawn`, `Process::shell`, `Process::wait`, `Process::poll`, `Process::kill`, `Process::exists`, `Process::currentId` | [Processes](#processes) |
@@ -66,10 +66,13 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Date | `Date::now`, `Date::format`, `Date::parse`, `Date::sleep` | [Dates](#dates) |
 | Log | `Log::info`, `Log::warn`, `Log::error`, `Log::debug`, `Log::setFile` | [Logging](#local-logging) |
 | Json | `Json::encode`, `Json::decode`, `Json::pretty` | [JSON](#json) |
-| Http | `Http::get`, `Http::post`, `Http::request` | [HTTP](#http) |
+| Bytes | `Bytes::encodeUtf8`, `Bytes::decodeUtf8`, `Bytes::slice` | [Binary values](#binary-values) |
+| Csv | `Csv::parse`, `Csv::encode`, `Csv::open`, `Csv::readRow`, `Csv::close` | [CSV](#csv) |
+| Regex | `Regex::isMatch`, `Regex::findAll`, `Regex::replace` | [Regex](#regex) |
+| Http | `Http::get`, `Http::post`, `Http::request`, `Http::download` | [HTTP](#http) |
 
 `DirEntry`, `ProcessResult`, `ProcessHandle`, `MemoryUsage`, `DiskUsage`,
-`HttpResponse`, and `FileStream` are read-only native objects whose properties
+`HttpResponse`, `CsvReader`, and `FileStream` are read-only native objects whose properties
 and methods are listed in their module sections. Convert selected properties into ordinary maps before
 JSON encoding. `require` and `require_once` are statements, not native functions;
 see [local script loading](language-spec.md#local-script-loading). The built-in
@@ -105,6 +108,16 @@ Wrong argument counts or types raise catchable `TypeError` exceptions.
 | `String::lower(text: string): string` | Applies locale-independent Unicode lowercase, including contextual Greek final sigma. Empty input returns `""`. Mappings can expand a scalar, such as `İ` becoming `i` plus a combining dot. |
 | `String::upper(text: string): string` | Applies locale-independent Unicode uppercase. Empty input returns `""`. Mappings can expand scalars, such as `ß` becoming `SS`. |
 
+`String::graphemeLength(text: string): int` counts extended grapheme clusters.
+`String::graphemeSubstring(text: string, start: int, length: int optional): string`
+uses those clusters as its position unit. Bounds and omitted length behave like
+`String::substring`; invalid bounds raise `RangeError`. These helpers preserve
+skin-tone modifiers, flag pairs, combining accents, and joined emoji sequences.
+For example, `len("👍🏽")` is 2, while `String::graphemeLength("👍🏽")` is 1.
+Segmentation uses Unicode 16.0 tables from `unicode-segmentation` 1.12.0;
+clusters do not imply a particular terminal width or font rendering. No
+normalization is applied. Existing scalar-based operations retain their semantics.
+
 `String::format` accepts exactly one value per `{}` placeholder. Values may be
 null, bool, int, finite float, or string, with the same display as `str` (so 1.0
 prints as `1`). Replacement strings are inserted literally and never reparsed.
@@ -115,8 +128,8 @@ value types raise `TypeError`. There are no width, precision, positional, or nam
 placeholders. Unicode is preserved without normalization. Output is preflighted
 before allocating the result and uses the byte budget described below.
 
-Matching is case-sensitive and literal, with no regular expressions or Unicode
-normalization. For example, precomposed `é` and `e` followed by a combining acute
+Matching in the literal `String` search helpers is case-sensitive, without Unicode
+normalization. Use the separate `Regex` module for patterns. For example, precomposed `é` and `e` followed by a combining acute
 accent are different searches. Substring positions use the same Unicode scalar
 unit as `len`, not bytes or grapheme clusters; a combining mark can be selected
 separately. Trimming and case conversion use Rust's Unicode tables, independently
@@ -150,6 +163,95 @@ result construction. A failed helper does not replace an assignment destination.
 
 Try [the strings playground](../playground/strings.scr) for a complete status
 record normalization example.
+
+## Binary values
+
+Strings remain valid UTF-8 text. `bytes` is a separate immutable value holding
+arbitrary bytes, including NUL and invalid UTF-8, with content equality and cheap
+shared clones. It is accepted by function parameter/return annotations as `bytes`.
+It has no implicit string conversion, concatenation, indexing, or JSON encoding.
+Use explicit conversion or byte slicing:
+
+| Function | Behavior |
+| --- | --- |
+| `Bytes::encodeUtf8(text: string): bytes` | Encodes the string as UTF-8 bytes. |
+| `Bytes::decodeUtf8(data: bytes): string` | Strict decoding; invalid UTF-8 raises `EncodingError`. |
+| `Bytes::slice(data: bytes, start: int, length: int optional): bytes` | Nonnegative byte positions; omitted length returns the suffix. Start at the end is allowed; invalid bounds raise `RangeError`. A slice can split a UTF-8 sequence. |
+| `len(data: bytes): int` | Number of bytes, independent of text encoding. |
+
+Byte payloads, including those nested in collections, count toward the runtime
+logical value byte limit. Shared values are charged by logical size, not pointer
+size. File and HTTP operations return byte values without decoding or replacing
+any data.
+
+## Regex
+
+These functions use Rust's `regex` crate with Unicode matching enabled. Arguments
+are strings. Patterns have no surrounding delimiters; use inline flags such as
+`(?i)` for case-insensitive matching and `(?m)` for multiline anchors. Escape a
+backslash in a double-quoted Scripta string, e.g. `"\\d+"`.
+
+| Function | Behavior |
+| --- | --- |
+| `Regex::isMatch(text, pattern): bool` | Whether the pattern matches anywhere in the text. Use anchors for a full-text match. |
+| `Regex::findAll(text, pattern): list` | Full matched strings in left-to-right, nonoverlapping order; empty list for no match. |
+| `Regex::replace(text, pattern, replacement): string` | Replaces all nonoverlapping matches with the literal replacement. `$1`, backslashes, and capture names have no special replacement meaning. |
+
+Empty patterns are valid and match at Unicode scalar boundaries, including both
+ends. Matching does not normalize text or treat grapheme clusters as a unit.
+Lookaround and pattern backreferences are unsupported. Invalid or oversized
+patterns raise `RegexError`; patterns are limited to 65,536 UTF-8 bytes, compiled
+regex size to 1 MiB, and DFA cache size to 1 MiB. Captures, compiled script objects,
+callbacks, and regex splitting are not exposed. Output growth is checked against
+runtime value limits before each append; cancellation is checked between matches.
+A single native match/compile runs synchronously.
+
+## CSV
+
+CSV uses the Rust `csv` crate behind a bounded record scanner. Parsing consumes
+complete records across physical lines, handling quoted delimiters, doubled
+quotes, embedded newlines, CRLF/LF/CR terminators, and a final unterminated line.
+Fields are UTF-8 strings without numeric coercion, trimming, or normalization.
+Backslashes are literal; quotes are escaped by doubling them. An initial UTF-8 BOM is
+removed; BOM characters elsewhere are retained as field content.
+
+| Function | Behavior |
+| --- | --- |
+| `Csv::parse(text: string, options optional): list` | Returns a list of rows, each a list of strings. Empty input returns an empty list. |
+| `Csv::encode(rows: list, options optional): string` | Writes rows of strings with necessary quoting and CRLF record terminators. Empty rows input returns an empty string. |
+| `Csv::open(path: string, options optional): CsvReader` | Opens a regular file with the same filesystem policy as `File::read`. |
+| `Csv::readRow(reader: CsvReader): list or null` | Reads a complete record; null at EOF. Reading an explicitly closed reader raises `StreamError`. |
+| `Csv::close(reader: CsvReader): null` | Idempotently closes the reader and all aliases; `reader->closed` reports state. |
+
+Options are a map or empty list. `delimiter` defaults to comma and must be one
+ASCII byte other than NUL, quote, CR, or LF. `maxRecordBytes` defaults to 1 MiB,
+is a positive int up to 16 MiB, and counts raw record bytes including quoting and
+terminators. Unknown options and invalid types raise `TypeError`. Record and
+execution value limit violations raise `ResourceLimitError`.
+
+Rows must have consistent, nonzero field counts. Blank input records produce one
+empty field. Malformed quotes, invalid UTF-8, and inconsistent widths raise
+`CsvError` with record context. No header interpretation is performed: the first
+row is ordinary data, and duplicate header text is retained. Applications can
+validate and map headers explicitly. CSV encoding preserves field contents; it
+does not sanitize spreadsheet formulas.
+
+Readers retain an open descriptor, close on read errors, and release their
+resources when dropped. They cannot be used by another standard-library
+registration. Use `try`/`finally` to close them promptly. `Csv::parse` bounds the
+entire output value; streaming bounds one raw record and returned row at a time.
+
+```scr
+<?scr
+$reader = Csv::open("records.csv");
+try {
+    while (($row = Csv::readRow($reader)) !== null) {
+        echo Json::encode($row) . "\n";
+    }
+} finally {
+    Csv::close($reader);
+}
+```
 
 ## Math
 
@@ -364,6 +466,9 @@ and does not affect other runtimes. Existing `DirEntry` snapshots keep their pat
 | --- | --- |
 | `File::exists(path): bool` | True for a regular file. Missing paths, directories, and final symlinks return false. Permission and other inspection failures raise exceptions. |
 | `File::read(path): string` | Reads a complete regular file as UTF-8. Invalid file bytes raise `EncodingError`. |
+| `File::readBytes(path: string): bytes` | Reads a complete regular file without text decoding, subject to the execution value limit. |
+| `File::writeBytes(path: string, contents: bytes): null` | Creates or truncates a regular file and writes the exact bytes. |
+| `File::appendBytes(path: string, contents: bytes): null` | Creates a missing file or appends exact bytes. |
 | `File::write(path, contents): null` | Creates or truncates a regular file, replacing its contents. Parent directories must exist. |
 | `File::writeAtomic(path: string, contents: string): null` | Stages a complete UTF-8 file beside the destination, then atomically creates or replaces it. Parent directory must exist; final symlinks, nonregular files, and read-only destinations are rejected. |
 | `File::append(path, contents): null` | Creates a missing file or appends UTF-8 bytes to a regular file. |
@@ -989,9 +1094,9 @@ echo Json::pretty($data) . "\n";
 `Http::get(url, options = [])`, `Http::post(url, body, options = [])`, and
 `Http::request(method, url, options = [])` make synchronous HTTP/HTTPS requests.
 URLs must be absolute, have a host, and contain no embedded user credentials.
-POST's body must be a string; JSON requests use `Json::encode(value)` explicitly
+POST's body accepts a string or bytes; JSON requests use `Json::encode(value)` explicitly
 and supply `Content-Type: application/json`. Generic request bodies use the
-`body` option. Supplying both POST's body argument and a body option is an error.
+`body` option, also accepting string or bytes. Supplying both POST's body argument and a body option is an error.
 Methods are case-sensitive HTTP tokens; CONNECT tunnels are unsupported.
 
 | Option | Default and behavior |
@@ -1000,7 +1105,8 @@ Methods are case-sensitive HTTP tokens; CONNECT tunnels are unsupported.
 | `headers` | Map of string header names to string values. Invalid names/newlines are rejected; Host, Content-Length, and Transfer-Encoding are managed by the client. |
 | `maxBodyBytes` | 8388608 (8 MiB); nonnegative int, no higher than the host ceiling. Counts bytes before UTF-8 decoding. An oversized response is an error, never successful truncation. |
 | `maxRedirects` | 5; nonnegative int, no higher than the host ceiling. Zero returns the original 3xx response without following it. |
-| `body` | Empty string; raw request body for `Http::request`. |
+| `body` | Empty body; string or bytes for `Http::request`. |
+| `responseType` | `"text"` (default) or `"bytes"`. Text mode validates UTF-8 before returning; bytes mode retains arbitrary data. |
 
 Unknown options and invalid values raise `TypeError` before connecting. Headers
 are optional; omit `headers` or use `headers: []` for an empty set. Each request returns a read-only
@@ -1010,10 +1116,15 @@ are optional; omit `headers` or use `headers: []` for an empty set. Each request
 | --- | --- |
 | `status: int` | HTTP status code. |
 | `headers: map` | Lowercase names mapped to **lists of strings**, preserving repeated header values. Header ordering is unspecified. |
-| `body: string` | UTF-8 response text. Invalid UTF-8 raises `EncodingError`; binary bodies and charset conversion are not exposed yet. |
+| `body: string or bytes` | Text in default mode; raw bytes when `responseType` is `"bytes"`. No charset conversion is performed. |
 | `ok(): bool` | True for status 200–299, false otherwise. |
 | `json()` | Decodes body using exactly `Json::decode` semantics, including line/column errors. Does not require a Content-Type header. |
-| `text(): string` | Returns the retained body. Repeated calls do not consume it. |
+| `text(): string` | Strictly decodes retained bytes as UTF-8; invalid bytes raise `EncodingError`. Repeated calls do not consume the body. |
+| `bytes(): bytes` | Returns the retained raw body without decoding. Available in both response modes. |
+
+HTTP response storage includes raw bytes and headers in the runtime value budget.
+Use `responseType: "bytes"` to receive a binary body; `json()` and `text()`
+still require valid UTF-8 when called.
 
 HTTP 4xx/5xx responses are normal response values with `ok() == false`.
 Transport failures return no response: `ConnectionError` covers connection/DNS/I/O
@@ -1033,6 +1144,28 @@ No proxy is selected implicitly from the host environment; no cookie jar or
 transparent response decompression is installed. Native DNS resolution may be
 subject to OS resolver scheduling. Cancellation is checked before/after blocking
 HTTP work; it cannot interrupt a pending socket operation before its timeout.
+
+`Http::download(url: string, destination: string, options optional): map` streams
+a GET response through a 64 KiB buffer into a temporary file beside the destination.
+It returns `status`, `headers` (the same map shape as a response), and
+`bytesWritten`. It requires `http.request` and `filesystem.write`, including host
+filesystem policy checks on the destination and parent. Parent directories must
+exist. All existing destinations, including symlinks, are refused with
+`AlreadyExistsError`; overwrite is not supported. A race creating the destination
+also refuses publication.
+
+Only 2xx responses are published; other statuses raise `HttpStatusError`.
+A completed staging file is synchronized, closed, and published without overwriting
+an existing name. Transfer, timeout, cancellation, limit, and filesystem failures
+remove the temporary file and leave the destination absent. Cleanup errors are
+included in the exception. Download output is not decoded, decompressed, or
+extracted. It accepts the HTTP options above except `body`; `responseType` has no
+effect on the downloaded bytes. Header/status metadata must fit the runtime value
+budget, but the file itself need not. The default **8 MiB HTTP body ceiling also
+applies to downloads**; embedders must raise the host ceiling to allow larger
+archives, and scripts can only lower that ceiling with `maxBodyBytes`.
+Cancellation is checked between body chunks; blocking socket work remains bounded
+by its timeout.
 
 Requests require `http.request`, enabled by default. Hosts can remove that
 capability or use `StdlibOptions { http: HttpConfig { timeout, max_response_bytes,

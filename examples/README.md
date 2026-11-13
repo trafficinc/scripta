@@ -17,6 +17,9 @@ package or source checkout; sample input directories must already exist.
 | atomic-report.scr | `scr examples/atomic-report.scr report.json --apply` | Previews without --apply; publishes a complete JSON report using atomic file replacement. Parent directory must exist. |
 | server-health.scr | `scr examples/server-health.scr` | Local JSON metrics, system RAM and interval-based CPU sample; optional first argument selects a disk path. |
 | http-client.scr | `scr examples/http-client.scr https://example.com/api/status` | Explicit bounded HTTPS/HTTP request and JSON output. Needs the endpoint and valid TLS. |
+| data-handling.scr | `scr examples/data-handling.scr` | Local byte conversions, emoji-aware slicing, CSV round trip, and simple regex. |
+| csv-reader.scr | `scr examples/csv-reader.scr records.csv` | Streams complete CSV records as JSON lines, including quoted multiline fields. |
+| download.scr | `scr examples/download.scr https://example.com/archive.zip archive.zip` | Downloads exact bytes into a new file; default HTTP ceiling is 8 MiB. Requires explicit URL and destination. |
 | command-runner.scr | `scr examples/command-runner.scr git '["status","--short"]'` | Explicit executable plus JSON array of literal arguments, bounded capture/timeout; needs the chosen executable. |
 
 PowerShell also accepts the single-quoted JSON argument shown above. A program or

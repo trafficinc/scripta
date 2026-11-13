@@ -396,18 +396,19 @@ examples and have not been deployment-tested in this checkout.
 
 ## Standard library
 
-The [complete reference](docs/standard-library.md) documents all **106 functions**,
+The [complete reference](docs/standard-library.md) documents all **123 functions**,
 return values, native objects, limits, and errors.
 
 | Modules | Use |
 | --- | --- |
-| `File`, `Dir`, `Path` | Read, write, stream bounded lines, list, copy, move, and organize files. |
+| `File`, `Dir`, `Path` | Read/write text and bytes, stream bounded lines, list, copy, move, and organize files. |
 | `Process` | Run literal arguments, capture bounded output, manage child processes. |
 | `Env`, `Cli` | Environment values, script arguments, options, and prompts. |
 | `System` | Platform, CPU sampling, system memory, disk usage, and host details. |
 | `Date`, `Log` | UTC timestamps, parsing, sleep, and redacted local JSON logs. |
-| `Json`, `Http` | JSON conversion and bounded HTTP/HTTPS requests. |
-| `String` | Trim, split/join, search, replace, take substrings, convert case, and format scalar values with `{}`. |
+| `Json`, `Http` | JSON conversion, binary HTTP/HTTPS requests, and downloads directly to disk. |
+| `Bytes`, `Csv`, `Regex` | Explicit UTF-8 conversion, byte slicing, CSV records and streams, and simple Rust-backed regex. |
+| `String` | Grapheme length/slicing for emoji and combining text; trim, split/join, search, replace, take substrings, convert case, and format scalar values with `{}`. |
 | `Math` | Type-preserving abs, min/max, floor, ceil, and round (ties away from zero). |
 | `List`, `Map` | Slice, remove, concatenate, sort, test membership, construct maps, and safely look up keys. |
 | Global functions | Explicit conversions, `type`, `len`, and cancellable `sleep`. |

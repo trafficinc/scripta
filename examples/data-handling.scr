@@ -1,0 +1,12 @@
+<?scr
+// Local-only examples: Unicode text, explicit bytes, CSV, and simple patterns.
+$text = "👍🏽 café";
+$data = Bytes::encodeUtf8($text);
+echo "UTF-8 bytes: " . str(len($data)) . "\n";
+echo "First grapheme: " . String::graphemeSubstring($text, 0, 1) . "\n";
+echo Bytes::decodeUtf8($data) . "\n";
+$rows = [["name", "note"], ["Ada, Lovelace", "first line\nsecond line"]];
+$csv = Csv::encode($rows);
+echo Json::encode(Csv::parse($csv)) . "\n";
+echo Json::encode(Regex::findAll("job-12 job-34", "job-[0-9]+")) . "\n";
+echo Regex::replace("ERROR: retry", "(?i)error", "warning") . "\n";

@@ -1,0 +1,14 @@
+<?scr
+$path = Cli::arg(0);
+if ($path === null) {
+    echo "Usage: scr csv-reader.scr INPUT.csv\n";
+    exit(2);
+}
+$reader = Csv::open($path);
+try {
+    while (($row = Csv::readRow($reader)) !== null) {
+        echo Json::encode($row) . "\n";
+    }
+} finally {
+    Csv::close($reader);
+}
