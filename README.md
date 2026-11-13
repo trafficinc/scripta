@@ -37,7 +37,8 @@ The other targets still need their native validation.
 Build instructions below describe the configured targets; they do not certify an
 untested platform. See the [compatibility matrix](docs/compatibility.md) for OS
 baselines and evidence, and the [release checklist](docs/release-checklist.md)
-for the remaining release work. Candidates are unsigned and not notarized.
+for the remaining release work. Candidates have no publisher signatures or
+notarization; the reviewed macOS binaries have linker-generated ad hoc signatures.
 
 ## What Scripta provides
 

@@ -8,6 +8,43 @@ actual native evidence. No release is automatically published by these changes.
 See the [local validation record](release-validation.md) for the reviewed scope,
 source provenance, generated evidence, and outstanding release gates.
 
+## Draft candidate notes
+
+Scripta 0.1.0 is a first public-test candidate. These notes are prepared for
+maintainer review; they do not announce a published release or stable API.
+
+- Strict scripting with explicit conversions, UTF-8 strings and immutable bytes,
+  separate lists/maps, lexical functions/closures, and tracing of unreachable
+  captured scopes. Cached module roots and host-held callables remain protected.
+- Standard-library automation covers filesystem operations, bounded subprocesses,
+  HTTP/HTTPS with text or binary bodies, JSON, CSV, regular expressions, dates,
+  logging, system metrics, and optional SQLite. The SQLite extension does not
+  currently bind or return the core bytes type as BLOB data.
+- Collection helpers provide list end operations and splice, generation,
+  aggregation, comparisons, record columns, and typed map merging/construction.
+  Key-based map operations use temporary indexes while preserving entry order.
+- Git/local package installation, isolated aliases, syntax checks, diagnostics,
+  and formatting are implemented. Interpolation, script-defined classes,
+  callback-based collection transforms, and recursive merge variants are absent.
+- The local macOS 27.0.1 ARM64 run passed 422 default-feature debug tests,
+  423 all-feature debug tests, and 423 all-feature dist tests. Rust 1.85 source
+  compatibility, formatting, Clippy, both archive variants, and offline package
+  smoke passed. See the [validation record](release-validation.md) for scope.
+- Base and SQLite archives were reviewed with all 34 shipped scripts checked,
+  isolated local installation/removal, and matching dependency-notice inventories.
+  These checks establish local artifact behavior, not other-platform support or
+  maintainer attribution signoff.
+- The binaries target macOS 15.0 but have not been run on that OS baseline.
+  Linux, Windows, macOS Intel, and macOS 15 ARM64 native evidence remain pending.
+  Reviewed macOS binaries have linker-generated ad hoc signatures, with no
+  publisher identity or notarization. No Windows signing is claimed.
+
+Before publication, review attribution notices and changes, select a clean
+source revision and matching tag, collect native evidence for the selected
+platforms, and repackage that final source. The reviewed local archives predate
+these final documentation-review updates; their hashes are retained separately
+and no current archive is presented as a clean tagged release.
+
 ## Pinned inputs and profiles
 
 Rust 1.99.1 is pinned in rust-toolchain.toml; Cargo.lock is committed and every
@@ -90,6 +127,8 @@ Checksums provide integrity, not publisher authentication.
 - Candidates are not notarized/Developer-ID-signed or Authenticode-signed. No MSI,
   PKG, OS package-manager publication, automatic updater, or privileged installer is
   provided. Platform security prompts may require manual review.
+  Local macOS binaries have linker-generated ad hoc signatures; these do not
+  identify a publisher.
 - Scripta is dynamically typed and not PHP-compatible. Interpolation, script-defined
   classes/Exception construction, a VM/JIT, and background
   daemons remain absent. Check validates syntax/declarations, not complete types.
