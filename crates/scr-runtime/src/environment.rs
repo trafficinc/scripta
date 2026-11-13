@@ -92,3 +92,25 @@ impl Environments {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Environments;
+
+    #[test]
+    fn transient_scope_slots_are_reused_across_many_batches() {
+        let mut environments = Environments::default();
+        for _ in 0..100 {
+            for _ in 0..100 {
+                let outer = environments.enter(0);
+                let inner = environments.enter(environments.current);
+                environments.leave(inner);
+                environments.leave(outer);
+            }
+            assert_eq!(environments.current, 0);
+            assert_eq!(environments.live, 1);
+            assert_eq!(environments.scopes.len(), 3);
+            assert_eq!(environments.free.len(), 2);
+        }
+    }
+}

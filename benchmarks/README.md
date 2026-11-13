@@ -48,3 +48,52 @@ Baseline rows predate the representation experiment; final rows include it.
 Actual Phase 13 measurements, platform details, caveats, and the safety audit are
 in [docs/performance.md](../docs/performance.md). Performance is not gated on noisy
 wall-time thresholds in CI; correctness and cleanup regressions are tested there.
+
+## Long-running memory behavior
+
+Deterministic lifecycle checks run with the normal Rust tests:
+
+```sh
+cargo test -p scr-runtime --locked
+```
+
+They cover 10,000 transient operations in a reused runtime, scope arena slot
+reuse, repeated exceptions and instruction-limit failures, discarded closure
+retention, scope-limit enforcement, and resource release when runtimes drop.
+Resource drop counters verify ownership cleanup; they do not measure allocator
+bytes or claim that every allocation is tracked.
+
+Build the isolated soak worker, then collect current RSS samples:
+
+```sh
+cargo build -p scr-runtime --example memory_soak --release --locked
+python3 benchmarks/memory_soak.py --output benchmarks/results/memory-soak-local.json
+```
+
+The driver runs four separate processes: temporary collections, caught errors,
+discarded closures, and repeated runtime creation/destruction. Each runs three
+warmup batches followed by 20 measured batches of 500 iterations by default.
+Use `--warmups`, `--batches`, and `--iterations` to extend a run. Repeat
+`--workload transient --workload errors --workload recreate` to run longer without
+the intentionally growing closure workload. `--worker` accepts
+an explicit executable path for target-specific builds. JSON output paths must
+be new files, and their parent directories must exist. Reports include the worker
+SHA-256 for identifying the measured build. The driver fails on worker
+errors, invalid checkpoints, and checkpoint timeouts (`--timeout`, seconds).
+
+At every checkpoint the worker waits while the driver samples current resident
+memory using `/proc/PID/status` on Linux or `ps` on macOS. This avoids confusing
+peak RSS with current memory. Other platforms report null RSS while still
+validating workload completion. The worker parses each batch program once and
+discards script output; the report's growing sample list lives in the driver,
+not the measured child. The final sample is taken after the runtime is dropped
+but before the worker exits.
+
+Closure growth is expected under the current arena design, including after a
+closure variable is set to null. Other workloads should settle after warmup.
+Freed allocations may remain resident in the allocator, so a runtime drop need
+not return RSS to the startup value. No RSS thresholds gate CI yet: establish
+repeatable native baselines before choosing platform-specific growth bounds.
+Compare multiple batch samples and repeated runs rather than a single delta.
+The recreate workload drops the previous runtime before constructing the next;
+its batch-boundary samples include one live runtime.
