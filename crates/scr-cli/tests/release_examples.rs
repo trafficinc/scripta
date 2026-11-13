@@ -240,7 +240,41 @@ fn collection_playground_and_log_analyzer_run_without_external_programs() {
         (
             "collections.scr",
             vec![],
-            "Active: auth, café-api\nFirst: auth\nWithout first: [\"café-api\"]\nWith extra: [\"auth\",\"café-api\",\"queue\"]\nHas auth: true\nFields: active, total\nValues: [2,4]\nHas total: true\n",
+            r#"Active: auth, café-api
+First: auth
+Without first: ["café-api"]
+With extra: ["auth","café-api","queue"]
+Has auth: true
+Fields: active, total
+Values: [2,4]
+Has total: true
+Next: frontend
+Last: queue
+Edited: ["frontend","replacement","café-api","queue"]
+Removed: ["auth"]
+Reversed: ["queue","café-api","auth","frontend"]
+Chunks: [["frontend","auth"],["café-api","queue"]]
+Filled: ["pending","pending","pending"]
+Unique: [1,1.0,null]
+Auth index: 1
+Sum: 9
+Product: 24
+Added: ["frontend","queue"]
+Shared: ["auth","café-api"]
+Merged: {"region":"local","retries":3,"timeout":20}
+Replaced: {"retries":3,"timeout":20}
+Combined: {"a":3,"b":2}
+Flipped keys: [1,"1"]
+Flipped values: ["last","second"]
+Timeout key: timeout
+Reverse keys: ["region","timeout","retries"]
+Different values: {"region":"local","timeout":20}
+Shared values: {"retries":3}
+New keys: {"region":"local"}
+Existing keys: {"retries":3,"timeout":20}
+Durations: [12,8,15]
+By job: {"api":15,"worker":8}
+"#,
         ),
         (
             "log-analyzer.scr",

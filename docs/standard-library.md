@@ -54,8 +54,8 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Globals | `str`, `int`, `float`, `bool`, `type`, `len`, `sleep` | Conversion table above |
 | String | `String::trim`, `String::split`, `String::join`, `String::contains`, `String::startsWith`, `String::endsWith`, `String::replace`, `String::substring`, `String::lower`, `String::upper`, `String::format`, `String::graphemeLength`, `String::graphemeSubstring` | [Strings](#strings) |
 | Math | `Math::abs`, `Math::min`, `Math::max`, `Math::floor`, `Math::ceil`, `Math::round` | [Math](#math) |
-| List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort` | [Collections](#collections) |
-| Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove` | [Collections](#collections) |
+| List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort`, end operations, generation, search, aggregation, comparisons, `List::column` | [Collections](#collections) |
+| Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove`, merge/replace, combine/flip, search/reverse, comparisons, `Map::column` | [Collections](#collections) |
 | File | `File::exists`, `File::read`, `File::readBytes`, `File::writeBytes`, `File::appendBytes`, `File::write`, `File::writeAtomic`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close` | [Filesystem](#filesystem-and-paths) |
 | Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
 | Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute` | [Paths](#filesystem-and-paths) |
@@ -297,11 +297,37 @@ preserve insertion order and distinguish integer keys from string keys.
 | `Map::keys(items: map): list` | Returns the map's keys in insertion order, preserving each int/string type. An empty map returns `[]`. |
 | `Map::values(items: map): list` | Returns copies of values in insertion order. An empty map returns `[]`. |
 | `Map::remove(items: map, key: int or string): map` | Returns a copy without that key, preserving the remaining entries' order. An absent key returns an unchanged copy, including for an empty map. |
+| `List::push(items: list, value: any): list` | Appends one value to a copy. Use `concat` to append another list's elements. |
+| `List::unshift(items: list, value: any): list` | Prepends one value to a copy. |
+| `List::pop(items: list): map` | Removes the last value and returns `["items" => remainingList, "value" => removedValue]`. Empty input raises `RangeError`; a removed null remains null. |
+| `List::shift(items: list): map` | Like `pop`, but removes the first value. |
+| `List::splice(items: list, start: int, length: int, replacement: list optional): map` | Returns `["items" => updatedList, "removed" => removedList]`. Replacement defaults to `[]`. Start and length must be nonnegative, start cannot exceed the list length, and length cannot exceed the remainder; violations raise `RangeError`. Zero length inserts without removing. Start at the end permits appending. Explicit null is not an omitted replacement. |
+| `List::reverse(items: list): list` | Reverses element order. Empty input returns `[]`. |
+| `List::chunk(items: list, size: int): list` | Returns contiguous sublists of at most size elements, with a possibly shorter final sublist. Size must be positive, otherwise `RangeError`. Empty input returns `[]`. |
+| `List::fill(count: int, value: any): list` | Generates count independent copies of value. Count must be nonnegative, otherwise `RangeError`; zero returns `[]`. |
+| `List::search(items: list, value: any): int or null` | Returns the first strictly equal value's index, or null when absent. Index zero is a successful match. |
+| `List::unique(items: list): list` | Keeps the first occurrence of each value using strict recursive equality. Preserves order. |
+| `List::sum(items: list): int or float` | Adds homogeneous ints or finite floats in input order. Empty input returns integer `0`. Mixed types and nonnumeric/nonfinite inputs raise `TypeError`; integer overflow and nonfinite intermediate float results raise `ArithmeticError`. |
+| `List::product(items: list): int or float` | Multiplies with the same numeric rules as `sum`. Empty input returns integer `1`. |
+| `List::diff(left: list, right: list): list` | Keeps left values absent from right, using strict recursive equality. Preserves left order and duplicates. |
+| `List::intersect(left: list, right: list): list` | Keeps left values present in right, using strict recursive equality. Preserves left order and duplicates; right duplicates do not multiply results. |
+| `List::column(rows: list, field: int or string): list` | Extracts field from each map row in order. Non-map rows raise `TypeError`, missing fields raise `RangeError`, and stored null is retained. Empty rows return `[]`. |
+| `Map::merge(left: map, right: map): map` | Right values replace matching typed keys without moving their positions. New keys append in right order. Numeric keys are preserved. |
+| `Map::replace(left: map, right: map): map` | Like merge, but ignores right keys absent from left. |
+| `Map::combine(keys: list, values: list): map` | Builds a map from equally sized lists, otherwise `RangeError`. Keys must be ints or strings, otherwise `TypeError`. Later duplicate keys overwrite values while retaining their first insertion position. Empty lists produce an empty map. |
+| `Map::flip(items: map): map` | Exchanges values and keys. Input values must be ints or strings, otherwise `TypeError`. Duplicate generated keys use the same overwrite and insertion rule as combine. |
+| `Map::search(items: map, value: any): int or string or null` | Returns the first strictly equal value's typed key in insertion order, or null when absent. |
+| `Map::reverse(items: map): map` | Reverses entry order while preserving typed keys. |
+| `Map::diff(left: map, right: map): map` | Keeps left entries whose values are absent from right, using strict recursive equality. Preserves left keys and order. |
+| `Map::intersect(left: map, right: map): map` | Keeps left entries whose values occur in right, using strict recursive equality. Preserves left keys and order. |
+| `Map::diffKeys(left: map, right: map): map` | Keeps left entries whose exact typed keys are absent from right. Preserves left order. |
+| `Map::intersectKeys(left: map, right: map): map` | Keeps left entries whose exact typed keys occur in right. Preserves left order. |
+| `Map::column(rows: list, field: int or string, indexField: int or string): map` | Extracts field values keyed by each row's indexField value. Rows must be maps and both fields must exist, with the same errors as List column. Index values must be ints or strings. Duplicate indexes overwrite values without moving their first insertion position. Empty rows return an empty map. |
 
 Arguments are strictly typed; invalid types and argument counts raise catchable
-`TypeError`. No helper converts a list into a map, coerces a key, creates holes,
-or creates missing intermediate collections. Sorting uses the language's numeric
-and UTF-8 string ordering, with no locale collation or numeric coercion. Stable
+`TypeError`. Helpers never coerce keys, create holes, or create missing intermediate
+collections. `Map::combine` and `Map::column` explicitly construct maps from
+lists. Sorting uses the language's numeric and UTF-8 string ordering, with no locale collation or numeric coercion. Stable
 float sorting preserves the order of equal values, including positive and
 negative zero.
 
@@ -340,9 +366,34 @@ core operand/index types raise `TypeError`, and arithmetic overflow or division
 by zero raises `ArithmeticError`. Core runtime safety limits and cancellation
 remain outside catches. Existing helper `RangeError` and `ResourceLimitError`
 exceptions are unchanged. See the [exception contract](language-spec.md#statement-grammar)
-and [errors playground](../playground/errors.scr). Callback transforms and pop
+and [errors playground](../playground/errors.scr). Callback transforms and recursive merge variants
 are deferred. Try the [collections playground](../playground/collections.scr)
 and [log analyzer](../playground/log-analyzer.scr) for complete examples.
+
+
+### PHP array function mapping
+
+These helpers return new values. PHP functions that mutate arrays need an
+explicit assignment in Scripta; pop and shift also return the removed value.
+Comparisons are always strict, without PHP's default coercion.
+
+| PHP function | Scripta equivalent | Difference |
+| --- | --- | --- |
+| `array_push`, `array_unshift` | `List::push`, `List::unshift` | One value per call; returns a new list rather than its length. |
+| `array_pop`, `array_shift` | `List::pop`, `List::shift` | Returns items and value; empty input raises `RangeError`. |
+| `array_splice` | `List::splice` | Returns items and removed; requires nonnegative, in-bounds start and length. |
+| `array_reverse` | `List::reverse`, `Map::reverse` | Map keys are always preserved. |
+| `array_chunk` | `List::chunk` | List input only. |
+| `array_fill` | `List::fill(count, value)` | Generates a list starting at index zero; no start-index argument. |
+| `array_search` | `List::search`, `Map::search` | Always strict; missing returns null. |
+| `array_unique` | `List::unique` | Strict recursive equality and contiguous output indexes. |
+| `array_sum`, `array_product` | `List::sum`, `List::product` | Homogeneous numeric types, checked arithmetic, no coercion. |
+| `array_merge` | `List::concat`, `Map::merge` | Map integer keys are preserved and overwritten like string keys. |
+| `array_replace` | `Map::merge` | `Map::replace` instead changes existing keys only. |
+| `array_combine`, `array_flip` | `Map::combine`, `Map::flip` | Integer and string keys remain distinct. |
+| `array_diff`, `array_intersect` | List or Map `diff`, `intersect` | Always strict; map results retain left keys. |
+| `array_diff_key`, `array_intersect_key` | `Map::diffKeys`, `Map::intersectKeys` | Typed key comparison. |
+| `array_column` | `List::column`, `Map::column` | Requires map rows and existing fields; indexed output requires valid typed keys. |
 
 ## Registering Rust modules
 
