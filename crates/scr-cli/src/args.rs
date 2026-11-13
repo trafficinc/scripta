@@ -7,8 +7,8 @@ pub const HELP: &str = "Scripta systems scripting language
 
 Usage: scr version
        scr version --verbose
-       scr help
-       scr run <file> [arguments...]
+       scr help [run|check|fmt]
+       scr run <file|-> [arguments...]
        scr <file> [arguments...]
        scr check <file>
        scr fmt [--check] <file>
@@ -26,6 +26,10 @@ Arguments after the script path belong to the script; -- ends script option quer
 pub enum Command {
     Package(Vec<OsString>),
     Help,
+    CommandHelp(&'static str),
+    RunStdin {
+        arguments: Vec<OsString>,
+    },
     Version,
     VersionVerbose,
     Run {
@@ -54,6 +58,30 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
     let Some(first) = args.first() else {
         return Err(UsageError("expected a command or source file".into()));
     };
+    let topic = if first == "help" && args.len() == 2 {
+        args[1].to_str()
+    } else if args.len() == 2 && matches!(args[1].to_str(), Some("--help" | "-h")) {
+        first.to_str()
+    } else {
+        None
+    };
+    if let Some(topic) = topic {
+        let help = match topic {
+            "run" => Some(
+                "Usage: scr run <file|-> [arguments...]\nExecute a file, or read UTF-8 source from stdin through EOF with -.\nSource from stdin uses the working directory for relative includes.\nArguments after the source path belong to the script.\nUse -- before a literal dash-prefixed filename.",
+            ),
+            "check" => Some(
+                "Usage: scr check <file>\nCheck syntax and declarations without executing or loading includes.\nUse -- before a dash-prefixed filename.",
+            ),
+            "fmt" => Some(
+                "Usage: scr fmt [--check] <file>\nFormat a source file, or report differences without writing with --check.\nUse -- before a dash-prefixed filename.",
+            ),
+            _ => None,
+        };
+        if let Some(help) = help {
+            return Ok(Command::CommandHelp(help));
+        }
+    }
     if matches!(first.to_str(), Some("init" | "add" | "install" | "update")) {
         return Ok(Command::Package(args));
     }
@@ -120,6 +148,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
     };
     if path.is_empty() {
         return Err(UsageError("source path must not be empty".into()));
+    }
+    if first == "run" && !escaped && path == "-" {
+        return Ok(Command::RunStdin {
+            arguments: rest[1..].to_vec(),
+        });
     }
     if !escaped && path.to_string_lossy().starts_with('-') {
         return Err(UsageError(

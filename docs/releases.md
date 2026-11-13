@@ -9,9 +9,8 @@ actual native evidence. No release is automatically published by these changes.
 ## Pinned inputs and profiles
 
 Rust 1.99.1 is pinned in rust-toolchain.toml; Cargo.lock is committed and every
-release command uses `--locked`. Actions are pinned to reviewed full commit IDs.
-The native runners are explicit OS images, not `*-latest`; hosted image revisions,
-SDKs/linkers, and system libraries can still change. Record their CI run metadata.
+release command uses `--locked`. Record the native build OS, SDK/linker, and
+system-library versions with validation results.
 
 `release` uses opt-level 3, thin LTO, one codegen unit, no incremental compilation,
 checked overflow, and panic unwinding. `dist` inherits release and strips symbols.
@@ -19,45 +18,18 @@ Unwinding is intentional: owned child/resource cleanup and the process monitor's
 panic containment must keep working. Do not switch to panic=abort to save bytes.
 Windows uses `+crt-static`; do not override RUSTFLAGS without retaining it.
 
-The workflow remaps the checkout path, embeds the commit supplied explicitly by
-SCR_BUILD_COMMIT, and normalizes archive metadata. A local build without an explicit
-commit reports `unknown`, rather than implying a clean/reproducible source revision.
+Builds embed the commit supplied explicitly by SCR_BUILD_COMMIT. A build without
+an explicit commit reports `unknown`, rather than implying a clean/reproducible source revision.
 `scr version` retains the simple version line; `scr version --verbose` adds target,
 Cargo's base profile, compiler, explicit commit metadata, and built-in extensions.
 
 Archives sort file entries, normalize permissions/ownership, and use a numeric
-SOURCE_DATE_EPOCH (the commit timestamp in CI; default 0 locally). Gzip header
-mtime and TAR mtimes are normalized. ZIP uses the fixed representable DOS epoch
+SOURCE_DATE_EPOCH (default 0; use the commit timestamp when packaging a release).
+Gzip header mtime and TAR mtimes are normalized. ZIP uses the fixed representable DOS epoch
 1980-01-01 and stored entries. Packaging identical input bytes twice must produce
 identical archives; this is tested for both formats. Bit-for-bit compiler output
 across different SDK/linker/host images is not promised. Rust profile details are
 in the [Cargo profile reference](https://doc.rust-lang.org/cargo/reference/profiles.html).
-
-## Native CI and artifact gate
-
-`.github/workflows/ci.yml` runs format checks, Clippy, and the complete debug suite
-on all five native targets, plus a declared-MSRV source compilation job.
-`.github/workflows/release.yml` is started manually or by a `v*` tag. It requires
-that CI workflow, then tests the complete workspace with the dist profile and
-builds scr on each matching native target. No Docker, emulator, Python, or Node
-setup is needed by the project commands; GitHub's own Actions infrastructure is
-separate from installed interpreter dependencies.
-
-Each target packages docs/examples/licenses, verifies the inventory, extracts and
-runs the executable with a cleared environment/PATH containing only the package,
-and records `*.validation.json`. Local smoke includes version/target, hello,
-variables, loops, functions, require_once, JSON, file reads/writes, dates, and
-logging. The full suites additionally test filesystem policies, HTTP/TLS fixtures,
-processes/jobs/cancellation, metrics, formatter, parser robustness, and CLI behavior.
-Linux/macOS dependency inspection rejects missing or non-system libraries;
-Windows import inspection rejects a separate MSVC runtime dependency.
-
-An aggregate artifact is produced only when all five native package jobs succeed.
-It includes archives, per-archive `.sha256`, `SHA256SUMS`, per-target validation
-records, and dependency reports. Workflow dispatch and tags produce candidates;
-publication remains a separate maintainer action after checklist review. The
-workflow has read-only repository permissions and never creates/pushes tags,
-commits, GitHub Releases, or package-registry uploads.
 
 ## Local native package procedure
 

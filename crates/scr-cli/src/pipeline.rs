@@ -26,7 +26,29 @@ pub fn run_with_options(
     output: &mut impl Write,
     options: scr_runtime::RuntimeOptions,
 ) -> Result<u8, scr_runtime::RuntimeError> {
+    run_configured(source, output, options, None)
+}
+
+/// Execute with an injected buffered input stream instead of process stdin.
+pub fn run_with_input(
+    source: &str,
+    output: &mut impl Write,
+    options: scr_runtime::RuntimeOptions,
+    input: impl std::io::BufRead + 'static,
+) -> Result<u8, scr_runtime::RuntimeError> {
+    run_configured(source, output, options, Some(Box::new(input)))
+}
+
+fn run_configured(
+    source: &str,
+    output: &mut impl Write,
+    options: scr_runtime::RuntimeOptions,
+    input: Option<Box<dyn std::io::BufRead>>,
+) -> Result<u8, scr_runtime::RuntimeError> {
     let mut runtime = scr_runtime::Runtime::with_options(options);
+    if let Some(input) = input {
+        runtime.set_input_stream(input);
+    }
     runtime.set_module_resolver(|base, name| {
         crate::packages::resolve(base, name)
             .map_err(|error| scr_runtime::NativeError::new("PackageError", error.to_string()))

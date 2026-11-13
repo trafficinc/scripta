@@ -690,3 +690,14 @@ Runtime-created values have a maximum nesting depth of 128. Optional per-value
 logical-byte, live-scope, instruction, and source budgets affect resource use, not
 value/coercion semantics. See [performance and safety](performance.md) for
 configuration and current limitations.
+
+
+## CLI source and pipeline input
+
+`scr run - [arguments...]` reads UTF-8 source from stdin through EOF under the
+same source-byte limit as disk files. Tags and language semantics are unchanged.
+Diagnostics use `<stdin>`, and relative includes/packages resolve from the working
+directory. Script input then observes EOF. `scr run -- -` selects a literal file.
+File-backed scripts can consume piped records with bounded `Cli::readLine`,
+which returns a string or null at EOF. See the [input API](standard-library.md#script-arguments-and-prompts)
+for byte limits, permissions, cancellation, and failure recovery.

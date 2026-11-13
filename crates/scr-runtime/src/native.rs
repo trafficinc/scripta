@@ -79,6 +79,7 @@ impl Default for PermissionConfig {
                 "log.write".into(),
                 "http.request".into(),
                 "cli.prompt".into(),
+                "cli.read".into(),
             ]),
         }
     }

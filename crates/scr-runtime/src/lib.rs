@@ -91,7 +91,6 @@ pub struct Runtime {
     error_stream: Option<Box<dyn Write>>,
     input_stream: Option<Box<dyn std::io::BufRead>>,
     source: Option<Arc<SourceFile>>,
-    loaded_modules: std::collections::HashSet<std::path::PathBuf>,
     active_modules: Vec<std::path::PathBuf>,
     module_policy: Option<Rc<modules::ModulePolicy>>,
     module_resolver: Option<Rc<modules::ModuleResolver>>,
@@ -216,6 +215,14 @@ impl Runtime {
                 "RegistryError",
                 format!("invalid native function name {name}"),
             ));
+        }
+        if let Some((namespace, _)) = name.split_once("::") {
+            if self.environments.has_alias(namespace) {
+                return Err(NativeError::new(
+                    "RegistryError",
+                    format!("namespace {namespace} is already a module alias"),
+                ));
+            }
         }
         let functions = &mut self.environments.scope_mut(0).functions;
         if functions.contains_key(&name) {
@@ -342,7 +349,7 @@ impl Runtime {
         if let Some(path) = entry {
             self.active_modules.pop();
             if result.is_ok() {
-                self.loaded_modules.insert(path);
+                self.environments.scope_mut(0).loaded_modules.insert(path);
             }
         }
         self.collect_garbage();
@@ -427,7 +434,7 @@ impl Runtime {
     fn statement(&mut self, statement: &Statement, output: &mut impl Write) -> Result<()> {
         self.checkpoint(statement.span)?;
         match &statement.kind {
-            StatementKind::Require { path, once } => {
+            StatementKind::Require { path, once, alias } => {
                 let value = self.evaluate(path, output)?;
                 let Value::String(path_value) = value else {
                     return Err(self.native_error(
@@ -435,7 +442,7 @@ impl Runtime {
                         path.span,
                     ));
                 };
-                self.require_module(&path_value, *once, statement.span, output)?;
+                self.require_module(&path_value, *once, alias.as_ref(), statement.span, output)?;
             }
             StatementKind::Expression(expr) => {
                 if let ExprKind::Assignment(target, op, rhs) = &expr.kind {
@@ -727,9 +734,26 @@ impl Runtime {
                 arguments,
             } => {
                 let ExprKind::Identifier(namespace) = &namespace.kind else {
-                    return self.fail("invalid native namespace", expr.span);
+                    return self.fail("invalid namespace", expr.span);
                 };
-                let callable = self.function(&format!("{namespace}::{name}"), expr.span)?;
+                let callable = if let Some(alias) = self.environments.find_alias(namespace) {
+                    self.environments
+                        .scope(alias.scope)
+                        .functions
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| {
+                            self.native_error(
+                                NativeError::new(
+                                    "ModuleError",
+                                    format!("module alias {namespace} has no function {name}"),
+                                ),
+                                expr.span,
+                            )
+                        })?
+                } else {
+                    self.function(&format!("{namespace}::{name}"), expr.span)?
+                };
                 self.call(callable, arguments, expr.span, output)
             }
             ExprKind::PropertyAccess(base, name) => {
@@ -788,6 +812,15 @@ impl Runtime {
 
     fn function(&self, name: &str, span: Span) -> Result<Value> {
         let Some(scope) = self.environments.find(name, true) else {
+            // Isolated modules have no caller/global lexical parent. Only host
+            // native registrations remain visible across that boundary.
+            if let Some(value @ Value::Callable(callable)) =
+                self.environments.scope(0).functions.get(name)
+            {
+                if matches!(callable.0.as_ref(), Function::Native { .. }) {
+                    return Ok(value.clone());
+                }
+            }
             return self.fail(format!("undefined function {name}"), span);
         };
         Ok(self.environments.scope(scope).functions[name].clone())

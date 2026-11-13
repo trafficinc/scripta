@@ -22,15 +22,15 @@
 On macOS ARM64, all 229 tests passed in both debug and distribution profiles,
 along with formatting, Clippy, the Rust 1.85 source check, archive checksum and
 reproducibility checks, and an offline test of the packaged executable.
-The other targets still need their native CI runs.
+The other targets still need their native validation.
 
 | Target | Current validation |
 | --- | --- |
-| macOS ARM64 | Verified locally on macOS 27.0.1; macOS 15 CI pending |
-| macOS x86-64 | Native CI pending |
-| Linux x86-64 | Native CI pending |
-| Linux ARM64 | Native CI pending |
-| Windows x86-64 | Native CI pending |
+| macOS ARM64 | Verified locally on macOS 27.0.1; macOS 15 validation pending |
+| macOS x86-64 | Native validation pending |
+| Linux x86-64 | Native validation pending |
+| Linux ARM64 | Native validation pending |
+| Windows x86-64 | Native validation pending |
 
 Build instructions below describe the configured targets; they do not certify an
 untested platform. See the [compatibility matrix](docs/compatibility.md) for OS
@@ -113,7 +113,7 @@ cargo build -p scr-cli --locked
 | [collections.scr](playground/collections.scr) | Filter, sort, and summarize records using list helpers and safe map lookups. |
 | [log-analyzer.scr](playground/log-analyzer.scr) | Analyze [sample events](playground/sample-events.txt), count log levels, list sorted services, and report malformed records. |
 | [errors.scr](playground/errors.scr) | Recover from indexing, arithmetic, and operand-type failures; add `--uncaught` to demonstrate a diagnostic and exit status 1. |
-| [streaming.scr](playground/streaming.scr) | Stream log records with a line-size limit and close the file in `finally`. |
+| [streaming.scr](playground/streaming.scr) | Stream log records from a file or stdin (`-`) with a line-size limit; file cleanup uses `finally`. |
 | [reporting.scr](playground/reporting.scr) | Summarize durations with Math helpers and bounded string formatting. |
 | [functions.scr](playground/functions.scr) | Try defaults, typed variadics, anonymous callbacks, captured counters, and independent collection defaults. |
 
@@ -268,12 +268,13 @@ an SSH terminal open. See the [crontab reference](https://man7.org/linux/man-pag
 | Command | Purpose |
 | --- | --- |
 | `scr run script.scr` | Execute a script; `scr script.scr` is shorthand. |
+| `scr run - [arguments...]` | Read script source from stdin through EOF and execute it. |
 | `scr check script.scr` | Validate tags, complete syntax, declarations, and control flow without execution. |
 | `scr fmt script.scr` | Format indentation and spacing while preserving comments and string literals. |
 | `scr fmt --check script.scr` | Check formatting without writing; useful in CI. |
 | `scr version` | Print the interpreter version. |
 | `scr version --verbose` | Show version, build target, compiler, profile, and supplied commit metadata. |
-| `scr help` | Show usage. |
+| `scr help` | Show usage; `scr help run`, `check`, or `fmt` shows command help. |
 
 `check` is a syntax/declaration check, not complete static type checking. It does
 not execute or load required files. `fmt` is idempotent and keeps an optional
@@ -282,6 +283,36 @@ closing tag. Use `scr run -- help` for a script whose path matches a command nam
 Exit codes: **0** for success, **1** for script/file failures or formatting that
 needs changes, **2** for CLI usage errors, and **130** for interruption.
 A script can explicitly return a code from 0 through 255 with `exit(code)`.
+
+### Shell pipelines
+
+A file-backed script can consume piped data without printing a prompt:
+
+```scr
+<?scr
+while (($line = Cli::readLine()) !== null) {
+    echo String::upper($line) . "\n";
+}
+```
+
+`Cli::readLine(maxLineBytes)` defaults to a 1 MiB raw line limit, including LF/CRLF.
+It returns `null` at EOF and an empty string for a blank line. Input failures
+raise exceptions and disable further stdin reads through `readLine` or `prompt`
+in that runtime registration. See the [input contract](docs/standard-library.md#script-arguments-and-prompts).
+
+On macOS/Linux, try the streaming example with piped data:
+
+```sh
+cat playground/sample-events.txt | scr run playground/streaming.scr -
+printf '%s\n' '<?scr echo "Hello from stdin!\n";' | scr run -
+```
+
+`scr run -` consumes stdin as UTF-8 source through EOF, subject to
+`SCR_MAX_SOURCE_BYTES`. Relative includes and package lookup start from the working
+directory; diagnostics identify the source as `<stdin>`. Stdin is then at EOF for
+script input. Use a file-backed script when stdin should carry data. A literal
+file named `-` remains accessible with `scr run -- -` or `scr run ./-`.
+`run`, `check`, and `fmt` also accept `--help` or `-h` before the source path.
 
 ## Web-server use
 
@@ -362,7 +393,7 @@ examples and have not been deployment-tested in this checkout.
 
 ## Standard library
 
-The [complete reference](docs/standard-library.md) documents all **104 functions**,
+The [complete reference](docs/standard-library.md) documents all **105 functions**,
 return values, native objects, limits, and errors.
 
 | Modules | Use |

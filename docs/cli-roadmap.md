@@ -5,8 +5,8 @@ transforming collections, handling failures, and reusing scripts. Each phase
 requires explicit approval before implementation starts. Completing one phase
 does not authorize the next.
 
-**Next action: choose the next scope after the CLI review below.** All six
-phases are accepted. The proposed Phase 7 remains unapproved.
+**Next action: review Phase 7 below.** All six
+phases are accepted. Phase 7 is approved and implemented; completion is ready for review.
 
 ## Progress and approval record
 
@@ -18,6 +18,7 @@ phases are accepted. The proposed Phase 7 remains unapproved.
 | 4 | Functions | Accepted | Approved | Accepted |
 | 5 | Math and formatting | Accepted | Approved | Accepted |
 | 6 | Cleanup and streaming | Accepted | Approved | Accepted |
+| 7 | CLI pipelines and help | Ready for review | Approved | Pending |
 
 Record explicit approvals here as they arrive. Use the statuses Waiting,
 Approved, In progress, Ready for review, and Accepted. Record the approving
@@ -49,7 +50,7 @@ isolation, local snapshots, offline installs, integrity checks, cycles, failed
 installation preservation, path validation, and runtime permissions/policies.
 The `examples/packages` demonstration installs with `--locked --offline`, prints
 `Hello, packages!`, and both scripts pass `scr fmt --check`. Linux/Windows
-execution remains for CI; these results do not establish a passing CI run.
+execution remains unverified by these local results.
 
 ### SQLite built-in extension (separate approved scope)
 
@@ -87,7 +88,7 @@ extension-list archive validation and dangling-symlink coverage. A local archive
 made from the debug SQLite-enabled binary passed verify and offline smoke;
 its declared extensions and rusqlite/libsqlite3-sys license inventories were
 checked. This is local development evidence, not a dist-profile release or
-Linux/Windows CI result.
+Linux/Windows validation result.
 
 ## Work already implemented
 
@@ -687,7 +688,7 @@ work explicitly. There is no automatically authorized next phase.
 completion summary. This review completes the next decision checkpoint; new feature work
 still requires an explicit scope approval.
 
-**Findings from the current debug CLI**
+**Historical findings before Phase 7**
 
 | Workflow | Observed result |
 | --- | --- |
@@ -713,31 +714,52 @@ passes all six matching playground tests. Both new playgrounds pass
 `scr fmt --check`. `cargo fmt --all -- --check` and `git diff --check` pass.
 The CLI probes used temporary scripts/input and did not change public APIs.
 
-## Proposed Phase 7 CLI pipelines and help
+## Phase 7 CLI pipelines and help
 
-**Status:** Proposed; approval to start is pending. This is the recommended next
-scope, not an automatically authorized continuation.
+**Approval to start:** The user requested “fix:2. Proper shell-pipeline support”
+and explicitly identified missing bounded stdin input, source from stdin, and
+command-local help. This authorizes Phase 7 plus source-from-stdin execution.
 
-**Proposed scope**
+**Status:** Ready for review.
 
-- Support `scr help run|check|fmt` and command-local `--help`/`-h` before the
-  source path, printing relevant help to stdout with exit 0. Preserve literal
-  paths after `--`, usage errors, and all arguments after the script path.
-- Add `Cli::readLine(maxLineBytes: int optional): string or null` for bounded
-  UTF-8 input from the runtime's existing buffered stdin, without printing or
-  flushing a prompt. Reuse file-stream conventions for LF/CRLF, empty lines,
-  EOF, raw-byte maxima, logical output limits, and cancellation. Define the
-  input capability and recovery behavior after read/encoding/limit errors in
-  the API contract before implementation.
-- Let the streaming playground accept `-` as its data-input argument while
-  preserving its filename mode and missing-argument usage. Keep script source
-  in a file; source-from-stdin parsing is a separate future decision.
-- Add end-to-end pipe/help tests and focused input boundary tests, update the
-  reference/export counts and README, and run the shared phase checks.
+**Implemented API and behavior**
 
-Callback transforms, precision formatting, writable streams, source from stdin,
-and new language syntax remain separate possible scopes.
+- `scr help run|check|fmt` and command-local `--help`/`-h` print relevant help to
+  stdout with exit 0. Escaped paths and arguments after the source path stay literal.
+- `Cli::readLine(maxLineBytes: int optional): string or null` reads buffered UTF-8
+  stdin without a prompt or output flush. It defaults to 1 MiB raw lines, including
+  terminators, and requires the independent default-enabled `cli.read` capability.
+  LF/CRLF, blank lines, final unterminated lines, and repeated EOF follow the file
+  stream conventions. Signature/range/permission failures do not consume input.
+  Read failures disable further readLine/prompt calls for that registration;
+  logical result budgets and cancellation checks apply during bounded assembly.
+- The streaming playground accepts `-` for piped data and retains file mode,
+  usage errors, and explicit file cleanup.
+- `scr run - [arguments...]` reads source through EOF with UTF-8 and source-budget
+  validation. Tags remain required. Includes and packages resolve from the working
+  directory, diagnostics use `<stdin>`, and subsequent script input observes EOF.
+  `scr run -- -` continues to address a literal filename.
 
-**Approval record:** Pending.
+See the [input contract](standard-library.md#script-arguments-and-prompts) and
+[README pipeline examples](../README.md#shell-pipelines). The default library now
+exports 105 functions. Input reads are synchronous; cancellation waits for a
+blocked read to return. Source-from-stdin is consumed before runtime execution.
 
-**Completion record:** Not started.
+**Validation:** On macOS ARM64, `cargo test --workspace --all-features --locked
+--offline` passed, including four new CLI pipeline/help tests and five new input
+integration tests. The suite ran outside the sandbox because existing HTTP/TLS
+fixtures bind loopback ports. Coverage includes Unicode split across buffers,
+blank lines/EOF, shared prompt cursors, raw/default/logical limits, strict inputs,
+separate permissions, read failures, mid-read cancellation, failed input state,
+stdin-source tags/UTF-8/budget/diagnostics, arguments, relative includes, literal
+paths, and streaming file/pipe parity.
+
+`cargo clippy --workspace --all-targets --all-features --locked --offline -- -D
+warnings`, `cargo fmt --all -- --check`, `git diff --check`, and the streaming
+playground's `scr fmt --check` passed. Direct CLI help and stdin-source smoke
+checks passed. These are local results, not Linux/Windows validation.
+
+Callback transforms, precision formatting, writable streams, and new language
+syntax remain separate possible scopes.
+
+**Completion acceptance:** Pending.

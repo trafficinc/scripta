@@ -47,7 +47,7 @@ Baseline rows predate the representation experiment; final rows include it.
 
 Actual Phase 13 measurements, platform details, caveats, and the safety audit are
 in [docs/performance.md](../docs/performance.md). Performance is not gated on noisy
-wall-time thresholds in CI; correctness and cleanup regressions are tested there.
+wall-time thresholds; correctness and cleanup regressions have deterministic tests.
 
 ## Long-running memory behavior
 
@@ -95,7 +95,7 @@ are now traced and reclaimed automatically, including during a single long
 execution. Deterministic tests check cleanup within that execution as well as
 between batches.
 Freed allocations may remain resident in the allocator, so a runtime drop need
-not return RSS to the startup value. No RSS thresholds gate CI yet: establish
+not return RSS to the startup value. No RSS thresholds are enforced yet: establish
 repeatable native baselines before choosing platform-specific growth bounds.
 Compare multiple batch samples and repeated runs rather than a single delta.
 The recreate workload drops the previous runtime before constructing the next;
@@ -154,6 +154,6 @@ separately and includes its samples in the JSON report. Increase
 `--memory-batches 100 --memory-iterations 2000` for a longer run, or use
 `--skip-memory` for timing only. `--soak-worker` accepts a target-specific memory
 worker path. RSS is not sampled during timing trials. No elapsed-time or RSS
-thresholds fail CI: establish repeated native baselines before selecting limits.
+thresholds are enforced: establish repeated native baselines before selecting limits.
 The timings cannot establish a hard pause guarantee, and the ordinary workload
 cannot establish GC-on versus GC-off overhead without a suitable reference build.
