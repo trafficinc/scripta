@@ -50,13 +50,35 @@ records, and the combined validation record are retained locally under
 not part of the source distribution. The complete generated record is
 `validation.json`; smoke records alone do not establish workspace test results.
 
+## Follow-up archive review
+
+The previously built base and SQLite archives were inspected by their recorded
+SHA-256 identities. Both passed isolated installation/removal in a temporary
+prefix, example execution from an unrelated working directory, and syntax
+checks for all 34 shipped scripts. The base notice inventory matches 87 external
+dependency versions and the SQLite inventory matches 94, including build
+dependencies. Rust library notices are present and all inventoried file hashes
+match. This is an inventory review, not maintainer attribution signoff.
+
+All checked example/playground links resolve inside the packages. Six links in
+the performance document point to benchmark instructions/raw evidence that
+require a source checkout; this limitation is now explicit in the source docs.
+Local `codesign` inspection identifies ad hoc linker signatures with no team
+identity. These are not publisher signatures or notarization.
+
+The generated `archive-review.json` alongside `validation.json` records these
+checks against the existing archives. Follow-up documentation edits are not
+contained in those immutable reviewed archives; final release inputs must be
+repackaged after selecting the reviewed source revision.
+
 ## Remaining release blockers
 
 - Native baseline validation for all pending targets, including macOS 15 ARM64.
 - Maintainer review of changes and dependency/license attribution notices.
 - A clean, reviewed source revision and matching `v0.1.0` tag.
 - Selection of supported assets and attachment of the corresponding native
-  records before publication. Candidates remain unsigned and not notarized.
+  records before publication. Candidates have no publisher signatures or
+  notarization; the local macOS binaries have ad hoc linker signatures.
 
 The [release checklist](release-checklist.md) and [compatibility matrix](compatibility.md)
 remain the sources for release gates and platform claims. No commit, tag,

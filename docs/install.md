@@ -21,6 +21,10 @@ and a network connection are not needed to run local scripts after installation.
 Archive extraction/checksum utilities are installation tools, not interpreter
 runtime dependencies.
 
+Developer documentation can link to benchmark harnesses and raw measurements in
+the source repository. Those source-checkout files are not included in the
+binary archive; runnable examples and playground fixtures are included.
+
 ## Linux x86-64 / ARM64
 
 After the corresponding native release is verified, select the appropriate target:

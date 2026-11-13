@@ -208,6 +208,10 @@ intentionally still available.
 
 ## Reproduction and evidence
 
+The benchmark harness and raw data below are source-checkout material and are
+not included in interpreter archives. These links require the repository;
+the packaged interpreter and shipped examples do not need the harness.
+
 See [benchmark instructions](../benchmarks/README.md). Raw evidence includes
 [initial baseline](../benchmarks/results/baseline.json),
 [final paired results](../benchmarks/results/optimized.json),

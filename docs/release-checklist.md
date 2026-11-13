@@ -8,7 +8,9 @@ all-platform release.
 - [x] Standalone scr binary target; workspace version 0.1.0.
 - [x] Rust compiler pinned, Cargo.lock retained, unwind/overflow-safe profiles.
 - [x] Required examples and standard-library reference included in package inputs.
-- [ ] Review git diff, licenses/notices, release limitations, and dependency updates.
+- [x] Inspect release-tool diff, unchanged dependency inputs, packaged notice
+  inventory, and documented release limitations against local artifacts.
+- [ ] Maintainer review of changes and license/attribution notices for publication.
 - [x] Reconcile feature-absence and capture-lifetime claims across release notes,
   architecture, and library docs with the current [package manager](packages.md),
   [collector documentation](performance.md), implementation, and tests.
@@ -29,6 +31,8 @@ replace a fresh run against the intended release source.
 - [x] Archive inventory/checksums verified; identical-input repack has identical hash.
 - [x] Extracted archive passed offline smoke with no external language runtime PATH.
 - [x] Archive name/hash and local machine/OS recorded in dist validation evidence.
+- [x] Local base/SQLite archives pass isolated installation/removal, syntax checks
+  of all 34 shipped scripts, and dependency-notice inventory review.
 
 ## Required native evidence before advertising all targets
 
@@ -43,10 +47,13 @@ replace a fresh run against the intended release source.
 ## Candidate review and publication (maintainer action)
 
 - [ ] Verify aggregate SHA256SUMS and all five uniquely named archives.
-- [ ] Inspect documentation/examples and installation/uninstallation from an archive.
-- [ ] Confirm signing/notarization status is described honestly; no unsupported claims.
-- [ ] Review unsigned preview limitations and explicit optional network/process behavior.
-- [ ] Prepare release notes with platform evidence and known limitations.
+- [ ] Inspect documentation/examples and installation/uninstallation for every
+  target selected for publication; local macOS artifact review is recorded above.
+- [x] Describe observed local ad hoc signatures and absent publisher
+  signing/notarization without claiming other-platform verification.
+- [x] Review local preview limitations and explicit optional network/process behavior.
+- [x] Prepare [draft candidate notes](releases.md#draft-candidate-notes) with local
+  platform evidence and known limitations; maintainer approval remains pending.
 - [ ] Publish chosen validated assets, checksums, validation and dependency reports.
 - [ ] Download a published artifact, verify checksum, and repeat local-script smoke.
 
