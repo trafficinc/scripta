@@ -569,6 +569,139 @@ fn map_operations_preserve_typed_keys_and_duplicate_insertion_positions() {
 }
 
 #[test]
+fn indexed_maps_preserve_order_with_many_typed_keys_and_partial_overlap() {
+    let keys = |i: i64| [MapKey::Int(i), MapKey::String(i.to_string())];
+    let right_value = |i: i64| {
+        if i % 3 == 0 {
+            Value::Null
+        } else {
+            Value::Int(-1000 - i)
+        }
+    };
+    let left: Vec<_> = (0..128)
+        .flat_map(|i| keys(i).map(|key| (key, Value::Int(i))))
+        .collect();
+    // Reverse both key order and type order on the right to catch accidental
+    // hash iteration order or reordering of overwritten entries.
+    let right: Vec<_> = (64..192)
+        .rev()
+        .flat_map(|i| {
+            let [int, text] = keys(i);
+            [(text, right_value(i)), (int, right_value(i))]
+        })
+        .collect();
+    let replaced: Vec<_> = (0..128)
+        .flat_map(|i| {
+            keys(i).map(|key| {
+                (
+                    key,
+                    if i < 64 {
+                        Value::Int(i)
+                    } else {
+                        right_value(i)
+                    },
+                )
+            })
+        })
+        .collect();
+    let mut merged = replaced.clone();
+    merged.extend((128..192).rev().flat_map(|i| {
+        let [int, text] = keys(i);
+        [(text, right_value(i)), (int, right_value(i))]
+    }));
+    let different: Vec<_> = (0..64)
+        .flat_map(|i| keys(i).map(|key| (key, Value::Int(i))))
+        .collect();
+    let shared: Vec<_> = (64..128)
+        .flat_map(|i| keys(i).map(|key| (key, Value::Int(i))))
+        .collect();
+    let mut runtime = runtime(None);
+    runtime
+        .set_global("left", Value::Map(left.clone()))
+        .unwrap();
+    runtime
+        .set_global("right", Value::Map(right.clone()))
+        .unwrap();
+    for (function, expected) in [
+        ("merge", merged),
+        ("replace", replaced),
+        ("diffKeys", different),
+        ("intersectKeys", shared),
+    ] {
+        execute(
+            &mut runtime,
+            &format!("$result = Map::{function}($left, $right);"),
+        );
+        let Value::Map(actual) = runtime.get_global("result").unwrap() else {
+            panic!("map result")
+        };
+        assert_eq!(actual, &expected, "{function}");
+    }
+    assert_eq!(runtime.get_global("left"), Some(&Value::Map(left)));
+    assert_eq!(runtime.get_global("right"), Some(&Value::Map(right)));
+}
+
+#[test]
+fn indexed_construction_keeps_first_positions_and_last_values_after_many_duplicates() {
+    let expected_keys: Vec<_> = (-64..64)
+        .flat_map(|i| [MapKey::Int(i), MapKey::String(i.to_string())])
+        .chain([MapKey::String(String::new()), MapKey::String("東京".into())])
+        .collect();
+    let as_value = |key: &MapKey| match key {
+        MapKey::Int(i) => Value::Int(*i),
+        MapKey::String(s) => Value::String(s.clone()),
+    };
+    // Repeat all keys in the opposite order, using separately owned strings.
+    let keys: Vec<_> = expected_keys
+        .iter()
+        .chain(expected_keys.iter().rev())
+        .map(as_value)
+        .collect();
+    let count = expected_keys.len();
+    let values: Vec<_> = (0..2 * count).map(|i| Value::Int(i as i64)).collect();
+    let rows: Vec<_> = keys
+        .iter()
+        .zip(&values)
+        .map(|(key, value)| {
+            Value::Map(vec![
+                (MapKey::String("id".into()), key.clone()),
+                (MapKey::String("v".into()), value.clone()),
+            ])
+        })
+        .collect();
+    let source: Vec<_> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, value)| (MapKey::Int(i as i64), value.clone()))
+        .collect();
+    let expected: Vec<_> = expected_keys
+        .into_iter()
+        .enumerate()
+        .map(|(i, key)| (key, Value::Int((2 * count - 1 - i) as i64)))
+        .collect();
+    let mut runtime = runtime(None);
+    for (name, value) in [
+        ("keys", Value::List(keys)),
+        ("values", Value::List(values)),
+        ("rows", Value::List(rows)),
+        ("source", Value::Map(source)),
+    ] {
+        runtime.set_global(name, value).unwrap();
+    }
+    for expression in [
+        "Map::combine($keys, $values)",
+        "Map::column($rows, 'v', 'id')",
+        "Map::flip($source)",
+    ] {
+        execute(&mut runtime, &format!("$result = {expression};"));
+        let Value::Map(actual) = runtime.get_global("result").unwrap() else {
+            panic!("map result")
+        };
+        assert_eq!(actual, &expected, "{expression}");
+    }
+}
+
+#[test]
 fn comparisons_preserve_left_order_duplicates_and_keys() {
     for (expression, expected) in [
         ("List::diff([3, 1, 3, 1.0, null], [1, null])", "[3, 3, 1.0]"),

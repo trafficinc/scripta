@@ -361,9 +361,18 @@ premature failures. Detected
 size overflows, byte-budget violations, and fallible result reservations raise
 `ResourceLimitError`; input arguments and returned booleans also remain subject
 to the runtime's ordinary value checks. These limits do not bound process RSS
-or sorting scratch space. Cancellation is checked at native-call boundaries
+or temporary key indexes and sorting scratch space. Cancellation is checked at native-call boundaries
 and during result traversal/copying; a sort can delay cancellation while it is
 ordering the result. Failed helpers leave assignment destinations unchanged.
+
+`Map::merge`, `replace`, `diffKeys`, and `intersectKeys` use temporary hash
+indexes of borrowed typed keys. `combine`, `flip`, and indexed `column` use
+indexes of the first insertion positions. Their key lookups take expected
+linear total work in the number of entries, plus string hashing and result
+traversal/copying. Ordered vectors determine all result order, including after
+overwrites. Index reservations are fallible and index construction checks
+cancellation between entries. Value-based `diff` and `intersect` retain strict
+recursive comparisons and can take quadratic time.
 
 `Map::get` and `has` provide safe lookups without exceptions. Direct missing-key
 indexing and invalid list positions raise catchable core `IndexError`; invalid
