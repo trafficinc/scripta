@@ -12,6 +12,7 @@ Usage: scr version
        scr <file> [arguments...]
        scr check <file>
        scr fmt [--check] <file>
+       scr playground [options]
 
 Options: --help, -h, --version
 Use scr run -- <file> for paths starting with a dash or matching command names.
@@ -19,6 +20,9 @@ Arguments after the script path belong to the script; -- ends script option quer
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    Playground {
+        arguments: Vec<OsString>,
+    },
     Help,
     Version,
     VersionVerbose,
@@ -48,6 +52,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
     let Some(first) = args.first() else {
         return Err(UsageError("expected a command or source file".into()));
     };
+    if first == "playground" {
+        return Ok(Command::Playground {
+            arguments: args[1..].to_vec(),
+        });
+    }
     if matches!(first.to_str(), Some("version" | "--version"))
         && args.len() == 2
         && args[1] == "--verbose"

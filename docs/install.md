@@ -20,6 +20,20 @@ and a network connection are not needed to run local scripts after installation.
 Archive extraction/checksum utilities are installation tools, not interpreter
 runtime dependencies.
 
+## Optional local browser playground
+
+The playground application is a separate project and download. Its editor and
+server are not included in Scripta source, builds, or normal interpreter archives.
+The standalone playground download bundles its own interpreter and launcher.
+
+For an existing Scripta installation, put the separately downloaded
+`scr-playground` (`scr-playground.exe` on Windows) beside `scr` or on PATH, then
+run `scr playground`. This uses your installed interpreter. You may instead set
+`SCR_PLAYGROUND_BIN` to the companion executable's full path. The command never
+downloads or installs the app automatically. Use `scr playground --no-open` to
+print the local URL without opening a browser. Delete the companion and remove
+any PATH/environment entry to uninstall it.
+
 ## Linux x86-64 / ARM64
 
 After the corresponding native release is verified, select the appropriate target:

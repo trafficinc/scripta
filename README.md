@@ -16,6 +16,13 @@
   <a href="examples/README.md">Examples</a>
 </p>
 
+## Try Scripta Playground
+
+Try Scripta in a local browser editor with syntax highlighting, example scripts,
+and an output console. Get the separate download from
+[Scripta Playground](https://github.com/trafficinc/scripta-playground).
+The playground is optional and is not included in normal Scripta installations.
+
 ## Project status
 
 **0.1.0 release preparation is implemented. A public release has not been published.**
@@ -269,6 +276,7 @@ an SSH terminal open. See the [crontab reference](https://man7.org/linux/man-pag
 | `scr check script.scr` | Validate tags, complete syntax, declarations, and control flow without execution. |
 | `scr fmt script.scr` | Format indentation and spacing while preserving comments and string literals. |
 | `scr fmt --check script.scr` | Check formatting without writing; useful in CI. |
+| `scr playground` | Launch the separately installed, optional local browser playground. |
 | `scr version` | Print the interpreter version. |
 | `scr version --verbose` | Show version, build target, compiler, profile, and supplied commit metadata. |
 | `scr help` | Show usage. |

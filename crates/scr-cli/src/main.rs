@@ -15,6 +15,7 @@ fn main() -> ExitCode {
         }
     };
     let (path, check_only, format_only, arguments) = match command {
+        Command::Playground { arguments } => return scr_cli::playground::launch(arguments),
         Command::Help => {
             println!("{}", args::HELP);
             return ExitCode::SUCCESS;
