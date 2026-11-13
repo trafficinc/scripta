@@ -80,17 +80,24 @@ Checksums provide integrity, not publisher authentication.
   other architectures, ARM32, musl, and device-specific Raspberry Pi behavior are
   unverified. A successful cross build is not a substitute for running the tests.
 - Candidates are not notarized/Developer-ID-signed or Authenticode-signed. No MSI,
-  PKG, package-manager publication, automatic updater, or privileged installer is
+  PKG, OS package-manager publication, automatic updater, or privileged installer is
   provided. Platform security prompts may require manual review.
 - Scripta is dynamically typed and not PHP-compatible. Interpolation, script-defined
-  classes/Exception construction, package management, a VM/JIT, and background
+  classes/Exception construction, a VM/JIT, and background
   daemons remain absent. Check validates syntax/declarations, not complete types.
+- The built-in [package manager](packages.md) supports Git and local dependencies,
+  lockfiles, and offline installation from installed Git snapshots or local sources.
+  Git packages require the Git executable. There is no registry lookup, package
+  publish command, or install-time script.
 - Filesystem root checks are not an OS sandbox or race-proof defense against a
   hostile directory tree. The interpreter executes trusted automation code with
   the user's permissions; Process execution capabilities are broad.
 - Local source defaults to 8 MiB, runtime value nesting to 128, calls/includes to
   at most 64. Configurable logical-value/scope/step budgets are not an aggregate
-  RSS ceiling. Captured scopes remain until runtime drop; see the safety audit.
+  RSS ceiling. A tracing collector reclaims unreachable captured scopes during
+  execution and at execution boundaries. Host-retained callables remain roots;
+  opaque native ownership cycles require host cleanup. Freed storage need not
+  immediately reduce RSS; see the [safety audit](performance.md).
 - Whole-file UTF-8 reads and value-copy semantics can use substantial memory.
   Subprocess capture and HTTP bodies have independent default 8 MiB ceilings.
   Temporary capture files can overshoot between monitor polls. HTTP cancellation

@@ -118,7 +118,9 @@ collection arguments such as repeated `len($list)`, but changing the public Valu
 representation would affect every native module and host consumer. The measured
 hot paths can be improved without that change, so owned values remain. Map lookup
 is still linear and equality is still order-insensitive with quadratic matching;
-no VM, JIT, hash-map representation migration, or new collector was introduced.
+no VM, JIT, hash-map representation migration, or new collector was introduced
+in that measured optimization work. The tracing collector described below was
+added later; these historical measurements do not measure its overhead.
 
 ## Implemented targeted changes
 

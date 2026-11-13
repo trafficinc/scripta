@@ -381,3 +381,49 @@ fn package_functions_keep_dependency_resolution_context() {
     .unwrap();
     assert_eq!(ok(&app, &["main.scr"]), "from dependency");
 }
+
+#[test]
+fn package_aliases_keep_same_named_private_dependency_versions_isolated() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let app = root.join("app");
+    fs::create_dir(&app).unwrap();
+    for (name, util) in [("a", "u1"), ("b", "u2")] {
+        package(
+            &root.join(name),
+            name,
+            "1.0.0",
+            "<?scr require_once 'util' as Util; function value() { return Util::value(); }",
+        );
+        dependency(&root.join(name), "util", &format!("../{util}"));
+    }
+    package(
+        &root.join("u1"),
+        "util",
+        "1.0.0",
+        "<?scr function helper() { return 'one'; } function value() { return helper(); }",
+    );
+    package(
+        &root.join("u2"),
+        "util",
+        "2.0.0",
+        "<?scr function helper() { return 'two'; } function value() { return helper(); }",
+    );
+    ok(&app, &["init"]);
+    ok(&app, &["add", "a", "--path", "../a"]);
+    ok(&app, &["add", "b", "--path", "../b"]);
+    fs::write(app.join("main.scr"), "<?scr function value() { return 'caller'; } require_once 'a' as A; require_once 'b' as B; require_once 'a' as Again; echo A::value() . B::value() . Again::value() . value();").unwrap();
+    assert_eq!(ok(root, &["run", "app/main.scr"]), "onetwoonecaller");
+    fs::write(
+        app.join("private.scr"),
+        "<?scr require_once 'a' as A; Util::value();",
+    )
+    .unwrap();
+    fails(&app, &["private.scr"], "undefined function Util::value");
+    fs::write(
+        app.join(".scripta/packages/a/.scripta/packages/util/main.scr"),
+        "<?scr function value() { return 'tampered'; }",
+    )
+    .unwrap();
+    fails(&app, &["main.scr"], "checksum mismatch");
+}
