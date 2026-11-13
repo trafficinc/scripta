@@ -1,3 +1,3 @@
 <?scr
-require_once "helpers";
-echo packageGreeting("packages");
+require_once "helpers" as Helpers;
+echo Helpers::packageGreeting("packages");

@@ -329,3 +329,111 @@ fn alias_formatting_preserves_comments_and_execution_and_check_does_not_load_fil
         assert_eq!(output, b"Ada");
     }
 }
+
+#[test]
+fn repeated_require_reclaims_old_instances_and_fatal_failures_restore_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "lib.scr", "function value() { return 'ok'; }");
+    let mut rt = Runtime::with_options(RuntimeOptions {
+        max_scopes: Some(8),
+        context: ContextOptions {
+            script_path: Some(dir.path().join("main.scr")),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    // Each fresh module contains a function/environment cycle. Scope pressure
+    // must reclaim replaced instances while retaining the current binding/cache.
+    assert_eq!(run(&mut rt, "for ($i=0; $i<100; $i+=1) { require 'lib.scr' as Lib; } require_once 'lib.scr' as Current; echo Current::value();").unwrap(), "ok");
+    write(dir.path(), "steps.scr", "while (true) {}");
+    let mut limited = Runtime::with_options(RuntimeOptions {
+        instruction_limit: Some(20),
+        context: ContextOptions {
+            script_path: Some(dir.path().join("main.scr")),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    assert!(
+        run(&mut limited, "require_once 'steps.scr' as Steps;")
+            .unwrap_err()
+            .message
+            .contains("instruction limit")
+    );
+    write(
+        dir.path(),
+        "steps.scr",
+        "function value() { return 'retry'; }",
+    );
+    assert_eq!(
+        run(
+            &mut limited,
+            "require_once 'steps.scr' as Steps; echo Steps::value();"
+        )
+        .unwrap(),
+        "retry"
+    );
+    write(
+        dir.path(),
+        "exit.scr",
+        "function value() { return 'partial'; } exit 7;",
+    );
+    assert_eq!(
+        rt.execute_source("<?scr require_once 'exit.scr' as Exiting;", &mut Vec::new())
+            .unwrap(),
+        7
+    );
+    assert!(
+        run(&mut rt, "Exiting::value();")
+            .unwrap_err()
+            .message
+            .contains("undefined function")
+    );
+    write(
+        dir.path(),
+        "exit.scr",
+        "function value() { return 'complete'; }",
+    );
+    assert_eq!(
+        run(
+            &mut rt,
+            "require_once 'exit.scr' as Exiting; echo Exiting::value();"
+        )
+        .unwrap(),
+        "complete"
+    );
+}
+
+#[test]
+fn module_entry_once_identity_is_retained_for_later_calls_and_canonical_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "self.scr",
+        "echo 'init'; function check() { require_once 'self.scr'; return 'ok'; }",
+    );
+    let mut rt = runtime(dir.path());
+    assert_eq!(
+        run(
+            &mut rt,
+            "require_once 'self.scr' as Lib; echo Lib::check();"
+        )
+        .unwrap(),
+        "initok"
+    );
+    rt.collect_garbage();
+    assert_eq!(run(&mut rt, "echo Lib::check();").unwrap(), "ok");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(dir.path().join("self.scr"), dir.path().join("link.scr"))
+            .unwrap();
+        assert_eq!(
+            run(
+                &mut rt,
+                "require_once 'link.scr' as Lib; echo Lib::check();"
+            )
+            .unwrap(),
+            "ok"
+        );
+    }
+}

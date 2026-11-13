@@ -34,8 +34,8 @@ to `add` are made absolute.
 
 ```scr
 <?scr
-require_once "helpers";
-echo greeting();
+require_once "helpers" as Helpers;
+echo Helpers::greeting();
 ```
 
 A bare dependency name resolves to its installed entry file. An existing local
@@ -43,9 +43,62 @@ file with that name takes precedence. Other local paths retain their existing
 behavior. Packages must be declared as direct dependencies of the closest
 `scripta.toml` to the including source file. Functions retain their definition
 file, so later calls resolve dependencies relative to their defining package.
-`require` and `require_once` retain their current execution and shared-scope
-semantics. There are no new exports or namespaces; library authors should use
-distinct function names. All script files still start with `<?scr`.
+All script files still start with `<?scr`.
+
+## Package aliases and isolation
+
+Add `as Alias` to load a package into an isolated module scope:
+
+```scr
+<?scr
+require_once "helpers" as Helpers;
+require_once "other-tools" as Tools;
+echo Helpers::greeting();
+echo Tools::greeting();
+```
+
+Aliases are unquoted, case-sensitive identifiers. `Helpers::greeting()` uses the
+same call notation as `String::trim()`. Each module has its own functions and
+variables, so both packages can define `greeting` and same-named helper functions.
+A module cannot read or overwrite caller variables or call caller script
+functions. Registered native functions remain available. Module functions capture
+their module's lexical state and call their own helpers normally. Functions
+declared directly in the module scope, including through unaliased local
+includes, are callable through the alias; there is no separate export/private
+function declaration. Module variables are not exposed through the alias.
+
+Aliases are lexical bindings, visible to nested functions and retained callbacks.
+Aliases inside a module stay within that module. A visible alias cannot be rebound
+to a different canonical entry file; this raises `ModuleAliasError` before running
+that file. Registered namespaces such as `String`, `File`, and `Http` cannot be
+used as aliases. Missing module functions raise `ModuleError`. Static checking
+validates the syntax without loading or resolving modules.
+
+`require_once` caches successful isolated instances by canonical entry path per
+runtime. Different aliases of the same file share one instance and its state;
+separately installed dependency versions have different paths and stay isolated.
+Every load still checks resolution, permissions, host policy, and package
+integrity before using a cached instance. Cycles are checked before cache lookup.
+`require` always executes in a fresh isolated scope. On success it binds the alias
+and replaces the cached instance for subsequent `require_once` loads; existing
+other aliases and callbacks retain their previous instance. Successful cached
+instances remain alive until runtime drop and count toward scope limits.
+
+Failed initialization publishes no new alias or cache entry and preserves any
+previous binding. Runtime scope/source/loading state is restored. Output, file
+changes, and successful dependency initialization that occurred earlier are not
+rolled back. Failed loads can be retried. Native permissions, source/include/call
+limits, and logical value budgets continue to apply; aliases are name isolation,
+not a security sandbox.
+
+The same syntax works for local files: `require_once "lib/helpers.scr" as Helpers;`.
+Without `as`, includes retain the existing shared-scope behavior and duplicate
+function errors. Unaliased `require_once` tracking is separate for the application
+and each isolated module, so a local helper file can be included once in each.
+Aliased and application shared-scope loading have separate caches. An initialized
+module entry is marked complete for unaliased `require_once` inside that module,
+including later calls from its functions. Existing local-file precedence
+over dependency names is unchanged.
 
 ## Manifest
 

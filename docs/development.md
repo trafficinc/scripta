@@ -150,3 +150,16 @@ compilation alone is not a platform support claim. The installed executable does
 not depend on the maintainer scr-release packaging tool. Phase 13 benchmark
 measurements used the earlier default release profile and do not measure the
 new Phase 14 LTO/distribution profile.
+
+
+## Aliased requires
+
+`require_once "helpers" as Helpers;` loads an isolated module and calls its
+functions with `Helpers::name()`. The AST's `StatementKind::Require` includes an
+optional `Binding` for the alias name/span. No lexer keyword or native export was
+added (`as` and qualified-call syntax already exist). Formatter token verification
+and syntax-only checking apply to aliases. Unaliased loading retains shared-scope
+behavior; see the [full contract](packages.md#package-aliases-and-isolation).
+
+Focused tests live in `crates/scr-cli/tests/module_aliases.rs`, alongside installed
+package/version/integrity coverage in `packages.rs` and parser statement tests.

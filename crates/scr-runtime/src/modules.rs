@@ -1,4 +1,4 @@
-//! Local source loading with canonical identity and retained definition sources.
+//! Shared-scope includes and isolated aliased modules with canonical identity.
 use super::*;
 use scr_diagnostics::Diagnostic;
 use std::{
@@ -238,7 +238,7 @@ impl Runtime {
         self.active_modules.push(result.clone());
         let execution = (|| {
             let program = self.parse_source(&self.source.as_ref().unwrap().text)?;
-            // No extra block: declarations/assignments belong to the caller's scope.
+            // No extra block: use the caller scope, or the isolated root for an alias.
             // Unlike the entry program, included declarations execute in source order.
             self.statements(&program.statements, output)
         })();
@@ -248,7 +248,9 @@ impl Runtime {
         if let Some((previous, scope)) = isolated {
             if execution.is_ok() {
                 // Even a module with no functions must remain a valid cached scope.
-                self.environments.scope_mut(scope).captured = true;
+                let root = self.environments.scope_mut(scope);
+                root.captured = true;
+                root.loaded_modules.insert(result.clone());
                 self.environments.module_cache.insert(result.clone(), scope);
             }
             self.environments.leave(previous);

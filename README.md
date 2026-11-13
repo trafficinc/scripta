@@ -423,9 +423,23 @@ scr add helpers --git https://example.com/team/helpers.git --version '^1.2'
 scr install --locked
 ```
 
-Load an installed package with `require_once "helpers";`. Commit `scripta.toml`
-and `scripta.lock`; ignore `.scripta/`. See [packages](docs/packages.md) for package
-metadata, transitive dependencies, offline installs, and update behavior.
+Load an installed package with an alias to keep its names isolated:
+
+```scr
+<?scr
+require_once "helpers" as Helpers;
+echo Helpers::greeting();
+```
+
+Use `Helpers::functionName()` to call module functions. Aliased packages have their
+own functions and variables; different libraries can use identical helper names.
+`require_once` shares an initialized instance across aliases of the same canonical
+entry file. Plain `require` executes a fresh instance. Unaliased includes retain
+the existing shared-scope behavior. See [alias semantics](docs/packages.md#package-aliases-and-isolation).
+
+Commit `scripta.toml` and `scripta.lock`; ignore `.scripta/`.
+See [packages](docs/packages.md) for package metadata, transitive dependencies,
+offline installs, and update behavior.
 
 ## Examples
 
