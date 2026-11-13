@@ -72,8 +72,10 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 `HttpResponse`, and `FileStream` are read-only native objects whose properties
 and methods are listed in their module sections. Convert selected properties into ordinary maps before
 JSON encoding. `require` and `require_once` are statements, not native functions;
-see [local script loading](language-spec.md#local-script-loading). There is no
-package manager or implicit remote module resolution.
+see [local script loading](language-spec.md#local-script-loading). The built-in
+[package manager](packages.md) installs declared Git and local dependencies;
+`require` and `require_once` can resolve installed packages by name. Script loading
+does not implicitly fetch remote modules.
 
 Default and variadic parameters and anonymous literals are language features,
 separate from native function registration. A script variadic annotation checks
@@ -1015,8 +1017,12 @@ RuntimeOptions controls max_source_bytes (default 8 MiB), max_value_bytes,
 max_scopes, instruction_limit, and bounded recursion. CLI equivalents are
 SCR_MAX_SOURCE_BYTES, SCR_MAX_VALUE_BYTES, SCR_MAX_SCOPES, and SCR_MAX_STEPS.
 Except source/value depth, new budgets are opt-in. A logical-value limit is not
-an aggregate native-object/process heap ceiling. Retained captures last until
-runtime drop. See [safety details](performance.md) for exact accounting and tests.
+an aggregate native-object/process heap ceiling. A tracing collector reclaims
+unreachable captured environments during execution and at execution boundaries;
+hosts can also request collection with `Runtime::collect_garbage()`. Host-retained
+callables remain roots, and opaque native ownership cycles require host cleanup.
+Freed storage need not immediately reduce RSS. See [safety details](performance.md)
+for exact accounting and tests.
 
 Diagnostics mask literal/comment excerpts and redact known credential values;
 ContextOptions.redacted_values adds host-provided values. Script catch values and

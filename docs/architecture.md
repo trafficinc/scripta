@@ -218,8 +218,16 @@ redirect, and response-size limits. HttpResponse returns native callables for it
 methods through `Value::native_function`, using the existing callable evaluator.
 
 Local loading is a runtime statement. The loader canonicalizes identity, tracks
-active/completed files, consults a host policy, and evaluates each parsed file in
-the current lexical scope. SourceFile references on user functions, runtime errors,
+active files, consults a host policy, and evaluates each parsed file in the current
+lexical scope unless `as Alias` requests an isolated lexical root. Unaliased once
+completion belongs to the enclosing root; successful isolated instances are
+cached by canonical entry path. Lexical alias bindings reference module scope IDs,
+and qualified calls select functions directly from the target module scope.
+Isolated roots have no caller parent; native registrations use a native-only
+fallback. The tracing collector follows alias edges and treats cached module
+roots as runtime-lifetime roots, including modules without functions. Aliased
+`require` publishes a fresh instance only after success; old aliases/callbacks
+can retain previous instances. Scope limits include cached module roots. SourceFile references on user functions, runtime errors,
 and stack frames retain original file text for cross-file diagnostics and relative
 requires after module initialization. Internal runtime error payloads are boxed to
 keep the recursive interpreter's stack bounded as diagnostic metadata grows.
@@ -253,8 +261,11 @@ that can outlive the caller’s Program. Value validation is iterative and bound
 at depth 128; map duplicate validation uses typed hashed keys.
 
 RuntimeOptions exposes source, instruction, per-value logical-byte, and live-scope
-budgets. Retained closure environments are still released at runtime drop, with
-a configurable ceiling rather than a new collector. Runtime error redaction is
+budgets. The tracing collector described above reclaims unreachable captured
+environments during execution and at execution boundaries, including before a
+scope allocation is rejected at its configured limit. Host-retained callables
+remain roots; opaque native ownership cycles require host cleanup. Collection
+does not enforce an aggregate RSS ceiling. Runtime error redaction is
 separate from script exception values. Process waiters receive monitor completion
 notifications while timeout/cancellation/capture checks remain bounded polling.
 See [measurements and safety details](performance.md).
