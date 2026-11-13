@@ -5,6 +5,8 @@
 Workspace version: **0.1.0**. This is a first public-test candidate, not a stable
 language/API compatibility guarantee. See [compatibility](compatibility.md) for
 actual native evidence. No release is automatically published by these changes.
+See the [local validation record](release-validation.md) for the reviewed scope,
+source provenance, generated evidence, and outstanding release gates.
 
 ## Pinned inputs and profiles
 
@@ -38,19 +40,25 @@ From a source checkout after the complete tests pass:
 ```sh
 # macOS ARM64 example; do not use a foreign-target binary as native proof.
 export MACOSX_DEPLOYMENT_TARGET=15.0
-cargo test --workspace --locked
+cargo test --workspace --locked --target aarch64-apple-darwin
+cargo test --workspace --all-features --locked --target aarch64-apple-darwin
 cargo test --workspace --profile dist --target aarch64-apple-darwin --locked
 cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked
-cargo run -p scr-release --locked -- package --binary target/aarch64-apple-darwin/dist/scr --target aarch64-apple-darwin --out-dir dist
-cargo run -p scr-release --locked -- verify --archive dist/scripta-0.1.0-aarch64-apple-darwin.tar.gz
-cargo run -p scr-release --locked -- smoke --archive dist/scripta-0.1.0-aarch64-apple-darwin.tar.gz
-cargo run -p scr-release --locked -- checksums --dir dist
-cargo run -p scr-release --locked -- verify-checksums --dir dist
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- package --binary target/aarch64-apple-darwin/dist/scr --target aarch64-apple-darwin --out-dir dist/local-base
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify --archive dist/local-base/scripta-0.1.0-aarch64-apple-darwin.tar.gz
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- smoke --archive dist/local-base/scripta-0.1.0-aarch64-apple-darwin.tar.gz
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- checksums --dir dist/local-base
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify-checksums --dir dist/local-base
 ```
 
 Use the Windows target explicitly for **all** Cargo commands on Windows. Package
 extension is selected by the target; target values outside the five configured
 candidate names are rejected. `--tag v0.1.0` validates tag/version agreement.
+Choose a fresh output directory for each validation run so prior evidence and
+archives are retained; `dist/local-base` above is only an example. Packages
+include reference documentation, examples, and runnable playgrounds with their
+fixtures. Offline smoke executes the collection playground as well as the
+basic examples, and records workspace tests as a separate native-evidence gate.
 `--epoch NUMBER` overrides the archive epoch for reproducibility testing. The
 maintainer-only scr-release tool requires Rust and cached/fetched crate metadata;
 it is not included in or required by the installed scr interpreter.
@@ -101,7 +109,9 @@ Checksums provide integrity, not publisher authentication.
 - Whole-file UTF-8 reads and value-copy semantics can use substantial memory.
   Subprocess capture and HTTP bodies have independent default 8 MiB ceilings.
   Temporary capture files can overshoot between monitor polls. HTTP cancellation
-  waits for blocking operations/timeouts; no custom CA or binary body API exists.
+  waits for blocking operations/timeouts. HTTP accepts string/byte request
+  bodies and binary responses; downloads stream to bounded temporary files.
+  No script-level custom CA option exists.
 - Native metric capabilities may be unavailable on restricted systems and then
   raise explicit errors. CPU usage blocks for a real interval; memory is system
   memory. No instantaneous CPU values or process-memory/system-memory substitution.

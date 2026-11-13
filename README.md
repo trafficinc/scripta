@@ -19,9 +19,11 @@
 ## Project status
 
 **0.1.0 release preparation is implemented. A public release has not been published.**
-On macOS ARM64, all 229 tests passed in both debug and distribution profiles,
-along with formatting, Clippy, the Rust 1.85 source check, archive checksum and
-reproducibility checks, and an offline test of the packaged executable.
+Local macOS ARM64 validation covers debug and distribution-profile tests,
+formatting, Clippy, the Rust 1.85 source check, archive checksums and
+reproducibility, and an offline test of the packaged executable, including the
+collection playground. See the [local validation record](docs/release-validation.md)
+for the tested source, feature variants, results, and limitations.
 The other targets still need their native validation.
 
 | Target | Current validation |
@@ -110,7 +112,7 @@ cargo build -p scr-cli --locked
 | [scores.scr](playground/scores.scr) | Change the scores; `if` / `elseif` / `else` assigns a result to each name. |
 | [arrays.scr](playground/arrays.scr) | Build a list with `[] =` and assignment at its length, replace an item, and append to a list inside a map. |
 | [strings.scr](playground/strings.scr) | Parse, normalize, search, and format a Unicode status record with the `String` helpers. |
-| [collections.scr](playground/collections.scr) | Filter, sort, and summarize records using list helpers and safe map lookups. |
+| [collections.scr](playground/collections.scr) | Transform lists, merge and compare maps, aggregate values, and extract record columns. |
 | [log-analyzer.scr](playground/log-analyzer.scr) | Analyze [sample events](playground/sample-events.txt), count log levels, list sorted services, and report malformed records. |
 | [errors.scr](playground/errors.scr) | Recover from indexing, arithmetic, and operand-type failures; add `--uncaught` to demonstrate a diagnostic and exit status 1. |
 | [streaming.scr](playground/streaming.scr) | Stream log records from a file or stdin (`-`) with a line-size limit; file cleanup uses `finally`. |
