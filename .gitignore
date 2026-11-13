@@ -14,6 +14,8 @@
 !.env.template
 .envrc
 
+.vscode
+
 # Credentials and private keys.
 .aws/
 .ssh/
