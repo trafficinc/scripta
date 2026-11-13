@@ -540,3 +540,34 @@ fn finally_parses_after_optional_catches_and_rejects_orphan_clauses() {
         );
     }
 }
+
+#[test]
+fn require_aliases_accept_bare_identifiers_and_reject_malformed_bindings() {
+    let parsed = program(
+        "require 'lib/' . $name as Helpers; require_once('other') as Other; Helpers::greet();",
+    );
+    for (index, name, once) in [(0, "Helpers", false), (1, "Other", true)] {
+        let StatementKind::Require {
+            alias,
+            once: actual,
+            ..
+        } = &parsed.statements[index].kind
+        else {
+            panic!()
+        };
+        let alias = alias.as_ref().unwrap();
+        assert_eq!(alias.name, name);
+        assert!(alias.span.end > alias.span.start);
+        assert_eq!(*actual, once);
+    }
+    for source in [
+        "require 'x' as;",
+        "require 'x' as 'Alias';",
+        "require 'x' as $Alias;",
+        "require 'x' as true;",
+        "require 'x' as Alias as Other;",
+        "require 'x' as Alias",
+    ] {
+        assert!(!errors(source).is_empty(), "{source}");
+    }
+}

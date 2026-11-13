@@ -1,0 +1,11 @@
+format = 1
+
+[packages.helpers]
+version = "1.0.0"
+checksum = "0a24e99efd028038a52f7bcd8a4d8c369e220c5c4799d2ae649efdba9c0b806f"
+
+[packages.helpers.source]
+path = "lib/helpers"
+version = "^1.0"
+
+[packages.helpers.dependencies]

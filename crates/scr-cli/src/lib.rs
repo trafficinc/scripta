@@ -4,4 +4,5 @@ pub mod pipeline;
 pub mod playground;
 
 pub mod formatter;
+pub mod packages;
 mod validation;

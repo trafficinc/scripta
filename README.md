@@ -26,23 +26,26 @@ The playground is optional and is not included in normal Scripta installations.
 ## Project status
 
 **0.1.0 release preparation is implemented. A public release has not been published.**
-On macOS ARM64, all 229 tests passed in both debug and distribution profiles,
-along with formatting, Clippy, the Rust 1.85 source check, archive checksum and
-reproducibility checks, and an offline test of the packaged executable.
-The other targets still need their native CI runs.
+Local macOS ARM64 validation covers debug and distribution-profile tests,
+formatting, Clippy, the Rust 1.85 source check, archive checksums and
+reproducibility, and an offline test of the packaged executable, including the
+collection playground. See the [local validation record](docs/release-validation.md)
+for the tested source, feature variants, results, and limitations.
+The other targets still need their native validation.
 
 | Target | Current validation |
 | --- | --- |
-| macOS ARM64 | Verified locally on macOS 27.0.1; macOS 15 CI pending |
-| macOS x86-64 | Native CI pending |
-| Linux x86-64 | Native CI pending |
-| Linux ARM64 | Native CI pending |
-| Windows x86-64 | Native CI pending |
+| macOS ARM64 | Verified locally on macOS 27.0.1; macOS 15 validation pending |
+| macOS x86-64 | Native validation pending |
+| Linux x86-64 | Native validation pending |
+| Linux ARM64 | Native validation pending |
+| Windows x86-64 | Native validation pending |
 
 Build instructions below describe the configured targets; they do not certify an
 untested platform. See the [compatibility matrix](docs/compatibility.md) for OS
 baselines and evidence, and the [release checklist](docs/release-checklist.md)
-for the remaining release work. Candidates are unsigned and not notarized.
+for the remaining release work. Candidates have no publisher signatures or
+notarization; the reviewed macOS binaries have linker-generated ad hoc signatures.
 
 ## What Scripta provides
 
@@ -55,9 +58,11 @@ generated HTML or JSON through an existing web server when you need a dashboard.
 - **Structured data and APIs:** lists, maps, JSON, HTTPS requests, UTC dates,
   and structured local logging.
 - **Reusable scripts:** default/variadic parameters, anonymous functions, lexical
-  captures, and local `require` / `require_once`.
+  captures, local `require` / `require_once`, and versioned Git/local packages.
 - **Developer tools:** syntax checks, a comment-preserving formatter, error codes,
   source locations, and runtime stack traces.
+- **Optional SQLite:** build with `--features sqlite` for parameterized SQL,
+  transactions, and bounded query results. See the [SQLite extension](docs/sqlite.md).
 - **A standalone interpreter:** the installed executable uses platform system
   libraries. Local scripts need no Python, Node.js, PHP, Docker, Rust, or network.
 
@@ -115,10 +120,10 @@ cargo build -p scr-cli --locked
 | [scores.scr](playground/scores.scr) | Change the scores; `if` / `elseif` / `else` assigns a result to each name. |
 | [arrays.scr](playground/arrays.scr) | Build a list with `[] =` and assignment at its length, replace an item, and append to a list inside a map. |
 | [strings.scr](playground/strings.scr) | Parse, normalize, search, and format a Unicode status record with the `String` helpers. |
-| [collections.scr](playground/collections.scr) | Filter, sort, and summarize records using list helpers and safe map lookups. |
+| [collections.scr](playground/collections.scr) | Transform lists, merge and compare maps, aggregate values, and extract record columns. |
 | [log-analyzer.scr](playground/log-analyzer.scr) | Analyze [sample events](playground/sample-events.txt), count log levels, list sorted services, and report malformed records. |
 | [errors.scr](playground/errors.scr) | Recover from indexing, arithmetic, and operand-type failures; add `--uncaught` to demonstrate a diagnostic and exit status 1. |
-| [streaming.scr](playground/streaming.scr) | Stream log records with a line-size limit and close the file in `finally`. |
+| [streaming.scr](playground/streaming.scr) | Stream log records from a file or stdin (`-`) with a line-size limit; file cleanup uses `finally`. |
 | [reporting.scr](playground/reporting.scr) | Summarize durations with Math helpers and bounded string formatting. |
 | [functions.scr](playground/functions.scr) | Try defaults, typed variadics, anonymous callbacks, captured counters, and independent collection defaults. |
 
@@ -273,13 +278,14 @@ an SSH terminal open. See the [crontab reference](https://man7.org/linux/man-pag
 | Command | Purpose |
 | --- | --- |
 | `scr run script.scr` | Execute a script; `scr script.scr` is shorthand. |
+| `scr run - [arguments...]` | Read script source from stdin through EOF and execute it. |
 | `scr check script.scr` | Validate tags, complete syntax, declarations, and control flow without execution. |
 | `scr fmt script.scr` | Format indentation and spacing while preserving comments and string literals. |
 | `scr fmt --check script.scr` | Check formatting without writing; useful in CI. |
 | `scr playground` | Launch the separately installed, optional local browser playground. |
 | `scr version` | Print the interpreter version. |
 | `scr version --verbose` | Show version, build target, compiler, profile, and supplied commit metadata. |
-| `scr help` | Show usage. |
+| `scr help` | Show usage; `scr help run`, `check`, or `fmt` shows command help. |
 
 `check` is a syntax/declaration check, not complete static type checking. It does
 not execute or load required files. `fmt` is idempotent and keeps an optional
@@ -288,6 +294,36 @@ closing tag. Use `scr run -- help` for a script whose path matches a command nam
 Exit codes: **0** for success, **1** for script/file failures or formatting that
 needs changes, **2** for CLI usage errors, and **130** for interruption.
 A script can explicitly return a code from 0 through 255 with `exit(code)`.
+
+### Shell pipelines
+
+A file-backed script can consume piped data without printing a prompt:
+
+```scr
+<?scr
+while (($line = Cli::readLine()) !== null) {
+    echo String::upper($line) . "\n";
+}
+```
+
+`Cli::readLine(maxLineBytes)` defaults to a 1 MiB raw line limit, including LF/CRLF.
+It returns `null` at EOF and an empty string for a blank line. Input failures
+raise exceptions and disable further stdin reads through `readLine` or `prompt`
+in that runtime registration. See the [input contract](docs/standard-library.md#script-arguments-and-prompts).
+
+On macOS/Linux, try the streaming example with piped data:
+
+```sh
+cat playground/sample-events.txt | scr run playground/streaming.scr -
+printf '%s\n' '<?scr echo "Hello from stdin!\n";' | scr run -
+```
+
+`scr run -` consumes stdin as UTF-8 source through EOF, subject to
+`SCR_MAX_SOURCE_BYTES`. Relative includes and package lookup start from the working
+directory; diagnostics identify the source as `<stdin>`. Stdin is then at EOF for
+script input. Use a file-backed script when stdin should carry data. A literal
+file named `-` remains accessible with `scr run -- -` or `scr run ./-`.
+`run`, `check`, and `fmt` also accept `--help` or `-h` before the source path.
 
 ## Web-server use
 
@@ -322,8 +358,11 @@ cd /srv/scripta-dashboard
 
 Ensure the web-server account can traverse the directory and read the generated
 files. Schedule the same `cd` and `scr run` command in cron to refresh the data.
-For concurrent readers, generate replacement files beside the published files
-and rename them into place after successful generation. The sample report is a
+Use `File::writeAtomic` in the report script so concurrent readers receive a
+complete old or new version of each file. New Unix files start private; after the
+first run, grant the web server read access to the public reports (for example,
+`chmod 644 public/status.json public/index.html`). Later replacements preserve
+these ordinary permission bits. Each file is published independently. The sample report is a
 starting point: add `System` metrics, HTML, and browser-side JavaScript that polls
 `status.json` to turn it into a dashboard.
 
@@ -368,18 +407,19 @@ examples and have not been deployment-tested in this checkout.
 
 ## Standard library
 
-The [complete reference](docs/standard-library.md) documents all **104 functions**,
+The [complete reference](docs/standard-library.md) documents all **123 functions**,
 return values, native objects, limits, and errors.
 
 | Modules | Use |
 | --- | --- |
-| `File`, `Dir`, `Path` | Read, write, stream bounded lines, list, copy, move, and organize files. |
+| `File`, `Dir`, `Path` | Read/write text and bytes, stream bounded lines, list, copy, move, and organize files. |
 | `Process` | Run literal arguments, capture bounded output, manage child processes. |
 | `Env`, `Cli` | Environment values, script arguments, options, and prompts. |
 | `System` | Platform, CPU sampling, system memory, disk usage, and host details. |
 | `Date`, `Log` | UTC timestamps, parsing, sleep, and redacted local JSON logs. |
-| `Json`, `Http` | JSON conversion and bounded HTTP/HTTPS requests. |
-| `String` | Trim, split/join, search, replace, take substrings, convert case, and format scalar values with `{}`. |
+| `Json`, `Http` | JSON conversion, binary HTTP/HTTPS requests, and downloads directly to disk. |
+| `Bytes`, `Csv`, `Regex` | Explicit UTF-8 conversion, byte slicing, CSV records and streams, and simple Rust-backed regex. |
+| `String` | Grapheme length/slicing for emoji and combining text; trim, split/join, search, replace, take substrings, convert case, and format scalar values with `{}`. |
 | `Math` | Type-preserving abs, min/max, floor, ceil, and round (ties away from zero). |
 | `List`, `Map` | Slice, remove, concatenate, sort, test membership, construct maps, and safely look up keys. |
 | Global functions | Explicit conversions, `type`, `len`, and cancellable `sleep`. |
@@ -387,6 +427,34 @@ return values, native objects, limits, and errors.
 Local script reuse uses `require "lib/helpers.scr"` or
 `require_once "lib/config.scr"`. Relative paths resolve against the including file;
 includes share their caller's current scope. See the [module contract](docs/language-spec.md#local-script-loading).
+
+Shared libraries can be installed with the built-in package manager:
+
+```sh
+scr init
+scr add helpers --path ./lib/helpers
+# Git sources can select version tags or a specific revision:
+scr add helpers --git https://example.com/team/helpers.git --version '^1.2'
+scr install --locked
+```
+
+Load an installed package with an alias to keep its names isolated:
+
+```scr
+<?scr
+require_once "helpers" as Helpers;
+echo Helpers::greeting();
+```
+
+Use `Helpers::functionName()` to call module functions. Aliased packages have their
+own functions and variables; different libraries can use identical helper names.
+`require_once` shares an initialized instance across aliases of the same canonical
+entry file. Plain `require` executes a fresh instance. Unaliased includes retain
+the existing shared-scope behavior. See [alias semantics](docs/packages.md#package-aliases-and-isolation).
+
+Commit `scripta.toml` and `scripta.lock`; ignore `.scripta/`.
+See [packages](docs/packages.md) for package metadata, transitive dependencies,
+offline installs, and update behavior.
 
 ## Examples
 
@@ -396,51 +464,6 @@ The [example guide](examples/README.md) also covers file organizing, log cleanup
 directory backups, server health, HTTP requests, and command execution.
 File-changing automation examples preview their work and require `--apply` to
 perform changes. The older `organize.scr` example moves files immediately.
-
-## Current gaps in language basics
-
-The six [CLI development phases](docs/cli-roadmap.md) are implemented and
-accepted. Further feature work requires a new scope decision; the roadmap records
-the CLI review and a proposed next phase.
-
-Scripta already has string and collection utilities, scalar values, lists/maps,
-nested indexing, list appends,
-conditions, `for` / `while` / `foreach`, functions with optional type annotations,
-lexical captures, `try` / `catch` / `finally` / `throw`, bounded file streams,
-local script loading, and JSON.
-The following review identifies useful additions for CLI automation. Priorities
-are suggestions, not release commitments; the
-[language specification](docs/language-spec.md) and
-[standard-library index](docs/standard-library.md#release-010-export-index)
-define current support.
-
-| Suggested priority | Missing basics | Current behavior or workaround |
-| --- | --- | --- |
-| Medium | Pop and callback-based map/filter/reduce | List removal, slicing, concatenation, sorting, and membership are implemented. Use loops and new lists to filter or rebuild collections. |
-| Lower | Null fallback syntax | `Map::has` and `Map::get` provide safe key lookups. No `??`, `isset`, or null-safe access syntax. Direct missing-key indexing raises catchable `IndexError`. |
-| Lower | Powers and random numbers | `Math` supplies abs, min/max, floor, ceil, and round; powers and random APIs remain deferred. |
-| Lower | Named arguments, arrow functions, and call-site unpacking | Default and variadic parameters and `function (...) { ... }` literals are supported. Calls still use positional arguments; `...` declares a variadic parameter and does not unpack arguments at a call site. |
-| Lower | String interpolation and advanced formatting | `String::format(template, values)` supports sequential `{}` scalar placeholders and escaped braces. Interpolation, width, and precision syntax remain deferred. |
-| Lower | General resource-management syntax | `finally` supports cleanup for ordinary completion, failures, and control flow, under existing execution limits. Fatal limits and cancellation bypass script cleanup; `defer` and general resource-management syntax remain deferred. |
-| Lower | Writable streams and iterator syntax | `File::openLines`, `readLine`, and `close` support bounded UTF-8 line reading; whole-file helpers remain available. Writable streams and iterator syntax remain deferred. |
-| Lower | Convenience syntax: ternary expressions, `switch` / `match`, `++` / `--`, `%=` | Use `if` / `elseif` / `else`, `+= 1`, `-= 1`, and `$value = $value % divisor`. |
-
-String utilities are complete in [Phase 1](docs/cli-roadmap.md#phase-1-strings).
-Collection helpers are complete in [Phase 2](docs/cli-roadmap.md#phase-2-collections-and-maps).
-Catchable core indexing, arithmetic, and operand-type errors are complete in
-[Phase 3](docs/cli-roadmap.md#phase-3-recoverable-errors). Default/variadic
-parameters and anonymous functions are implemented in
-[Phase 4](docs/cli-roadmap.md#phase-4-functions). Math and bounded formatting are
-complete in [Phase 5](docs/cli-roadmap.md#phase-5-math-and-formatting). Cleanup and
-bounded line streams are implemented in
-[Phase 6](docs/cli-roadmap.md#phase-6-cleanup-and-streaming); all six phases are accepted.
-The playgrounds demonstrate each phase. Runtime safety limits and cancellation
-continue to bypass catches.
-Regex support, Unicode normalization, and string indexing remain outside these phases.
-
-Strict booleans, explicit conversions, collection value semantics, and block
-scope are existing language choices. Classes, a package manager, and a web
-runtime are separate scope decisions rather than prerequisites for CLI scripts.
 
 ## Limits and diagnostics
 

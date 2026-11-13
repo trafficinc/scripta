@@ -5,13 +5,51 @@
 Workspace version: **0.1.0**. This is a first public-test candidate, not a stable
 language/API compatibility guarantee. See [compatibility](compatibility.md) for
 actual native evidence. No release is automatically published by these changes.
+See the [local validation record](release-validation.md) for the reviewed scope,
+source provenance, generated evidence, and outstanding release gates.
+
+## Draft candidate notes
+
+Scripta 0.1.0 is a first public-test candidate. These notes are prepared for
+maintainer review; they do not announce a published release or stable API.
+
+- Strict scripting with explicit conversions, UTF-8 strings and immutable bytes,
+  separate lists/maps, lexical functions/closures, and tracing of unreachable
+  captured scopes. Cached module roots and host-held callables remain protected.
+- Standard-library automation covers filesystem operations, bounded subprocesses,
+  HTTP/HTTPS with text or binary bodies, JSON, CSV, regular expressions, dates,
+  logging, system metrics, and optional SQLite. The SQLite extension does not
+  currently bind or return the core bytes type as BLOB data.
+- Collection helpers provide list end operations and splice, generation,
+  aggregation, comparisons, record columns, and typed map merging/construction.
+  Key-based map operations use temporary indexes while preserving entry order.
+- Git/local package installation, isolated aliases, syntax checks, diagnostics,
+  and formatting are implemented. Interpolation, script-defined classes,
+  callback-based collection transforms, and recursive merge variants are absent.
+- The local macOS 27.0.1 ARM64 run passed 422 default-feature debug tests,
+  423 all-feature debug tests, and 423 all-feature dist tests. Rust 1.85 source
+  compatibility, formatting, Clippy, both archive variants, and offline package
+  smoke passed. See the [validation record](release-validation.md) for scope.
+- Base and SQLite archives were reviewed with all 34 shipped scripts checked,
+  isolated local installation/removal, and matching dependency-notice inventories.
+  These checks establish local artifact behavior, not other-platform support or
+  maintainer attribution signoff.
+- The binaries target macOS 15.0 but have not been run on that OS baseline.
+  Linux, Windows, macOS Intel, and macOS 15 ARM64 native evidence remain pending.
+  Reviewed macOS binaries have linker-generated ad hoc signatures, with no
+  publisher identity or notarization. No Windows signing is claimed.
+
+Before publication, review attribution notices and changes, select a clean
+source revision and matching tag, collect native evidence for the selected
+platforms, and repackage that final source. The reviewed local archives predate
+these final documentation-review updates; their hashes are retained separately
+and no current archive is presented as a clean tagged release.
 
 ## Pinned inputs and profiles
 
 Rust 1.99.1 is pinned in rust-toolchain.toml; Cargo.lock is committed and every
-release command uses `--locked`. Actions are pinned to reviewed full commit IDs.
-The native runners are explicit OS images, not `*-latest`; hosted image revisions,
-SDKs/linkers, and system libraries can still change. Record their CI run metadata.
+release command uses `--locked`. Record the native build OS, SDK/linker, and
+system-library versions with validation results.
 
 `release` uses opt-level 3, thin LTO, one codegen unit, no incremental compilation,
 checked overflow, and panic unwinding. `dist` inherits release and strips symbols.
@@ -19,45 +57,18 @@ Unwinding is intentional: owned child/resource cleanup and the process monitor's
 panic containment must keep working. Do not switch to panic=abort to save bytes.
 Windows uses `+crt-static`; do not override RUSTFLAGS without retaining it.
 
-The workflow remaps the checkout path, embeds the commit supplied explicitly by
-SCR_BUILD_COMMIT, and normalizes archive metadata. A local build without an explicit
-commit reports `unknown`, rather than implying a clean/reproducible source revision.
+Builds embed the commit supplied explicitly by SCR_BUILD_COMMIT. A build without
+an explicit commit reports `unknown`, rather than implying a clean/reproducible source revision.
 `scr version` retains the simple version line; `scr version --verbose` adds target,
-Cargo's base profile, compiler, and explicit commit metadata.
+Cargo's base profile, compiler, explicit commit metadata, and built-in extensions.
 
 Archives sort file entries, normalize permissions/ownership, and use a numeric
-SOURCE_DATE_EPOCH (the commit timestamp in CI; default 0 locally). Gzip header
-mtime and TAR mtimes are normalized. ZIP uses the fixed representable DOS epoch
+SOURCE_DATE_EPOCH (default 0; use the commit timestamp when packaging a release).
+Gzip header mtime and TAR mtimes are normalized. ZIP uses the fixed representable DOS epoch
 1980-01-01 and stored entries. Packaging identical input bytes twice must produce
 identical archives; this is tested for both formats. Bit-for-bit compiler output
 across different SDK/linker/host images is not promised. Rust profile details are
 in the [Cargo profile reference](https://doc.rust-lang.org/cargo/reference/profiles.html).
-
-## Native CI and artifact gate
-
-`.github/workflows/ci.yml` runs format checks, Clippy, and the complete debug suite
-on all five native targets, plus a declared-MSRV source compilation job.
-`.github/workflows/release.yml` is started manually or by a `v*` tag. It requires
-that CI workflow, then tests the complete workspace with the dist profile and
-builds scr on each matching native target. No Docker, emulator, Python, or Node
-setup is needed by the project commands; GitHub's own Actions infrastructure is
-separate from installed interpreter dependencies.
-
-Each target packages docs/examples/licenses, verifies the inventory, extracts and
-runs the executable with a cleared environment/PATH containing only the package,
-and records `*.validation.json`. Local smoke includes version/target, hello,
-variables, loops, functions, require_once, JSON, file reads/writes, dates, and
-logging. The full suites additionally test filesystem policies, HTTP/TLS fixtures,
-processes/jobs/cancellation, metrics, formatter, parser robustness, and CLI behavior.
-Linux/macOS dependency inspection rejects missing or non-system libraries;
-Windows import inspection rejects a separate MSVC runtime dependency.
-
-An aggregate artifact is produced only when all five native package jobs succeed.
-It includes archives, per-archive `.sha256`, `SHA256SUMS`, per-target validation
-records, and dependency reports. Workflow dispatch and tags produce candidates;
-publication remains a separate maintainer action after checklist review. The
-workflow has read-only repository permissions and never creates/pushes tags,
-commits, GitHub Releases, or package-registry uploads.
 
 ## Local native package procedure
 
@@ -66,22 +77,35 @@ From a source checkout after the complete tests pass:
 ```sh
 # macOS ARM64 example; do not use a foreign-target binary as native proof.
 export MACOSX_DEPLOYMENT_TARGET=15.0
-cargo test --workspace --locked
+cargo test --workspace --locked --target aarch64-apple-darwin
+cargo test --workspace --all-features --locked --target aarch64-apple-darwin
 cargo test --workspace --profile dist --target aarch64-apple-darwin --locked
 cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked
-cargo run -p scr-release --locked -- package --binary target/aarch64-apple-darwin/dist/scr --target aarch64-apple-darwin --out-dir dist
-cargo run -p scr-release --locked -- verify --archive dist/scripta-0.1.0-aarch64-apple-darwin.tar.gz
-cargo run -p scr-release --locked -- smoke --archive dist/scripta-0.1.0-aarch64-apple-darwin.tar.gz
-cargo run -p scr-release --locked -- checksums --dir dist
-cargo run -p scr-release --locked -- verify-checksums --dir dist
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- package --binary target/aarch64-apple-darwin/dist/scr --target aarch64-apple-darwin --out-dir dist/local-base
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify --archive dist/local-base/scripta-0.1.0-aarch64-apple-darwin.tar.gz
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- smoke --archive dist/local-base/scripta-0.1.0-aarch64-apple-darwin.tar.gz
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- checksums --dir dist/local-base
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify-checksums --dir dist/local-base
 ```
 
 Use the Windows target explicitly for **all** Cargo commands on Windows. Package
 extension is selected by the target; target values outside the five configured
 candidate names are rejected. `--tag v0.1.0` validates tag/version agreement.
+Choose a fresh output directory for each validation run so prior evidence and
+archives are retained; `dist/local-base` above is only an example. Packages
+include reference documentation, examples, and runnable playgrounds with their
+fixtures. Offline smoke executes the collection playground as well as the
+basic examples, and records workspace tests as a separate native-evidence gate.
 `--epoch NUMBER` overrides the archive epoch for reproducibility testing. The
 maintainer-only scr-release tool requires Rust and cached/fetched crate metadata;
 it is not included in or required by the installed scr interpreter.
+
+For a SQLite-enabled variant, build the CLI with `--features sqlite` and pass
+`--features sqlite` to the `scr-release package` subcommand as well. This selects
+the matching dependency notices and records the extension in `release.json`.
+Smoke checks the executable's reported extension list and runs the SQLite example
+for enabled archives. Use a separate output directory for each variant; archive
+names do not encode features. See the [SQLite release instructions](sqlite.md#validation-and-release-builds).
 
 SHA-256 sidecars contain `hex  filename` in the standard checksum format.
 `checksums --dir` writes a sorted manifest for every archive in that directory;
@@ -101,21 +125,32 @@ Checksums provide integrity, not publisher authentication.
   other architectures, ARM32, musl, and device-specific Raspberry Pi behavior are
   unverified. A successful cross build is not a substitute for running the tests.
 - Candidates are not notarized/Developer-ID-signed or Authenticode-signed. No MSI,
-  PKG, package-manager publication, automatic updater, or privileged installer is
+  PKG, OS package-manager publication, automatic updater, or privileged installer is
   provided. Platform security prompts may require manual review.
+  Local macOS binaries have linker-generated ad hoc signatures; these do not
+  identify a publisher.
 - Scripta is dynamically typed and not PHP-compatible. Interpolation, script-defined
-  classes/Exception construction, package management, a VM/JIT, and background
+  classes/Exception construction, a VM/JIT, and background
   daemons remain absent. Check validates syntax/declarations, not complete types.
+- The built-in [package manager](packages.md) supports Git and local dependencies,
+  lockfiles, and offline installation from installed Git snapshots or local sources.
+  Git packages require the Git executable. There is no registry lookup, package
+  publish command, or install-time script.
 - Filesystem root checks are not an OS sandbox or race-proof defense against a
   hostile directory tree. The interpreter executes trusted automation code with
   the user's permissions; Process execution capabilities are broad.
 - Local source defaults to 8 MiB, runtime value nesting to 128, calls/includes to
   at most 64. Configurable logical-value/scope/step budgets are not an aggregate
-  RSS ceiling. Captured scopes remain until runtime drop; see the safety audit.
+  RSS ceiling. A tracing collector reclaims unreachable captured scopes during
+  execution and at execution boundaries. Host-retained callables remain roots;
+  opaque native ownership cycles require host cleanup. Freed storage need not
+  immediately reduce RSS; see the [safety audit](performance.md).
 - Whole-file UTF-8 reads and value-copy semantics can use substantial memory.
   Subprocess capture and HTTP bodies have independent default 8 MiB ceilings.
   Temporary capture files can overshoot between monitor polls. HTTP cancellation
-  waits for blocking operations/timeouts; no custom CA or binary body API exists.
+  waits for blocking operations/timeouts. HTTP accepts string/byte request
+  bodies and binary responses; downloads stream to bounded temporary files.
+  No script-level custom CA option exists.
 - Native metric capabilities may be unavailable on restricted systems and then
   raise explicit errors. CPU usage blocks for a real interval; memory is system
   memory. No instantaneous CPU values or process-memory/system-memory substitution.

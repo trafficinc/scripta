@@ -7,12 +7,17 @@ pub const HELP: &str = "Scripta systems scripting language
 
 Usage: scr version
        scr version --verbose
-       scr help
-       scr run <file> [arguments...]
+       scr help [run|check|fmt]
+       scr run <file|-> [arguments...]
        scr <file> [arguments...]
        scr check <file>
        scr fmt [--check] <file>
        scr playground [options]
+       scr init
+       scr add <name> --path <dir>
+       scr add <name> --git <url> (--version <constraint> | --rev <ref>)
+       scr install [--locked] [--offline]
+       scr update [--offline]
 
 Options: --help, -h, --version
 Use scr run -- <file> for paths starting with a dash or matching command names.
@@ -23,7 +28,12 @@ pub enum Command {
     Playground {
         arguments: Vec<OsString>,
     },
+    Package(Vec<OsString>),
     Help,
+    CommandHelp(&'static str),
+    RunStdin {
+        arguments: Vec<OsString>,
+    },
     Version,
     VersionVerbose,
     Run {
@@ -56,6 +66,33 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
         return Ok(Command::Playground {
             arguments: args[1..].to_vec(),
         });
+    }
+    let topic = if first == "help" && args.len() == 2 {
+        args[1].to_str()
+    } else if args.len() == 2 && matches!(args[1].to_str(), Some("--help" | "-h")) {
+        first.to_str()
+    } else {
+        None
+    };
+    if let Some(topic) = topic {
+        let help = match topic {
+            "run" => Some(
+                "Usage: scr run <file|-> [arguments...]\nExecute a file, or read UTF-8 source from stdin through EOF with -.\nSource from stdin uses the working directory for relative includes.\nArguments after the source path belong to the script.\nUse -- before a literal dash-prefixed filename.",
+            ),
+            "check" => Some(
+                "Usage: scr check <file>\nCheck syntax and declarations without executing or loading includes.\nUse -- before a dash-prefixed filename.",
+            ),
+            "fmt" => Some(
+                "Usage: scr fmt [--check] <file>\nFormat a source file, or report differences without writing with --check.\nUse -- before a dash-prefixed filename.",
+            ),
+            _ => None,
+        };
+        if let Some(help) = help {
+            return Ok(Command::CommandHelp(help));
+        }
+    }
+    if matches!(first.to_str(), Some("init" | "add" | "install" | "update")) {
+        return Ok(Command::Package(args));
     }
     if matches!(first.to_str(), Some("version" | "--version"))
         && args.len() == 2
@@ -120,6 +157,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
     };
     if path.is_empty() {
         return Err(UsageError("source path must not be empty".into()));
+    }
+    if first == "run" && !escaped && path == "-" {
+        return Ok(Command::RunStdin {
+            arguments: rest[1..].to_vec(),
+        });
     }
     if !escaped && path.to_string_lossy().starts_with('-') {
         return Err(UsageError(
@@ -187,6 +229,37 @@ mod tests {
         ] {
             assert!(parse_strings(&args).is_err(), "{args:?}");
         }
+    }
+
+    #[test]
+    fn playground_coexists_with_package_commands_help_and_stdin() {
+        assert_eq!(
+            parse_strings(&["playground", "--no-open"]).unwrap(),
+            Command::Playground {
+                arguments: vec!["--no-open".into()]
+            }
+        );
+        assert_eq!(
+            parse_strings(&["install", "--offline"]).unwrap(),
+            Command::Package(vec!["install".into(), "--offline".into()])
+        );
+        assert!(matches!(
+            parse_strings(&["run", "--help"]).unwrap(),
+            Command::CommandHelp(_)
+        ));
+        assert_eq!(
+            parse_strings(&["run", "-", "argument"]).unwrap(),
+            Command::RunStdin {
+                arguments: vec!["argument".into()]
+            }
+        );
+        assert_eq!(
+            parse_strings(&["run", "--", "playground"]).unwrap(),
+            Command::Run {
+                path: "playground".into(),
+                arguments: vec![]
+            }
+        );
     }
 
     #[test]

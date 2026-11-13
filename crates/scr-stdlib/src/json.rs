@@ -41,9 +41,9 @@ fn convert(value: &Value, depth: usize) -> NativeResult<Json> {
             }
             Json::Object(object)
         }
-        Value::NativeObject(_) | Value::Callable(_) => {
+        Value::Bytes(_) | Value::NativeObject(_) | Value::Callable(_) => {
             return Err(error(
-                "native objects and callables require explicit conversion before JSON encoding",
+                "bytes, native objects and callables require explicit conversion before JSON encoding",
             ));
         }
     })

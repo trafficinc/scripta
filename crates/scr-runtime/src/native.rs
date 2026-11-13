@@ -79,6 +79,7 @@ impl Default for PermissionConfig {
                 "log.write".into(),
                 "http.request".into(),
                 "cli.prompt".into(),
+                "cli.read".into(),
             ]),
         }
     }
@@ -174,6 +175,7 @@ pub enum NativeType {
     Int,
     Float,
     String,
+    Bytes,
     List,
     Map,
     Callable,
@@ -188,6 +190,7 @@ impl NativeType {
             | (Self::Bool, Value::Bool(_))
             | (Self::Int, Value::Int(_))
             | (Self::Float, Value::Float(_))
+            | (Self::Bytes, Value::Bytes(_))
             | (Self::String, Value::String(_))
             | (Self::List, Value::List(_))
             | (Self::Map, Value::Map(_))
@@ -207,6 +210,7 @@ impl fmt::Display for NativeType {
             Self::Int => f.write_str("int"),
             Self::Float => f.write_str("float"),
             Self::String => f.write_str("string"),
+            Self::Bytes => f.write_str("bytes"),
             Self::List => f.write_str("list"),
             Self::Map => f.write_str("map"),
             Self::Callable => f.write_str("callable"),

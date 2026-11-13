@@ -57,8 +57,10 @@ undefined variable raises an error. Assignment creates or replaces a variable,
 and unannotated variables may change type.
 
 Values are `null`, `bool`, signed 64-bit `int`, finite 64-bit `float`, UTF-8
-`string`, separate `list` and `map` collections, host-defined native objects,
-and callable values. Integer literals currently contain decimal digits only; floating-point
+`string`, immutable arbitrary `bytes`, separate `list` and `map` collections, host-defined native objects,
+and callable values. Byte values have content equality, count byte payloads toward
+runtime value limits, and require explicit UTF-8 conversion through `Bytes`; there
+is no byte literal syntax or implicit string/JSON conversion. Integer literals currently contain decimal digits only; floating-point
 literals have digits on both sides of a decimal point, an exponent, or both.
 Exponents use `e`/`E`, an optional sign, and at least one digit. Signs outside
 exponents are operator tokens. A dot without following digits is concatenation;
@@ -142,7 +144,7 @@ operations chain from left to right.
 | 7 | `+ -` | Addition / subtraction, left |
 | 8 | `* / %` | Multiplication / division / remainder, left |
 | 9 | `+ - !` (prefix) | Unary positive / negative / logical NOT, right |
-| 10 | `(...) [...] ->name ::name(...)` (postfix) | Call / index / property / native call, left |
+| 10 | `(...) [...] ->name ::name(...)` (postfix) | Call / index / property / qualified call, left |
 
 Arithmetic and concatenation are separate operators: `"Count: " . 1 + 2`
 parses as `"Count: " . (1 + 2)` without inserting a conversion. Any operand type
@@ -158,10 +160,11 @@ any expression at their binding power. A call has an expression callee and zero
 or more comma-separated arguments; calls may chain, for example `$f()(1)`.
 Call argument lists do not accept trailing commas.
 
-Native calls use `Identifier::name(arguments)`, for example
-`Process::run("git", ["status"])`. The namespace must be a bare identifier and
-the member must be followed by an argument list. This is native API syntax;
-classes and object declarations are not part of this grammar. Property members
+Qualified calls use `Identifier::name(arguments)`, for example
+`Process::run("git", ["status"])` or `Helpers::greet("Ada")`. The namespace must be
+a bare identifier naming a registered native module or a require alias, and the
+member must be followed by an argument list. Classes and object declarations
+are not part of this grammar. Property members
 must be identifiers; dynamic member syntax is not supported. Index reads require
 one expression inside brackets. Empty brackets are a write-only list append
 target and must be followed immediately by plain `=` assignment.
@@ -292,7 +295,7 @@ evaluating their defaults.
 Calls require all required arguments and reject extra arguments unless there
 is a variadic parameter. Parameter and return annotations require matching types
 without conversion. Built-in type names are `null`, `bool`, `int`, `float`,
-`string`, `list`, `map`, and `callable`; native object annotations match the host
+`string`, `bytes`, `list`, `map`, and `callable`; native object annotations match the host
 type name. `void` return types permit only null. Falling off a function or
 `return;` returns null. Annotations check call boundaries; they do not freeze
 parameter bindings against later reassignment. Defaults are checked after
@@ -472,7 +475,9 @@ error. Explicit `float(int)` conversion may round large integers to f64 precisio
 ordering is lexicographic in UTF-8 order. Other combinations are errors. Strict
 `===` and `!==` never coerce, including int versus float. Lists compare by ordered
 recursive value equality. Maps compare by key/value contents independent of
-insertion order. Native objects and callables compare by identity.
+insertion order. Byte values compare by byte contents; bytes and strings are
+distinct types even when their UTF-8 payloads match. Native objects and callables
+compare by identity.
 
 Every if/elseif/while condition and the final for-condition value must be bool.
 `!` requires bool. `&&` and `||` check the left bool operand first and evaluate the
@@ -481,13 +486,17 @@ There is no implicit truthiness. `+` never concatenates strings, and `.` require
 two strings. Echo requires one string and writes its bytes without adding a
 newline. Explicit conversions are registered as `str`, `int`, `float`, and `bool`;
 invalid inputs or arities raise `TypeError`. `type` returns stable type names,
-`len` counts string Unicode scalars or collection entries, and `sleep` accepts
+`len` counts string Unicode scalars, byte-value bytes, or collection entries, and `sleep` accepts
 nonnegative integer milliseconds and checks host cancellation. See
 [standard library](standard-library.md) for the conversion matrix and native API.
 
 The `String` namespace supplies pure text helpers for trimming, literal
 split/join, search, replacement, Unicode scalar substrings, and Unicode case
-conversion. These are registered native functions, not string methods or new
+conversion. Explicit grapheme length and substring helpers preserve emoji sequences
+and combining marks without changing scalar-based operations. The separate
+`Regex` namespace provides simple pattern matching and literal replacement,
+while `Csv` parses and writes complete records. These are registered native
+functions, not string methods or new
 syntax; they do not add string interpolation or string indexing. Arguments are
 strictly typed. Invalid substring bounds and empty split/replacement search
 strings raise catchable `RangeError`; result budget failures raise
@@ -545,8 +554,11 @@ Nested assignment never creates missing intermediate collections. Indexing
 other types is an error.
 
 The standard library's `List` and `Map` namespaces add collection helpers without
-new syntax. List removal, slicing, concatenation, membership, and homogeneous
-sorting preserve strict value semantics. `Map::has` and `Map::get` safely handle
+new syntax. List end operations, splice, slicing, concatenation, chunking, fill,
+search, uniqueness, numeric aggregation, comparisons, and homogeneous sorting
+preserve strict value semantics. Map merging, replacement, construction,
+flipping, comparisons, and record-column extraction preserve typed keys and
+defined entry order. `Map::has` and `Map::get` safely handle
 absent keys, while normal indexing still requires an existing key. Map keys and
 values can be projected in insertion order, and removal returns an independent
 map. Invalid helper arguments and bounds raise catchable native errors; core
@@ -583,24 +595,30 @@ Statements and loop back edges check both, including empty infinite loops. Budge
 units are checkpoints, not CPU instructions, and reset on each execute call.
 Cancellation flags remain set until cleared by the host. Interruption bypasses
 script catches and reports a runtime error after unwinding calls and scopes.
-Native calls must return before execution can observe cancellation. There are no
-wall-clock or allocation limits.
+Native helpers must check cancellation cooperatively or return before the
+evaluator can observe it. Optional logical-value byte and live-scope budgets
+are not aggregate allocation/RSS limits, and there is no interpreter-wide
+wall-clock deadline. Individual native operations can impose their own timeouts.
 
 The runtime uses safe Rust and owns its environments in an arena. Transient
-scopes are reclaimed and slots reused; environments captured by functions remain
-owned until the runtime is dropped. Function references use scope IDs, avoiding
-reference-counted cycles between environments and callables. Hosts control the
-lifetime of native object handles through safe reference-counted ownership.
+scopes are reclaimed and slots reused. A tracing collector reclaims captured
+environments once they are unreachable from globals, active calls, or callable
+values retained by the evaluator or host. Collection runs automatically during
+execution and at execution boundaries; hosts can request it through
+`Runtime::collect_garbage()`. Function references use scope IDs, allowing recursive
+closure/environment cycles to be reclaimed. Opaque native ownership cycles are
+conservative roots and require host cleanup. Hosts control native object handles
+through safe reference-counted ownership. Collection timing is not an explicit
+resource-close guarantee, and freed memory need not immediately reduce RSS.
 
 ## Planned features
 
 Interpolation, variable annotation syntax, richer exception types, and
-callback-based collection transforms and pop remain future work.
-List and map helpers for removal, slicing, concatenation, membership, sorting,
-construction, projection, and safe lookup are implemented.
+callback-based collection transforms remain future work. Recursive map merge
+variants are not implemented. List and map helpers, including `List::pop`,
+`List::shift`, splice, aggregation, comparisons, and column extraction, are
+implemented alongside construction, projection, and safe lookup.
 List growth through `[] =` and assignment at the current length is implemented.
-See the [basics review](../README.md#current-gaps-in-language-basics) for suggested
-priorities within the CLI automation direction.
 
 
 ## Local script loading
@@ -611,7 +629,9 @@ require "lib/helpers.scr";
 require_once "lib/config.scr";
 ```
 
-`require expression;` and `require_once expression;` are statements. The expression
+`require expression;` and `require_once expression;` are statements. Both accept
+an optional unquoted alias: `require_once expression as Helpers;`, with calls as
+`Helpers::functionName(...)`. The expression
 must evaluate to a nonempty string naming a local UTF-8 file. Every file is lexed
 independently and must start with `<?scr` under the normal opening-tag rules
 (including the existing BOM/shebang handling). Each file is fully parsed before
@@ -624,13 +644,12 @@ file retains that definition file for later relative requires and diagnostics.
 Absolute local paths are supported; remote URLs are rejected. For hosts without
 a script filename, relative requires use the runtime working directory.
 
-Included statements execute in source order, at the require statement, without
-an extra scope. At top level, variables/functions become available in the caller's
-top-level scope; inside a block or function, existing lexical scope rules apply.
+Without an alias, included statements execute in source order at the require
+statement without an extra scope. At top level, variables/functions become
+available in the caller's top-level scope; inside a block or function, existing lexical scope rules apply.
 Assignments update the nearest visible binding. Includes do not bypass function
-isolation from global variables, and introduce no namespace or exported-symbol
-mechanism. Included function declarations become available when encountered;
-they are not hoisted before earlier statements in that included file. The entry
+isolation from global variables. Unaliased includes introduce no namespace.
+Included function declarations become available when encountered; they are not hoisted before earlier statements in that included file. The entry
 program retains its existing direct top-level function hoisting behavior.
 
 `require` executes on each call (and can therefore encounter a duplicate function
@@ -641,6 +660,32 @@ includes are not marked complete and may be retried; earlier side effects are
 not rolled back. Active files are checked for circular inclusion before the
 once check; cycles raise `CircularIncludeError`, including self-inclusion of
 the entry script. Calls and includes share the runtime depth limit (maximum 64).
+
+With `as Alias`, the file executes in an isolated lexical root without a caller
+parent. Its functions/variables stay separate; registered native functions are
+available through a native-only fallback. Module functions capture the root's
+private state. Direct module-scope functions are public through `Alias::name()`;
+there is no export declaration or alias access to variables. Aliases are lexical
+and case-sensitive, with normal identifier spelling. Module-internal aliases do
+not become caller aliases. Calls require parentheses, like native qualified calls.
+
+Successful aliased loads are cached by canonical entry path per runtime.
+`require_once` reuses that instance, even under a second alias. Aliased `require`
+executes in a fresh isolated root, binds only on success, and updates the cached
+instance; older aliases/callbacks retain their previous instance. A visible alias
+cannot name a different canonical file (`ModuleAliasError`), and registered native
+namespaces cannot be shadowed. Missing functions on a bound alias raise
+`ModuleError`. Resolution/policy/permission checks and active-cycle detection
+precede cache reuse. Separate installed versions have separate canonical paths.
+
+Unaliased `require_once` completion is tracked per enclosing module root (or the
+application global root), independently of the aliased cache. Local unaliased
+includes share that root's lexical rules. Successful cached roots remain alive
+until runtime drop and count toward scope limits; aliases and retained callables
+also keep older instances reachable through tracing. Failed initialization
+restores scope/source/loading state, publishes no new alias/cache entry, and
+preserves previous bindings. Earlier external effects and successful dependency
+loads are not rolled back. See [package aliases](packages.md#package-aliases-and-isolation).
 
 By default a required file may be at most 8 MiB; hosts/CLI can configure the shared
 source byte ceiling. Missing/unresolvable dependencies raise
@@ -656,8 +701,12 @@ when registered, with the same documented concurrent-path-replacement limitation
 Embedders can call `Runtime::execute_source(source, output)` with
 `ContextOptions.script_path` to retain source text and entry identity, or continue
 using AST execution. `Runtime::set_module_policy` supplies an additional host path
-check. No package registry, dependency installer, remote fetching, or package
-manager is involved.
+check. Hosts may opt into package-name resolution with
+`Runtime::set_module_resolver`; the CLI configures this for installed direct
+dependencies. Existing local files take precedence over package names. Package
+entries still pass through the module policy and execute with the same include
+semantics. Resolution never fetches remote code during execution; see
+[packages](packages.md) for explicit installation, locking, and checksums.
 
 
 ## Developer checks and formatting
@@ -683,3 +732,24 @@ Runtime-created values have a maximum nesting depth of 128. Optional per-value
 logical-byte, live-scope, instruction, and source budgets affect resource use, not
 value/coercion semantics. See [performance and safety](performance.md) for
 configuration and current limitations.
+
+
+## CLI source and pipeline input
+
+`scr run - [arguments...]` reads UTF-8 source from stdin through EOF under the
+same source-byte limit as disk files. Tags and language semantics are unchanged.
+Diagnostics use `<stdin>`, and relative includes/packages resolve from the working
+directory. Script input then observes EOF. `scr run -- -` selects a literal file.
+File-backed scripts can consume piped records with bounded `Cli::readLine`,
+which returns a string or null at EOF. See the [input API](standard-library.md#script-arguments-and-prompts)
+for byte limits, permissions, cancellation, and failure recovery.
+
+
+## Atomic file output
+
+`File::writeAtomic(path, contents): null` stages UTF-8 contents in the destination
+parent directory, then atomically publishes a complete replacement. It follows
+filesystem write/root permissions and rejects final symlinks and nonregular or
+read-only destinations. It does not change `File::write` or `File::move` semantics.
+See the [atomic replacement contract](standard-library.md#atomic-file-replacement)
+for metadata, cancellation, concurrency, cleanup, and durability limits.

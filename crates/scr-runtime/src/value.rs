@@ -11,6 +11,10 @@ pub trait NativeObject: fmt::Debug {
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         None
     }
+    /// Retained payload counted toward the logical per-value budget.
+    fn payload_bytes(&self) -> usize {
+        0
+    }
     fn type_name(&self) -> &str;
     fn get_property(&self, name: &str) -> Result<Value, String>;
     fn set_property(&self, name: &str, _value: Value) -> Result<(), String> {
@@ -79,6 +83,8 @@ pub enum Value {
     Int(i64),
     Float(f64),
     String(String),
+    /// Immutable arbitrary bytes, with content equality and cheap clones.
+    Bytes(Rc<[u8]>),
     List(Vec<Value>),
     /// Ordered entries with unique, strictly typed keys.
     Map(Vec<(MapKey, Value)>),
@@ -94,6 +100,7 @@ impl PartialEq for Value {
             (Self::Int(a), Self::Int(b)) => a == b,
             (Self::Float(a), Self::Float(b)) => a == b,
             (Self::String(a), Self::String(b)) => a == b,
+            (Self::Bytes(a), Self::Bytes(b)) => a == b,
             (Self::List(a), Self::List(b)) => a == b,
             (Self::Map(a), Self::Map(b)) => {
                 a.len() == b.len()
@@ -126,6 +133,7 @@ impl Value {
             Self::Int(_) => "int",
             Self::Float(_) => "float",
             Self::String(_) => "string",
+            Self::Bytes(_) => "bytes",
             Self::List(_) => "list",
             Self::Map(_) => "map",
             Self::NativeObject(object) => object.type_name(),
@@ -156,10 +164,11 @@ impl Value {
                 return Err("floating-point value must be finite".into());
             }
             let bytes = std::mem::size_of::<Value>()
-                .checked_add(if let Self::String(value) = self {
-                    value.len()
-                } else {
-                    0
+                .checked_add(match self {
+                    Self::String(value) => value.len(),
+                    Self::Bytes(value) => value.len(),
+                    Self::NativeObject(object) => object.payload_bytes(),
+                    _ => 0,
                 })
                 .ok_or("value size overflow")?;
             if limit.is_some_and(|limit| bytes > limit) {
@@ -179,6 +188,12 @@ impl Value {
                     return Err("floating-point value must be finite".into());
                 }
                 Self::String(s) => add = add.checked_add(s.len()).ok_or("value size overflow")?,
+                Self::Bytes(b) => add = add.checked_add(b.len()).ok_or("value size overflow")?,
+                Self::NativeObject(object) => {
+                    add = add
+                        .checked_add(object.payload_bytes())
+                        .ok_or("value size overflow")?
+                }
                 Self::List(values) => pending.extend(values.iter().map(|v| (v, depth + 1))),
                 Self::Map(entries) => {
                     let mut keys = std::collections::HashSet::with_capacity(entries.len());

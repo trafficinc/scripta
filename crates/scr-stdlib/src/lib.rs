@@ -5,8 +5,11 @@ use scr_runtime::{
     RuntimeContext, Value,
 };
 use std::time::{Duration, Instant};
+mod bytes;
 mod cli;
 mod collections;
+mod csv;
+mod data_text;
 mod date;
 mod environment;
 pub mod filesystem;
@@ -84,6 +87,7 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
             NativeSignature::new(
                 vec![NativeType::OneOf(vec![
                     NativeType::String,
+                    NativeType::Bytes,
                     NativeType::List,
                     NativeType::Map,
                 ])],
@@ -101,11 +105,14 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
     )?;
     let module_policy = options.filesystem.clone().prepare()?;
     runtime.set_module_policy(move |path| module_policy.check_path(path, false));
+    bytes::register(runtime)?;
+    data_text::register(runtime)?;
+    csv::register(runtime, options.filesystem.clone())?;
     json::register(runtime)?;
     strings::register(runtime)?;
     math::register(runtime)?;
     collections::register(runtime)?;
-    http::register(runtime, options.http)?;
+    http::register(runtime, options.http, options.filesystem.clone())?;
     filesystem::register(runtime, options.filesystem.clone())?;
     system::register(runtime, options.filesystem.clone())?;
     date::register(runtime)?;
@@ -120,11 +127,12 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
 fn len_value(args: &[Value]) -> NativeResult {
     let length = match args {
         [Value::String(value)] => value.chars().count(),
+        [Value::Bytes(value)] => value.len(),
         [Value::List(value)] => value.len(),
         [Value::Map(value)] => value.len(),
         _ => {
             return Err(NativeError::type_error(
-                "len() expects one string, list, or map",
+                "len() expects one string, bytes, list, or map",
             ));
         }
     };

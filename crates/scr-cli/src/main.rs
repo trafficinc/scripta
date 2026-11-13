@@ -14,20 +14,47 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let (path, check_only, format_only, arguments) = match command {
+    let (path, check_only, format_only, arguments, source_stdin) = match command {
         Command::Playground { arguments } => return scr_cli::playground::launch(arguments),
+        Command::Package(arguments) => {
+            return match env::current_dir()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                .and_then(|cwd| scr_cli::packages::execute(&arguments, &cwd))
+            {
+                Ok(message) => {
+                    println!("{message}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!(
+                        "error[E0601]: {}",
+                        scr_diagnostics::redact_text(&error.to_string(), &[])
+                    );
+                    ExitCode::from(1)
+                }
+            };
+        }
+        Command::CommandHelp(help) => {
+            println!("{help}");
+            return ExitCode::SUCCESS;
+        }
         Command::Help => {
             println!("{}", args::HELP);
             return ExitCode::SUCCESS;
         }
         Command::VersionVerbose => {
             println!(
-                "scr {}\ntarget: {}\nprofile: {}\ncompiler: {}\ncommit: {}",
+                "scr {}\ntarget: {}\nprofile: {}\ncompiler: {}\ncommit: {}\nextensions: {}",
                 env!("CARGO_PKG_VERSION"),
                 env!("SCR_TARGET"),
                 env!("SCR_PROFILE"),
                 env!("SCR_COMPILER"),
-                env!("SCR_COMMIT")
+                env!("SCR_COMMIT"),
+                if cfg!(feature = "sqlite") {
+                    "sqlite"
+                } else {
+                    "none"
+                }
             );
             return ExitCode::SUCCESS;
         }
@@ -35,9 +62,10 @@ fn main() -> ExitCode {
             println!("scr {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
-        Command::Run { path, arguments } => (path, false, None, arguments),
-        Command::Check(path) => (path, true, None, Vec::new()),
-        Command::Format { path, check } => (path, true, Some(check), Vec::new()),
+        Command::RunStdin { arguments } => ("<stdin>".into(), false, None, arguments, true),
+        Command::Run { path, arguments } => (path, false, None, arguments, false),
+        Command::Check(path) => (path, true, None, Vec::new(), false),
+        Command::Format { path, check } => (path, true, Some(check), Vec::new(), false),
     };
     let limits = match limits() {
         Ok(limits) => limits,
@@ -46,7 +74,12 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let source = match read_source(&path, limits.max_source_bytes) {
+    let source_result = if source_stdin {
+        read_source_stream(io::stdin().lock(), limits.max_source_bytes)
+    } else {
+        read_source(&path, limits.max_source_bytes)
+    };
+    let source = match source_result {
         Ok(source) => source,
         Err(error) => {
             eprintln!(
@@ -107,8 +140,13 @@ fn main() -> ExitCode {
                 .collect::<Vec<_>>()
         })
     } else {
-        pipeline::run_with_options(&source, &mut io::stdout().lock(), options)
-            .map_err(|error| vec![error.render(&path, &source)])
+        let mut output = io::stdout().lock();
+        let result = if source_stdin {
+            pipeline::run_with_input(&source, &mut output, options, io::empty())
+        } else {
+            pipeline::run_with_options(&source, &mut output, options)
+        };
+        result.map_err(|error| vec![error.render(&path, &source)])
     };
     match result {
         Ok(code) => ExitCode::from(code),
@@ -148,8 +186,11 @@ fn limits() -> Result<scr_runtime::RuntimeOptions, String> {
     })
 }
 fn read_source(path: &std::path::Path, limit: usize) -> io::Result<String> {
+    read_source_stream(fs::File::open(path)?, limit)
+}
+fn read_source_stream(reader: impl Read, limit: usize) -> io::Result<String> {
     let mut bytes = Vec::new();
-    fs::File::open(path)?
+    reader
         .take((limit as u64).saturating_add(1))
         .read_to_end(&mut bytes)?;
     if bytes.len() > limit {

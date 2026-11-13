@@ -337,8 +337,17 @@ impl Parser<'_> {
                 let once = self.current().kind == TokenKind::RequireOnce;
                 self.pos += 1;
                 let path = self.expression(0)?;
+                let alias = if self.take(TokenKind::As) {
+                    let span = self.current().span;
+                    Some(Binding {
+                        name: self.name()?,
+                        span,
+                    })
+                } else {
+                    None
+                };
                 self.expect(TokenKind::Semicolon)?;
-                StatementKind::Require { path, once }
+                StatementKind::Require { path, once, alias }
             }
             TokenKind::Exit => {
                 self.pos += 1;
@@ -765,7 +774,7 @@ impl Parser<'_> {
             TokenKind::StaticAccess => {
                 if !matches!(left.kind, ExprKind::Identifier(_)) {
                     return Err(Diagnostic::new(
-                        "expected native namespace identifier before ::",
+                        "expected namespace identifier before ::",
                         left.span,
                     ));
                 }

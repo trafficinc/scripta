@@ -1,8 +1,10 @@
 use crate::environment::text;
 use scr_runtime::{
-    NativeError, NativeFunction, NativeResult, NativeSignature, NativeType, Runtime, Value,
+    NativeError, NativeFunction, NativeResult, NativeSignature, NativeType, Runtime,
+    RuntimeContext, Value,
 };
 use std::io::{BufRead, Read};
+use std::{cell::Cell, mem::size_of, rc::Rc};
 
 fn option(args: &[String], requested: &str) -> NativeResult<(bool, Option<String>)> {
     let requested = requested.trim_start_matches('-');
@@ -42,6 +44,41 @@ fn option(args: &[String], requested: &str) -> NativeResult<(bool, Option<String
     Ok(result)
 }
 pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
+    let input_failed = Rc::new(Cell::new(false));
+    let read_failed = input_failed.clone();
+    runtime.register(
+        "Cli::readLine",
+        NativeFunction::new(
+            NativeSignature::new(
+                vec![],
+                NativeType::OneOf(vec![NativeType::String, NativeType::Null]),
+            )
+            .with_optional(vec![NativeType::Int]),
+            move |context, args| {
+                context.permissions.require("cli.read")?;
+                let maximum = match args.first() {
+                    None => 1024 * 1024,
+                    Some(Value::Int(n)) => {
+                        usize::try_from(*n).ok().filter(|&n| n > 0).ok_or_else(|| {
+                            NativeError::new("RangeError", "maxLineBytes must be a positive int")
+                        })?
+                    }
+                    _ => unreachable!("validated signature"),
+                };
+                if read_failed.get() {
+                    return Err(NativeError::new(
+                        "InputError",
+                        "stdin is unavailable after an input failure",
+                    ));
+                }
+                let result = read_line(context, maximum);
+                if result.is_err() {
+                    read_failed.set(true);
+                }
+                result
+            },
+        ),
+    )?;
     for (method, params, returns) in [
         ("args", vec![], NativeType::List),
         (
@@ -61,6 +98,7 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
             NativeType::OneOf(vec![NativeType::String, NativeType::Null]),
         ),
     ] {
+        let input_failed = input_failed.clone();
         runtime.register(
             format!("Cli::{method}"),
             NativeFunction::new(
@@ -104,6 +142,12 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
                     }
                     "prompt" => {
                         context.permissions.require("cli.prompt")?;
+                        if input_failed.get() {
+                            return Err(NativeError::new(
+                                "InputError",
+                                "stdin is unavailable after an input failure",
+                            ));
+                        }
                         let [Value::String(message)] = args else {
                             return Err(NativeError::type_error("prompt message must be a string"));
                         };
@@ -140,4 +184,61 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
         )?;
     }
     Ok(())
+}
+
+fn read_line(context: &mut RuntimeContext<'_>, maximum: usize) -> NativeResult {
+    let resource = |message| NativeError::new("ResourceLimitError", message);
+    let payload_limit = context
+        .max_value_bytes
+        .map(|limit| {
+            limit
+                .checked_sub(size_of::<Value>())
+                .ok_or_else(|| resource("line result exceeds execution value byte limit"))
+        })
+        .transpose()?;
+    let mut bytes = Vec::new();
+    loop {
+        context.check_cancelled()?;
+        let available = context.input.fill_buf()?;
+        if available.is_empty() {
+            break;
+        }
+        let available = &available[..available.len().min(8192)];
+        let newline = available.iter().position(|&b| b == b'\n');
+        let count = newline.map_or(available.len(), |i| i + 1);
+        let length = bytes
+            .len()
+            .checked_add(count)
+            .ok_or_else(|| resource("line size overflow"))?;
+        if length > maximum {
+            return Err(resource("line exceeds maxLineBytes"));
+        }
+        if payload_limit.is_some_and(|limit| length > limit.saturating_add(2)) {
+            return Err(resource("line result exceeds execution value byte limit"));
+        }
+        bytes
+            .try_reserve_exact(count)
+            .map_err(|_| resource("line allocation failed"))?;
+        bytes.extend_from_slice(&available[..count]);
+        context.input.consume(count);
+        if newline.is_some() {
+            break;
+        }
+    }
+    context.check_cancelled()?;
+    if bytes.is_empty() {
+        return Ok(Value::Null);
+    }
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+        if bytes.last() == Some(&b'\r') {
+            bytes.pop();
+        }
+    }
+    if payload_limit.is_some_and(|limit| bytes.len() > limit) {
+        return Err(resource("line result exceeds execution value byte limit"));
+    }
+    String::from_utf8(bytes)
+        .map(Value::String)
+        .map_err(|_| NativeError::new("EncodingError", "stdin line is not valid UTF-8"))
 }
