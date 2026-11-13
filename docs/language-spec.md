@@ -57,8 +57,10 @@ undefined variable raises an error. Assignment creates or replaces a variable,
 and unannotated variables may change type.
 
 Values are `null`, `bool`, signed 64-bit `int`, finite 64-bit `float`, UTF-8
-`string`, separate `list` and `map` collections, host-defined native objects,
-and callable values. Integer literals currently contain decimal digits only; floating-point
+`string`, immutable arbitrary `bytes`, separate `list` and `map` collections, host-defined native objects,
+and callable values. Byte values have content equality, count byte payloads toward
+runtime value limits, and require explicit UTF-8 conversion through `Bytes`; there
+is no byte literal syntax or implicit string/JSON conversion. Integer literals currently contain decimal digits only; floating-point
 literals have digits on both sides of a decimal point, an exponent, or both.
 Exponents use `e`/`E`, an optional sign, and at least one digit. Signs outside
 exponents are operator tokens. A dot without following digits is concatenation;
@@ -293,7 +295,7 @@ evaluating their defaults.
 Calls require all required arguments and reject extra arguments unless there
 is a variadic parameter. Parameter and return annotations require matching types
 without conversion. Built-in type names are `null`, `bool`, `int`, `float`,
-`string`, `list`, `map`, and `callable`; native object annotations match the host
+`string`, `bytes`, `list`, `map`, and `callable`; native object annotations match the host
 type name. `void` return types permit only null. Falling off a function or
 `return;` returns null. Annotations check call boundaries; they do not freeze
 parameter bindings against later reassignment. Defaults are checked after
@@ -473,7 +475,9 @@ error. Explicit `float(int)` conversion may round large integers to f64 precisio
 ordering is lexicographic in UTF-8 order. Other combinations are errors. Strict
 `===` and `!==` never coerce, including int versus float. Lists compare by ordered
 recursive value equality. Maps compare by key/value contents independent of
-insertion order. Native objects and callables compare by identity.
+insertion order. Byte values compare by byte contents; bytes and strings are
+distinct types even when their UTF-8 payloads match. Native objects and callables
+compare by identity.
 
 Every if/elseif/while condition and the final for-condition value must be bool.
 `!` requires bool. `&&` and `||` check the left bool operand first and evaluate the
@@ -482,13 +486,17 @@ There is no implicit truthiness. `+` never concatenates strings, and `.` require
 two strings. Echo requires one string and writes its bytes without adding a
 newline. Explicit conversions are registered as `str`, `int`, `float`, and `bool`;
 invalid inputs or arities raise `TypeError`. `type` returns stable type names,
-`len` counts string Unicode scalars or collection entries, and `sleep` accepts
+`len` counts string Unicode scalars, byte-value bytes, or collection entries, and `sleep` accepts
 nonnegative integer milliseconds and checks host cancellation. See
 [standard library](standard-library.md) for the conversion matrix and native API.
 
 The `String` namespace supplies pure text helpers for trimming, literal
 split/join, search, replacement, Unicode scalar substrings, and Unicode case
-conversion. These are registered native functions, not string methods or new
+conversion. Explicit grapheme length and substring helpers preserve emoji sequences
+and combining marks without changing scalar-based operations. The separate
+`Regex` namespace provides simple pattern matching and literal replacement,
+while `Csv` parses and writes complete records. These are registered native
+functions, not string methods or new
 syntax; they do not add string interpolation or string indexing. Arguments are
 strictly typed. Invalid substring bounds and empty split/replacement search
 strings raise catchable `RangeError`; result budget failures raise

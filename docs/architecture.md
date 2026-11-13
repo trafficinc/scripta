@@ -82,8 +82,8 @@ expression. Runtime errors stop execution and preserve output already written.
 Lexing and parsing complete before execution starts.
 
 The evaluator walks owned AST values using safe Rust (`unsafe_code` is forbidden).
-Values include owned lists/maps plus reference-counted native objects and
-callables. Strict equality is implemented by value for scalars/collections and
+Values include UTF-8 strings, immutable reference-counted byte slices, owned
+lists/maps, and reference-counted native objects and callables. Strict equality is implemented by value for scalars/collections and
 by identity for native objects/callables. Arithmetic, ordering, and conditions
 reject implicit conversions.
 
@@ -216,6 +216,17 @@ JSON conversion lives in scr-stdlib and rejects unsupported values before serde_
 serialization. HTTP uses a blocking ureq/Rustls client with explicit timeout,
 redirect, and response-size limits. HttpResponse returns native callables for its
 methods through `Value::native_function`, using the existing callable evaluator.
+Responses retain raw bytes; default text mode validates UTF-8, and binary mode
+leaves decoding explicit. Native objects can report retained payload size through
+`NativeObject::payload_bytes`; HTTP uses this for body/header accounting.
+Downloads use bounded buffers, filesystem policy checks, same-directory temporary
+files, and exclusive publication after a successful transfer.
+
+CSV combines a bounded, strict record scanner with the Rust `csv` parser/writer.
+File readers retain descriptors and return complete records across line breaks.
+Regex uses a small API backed by Rust's `regex` crate with fixed pattern/compiled
+size limits. Explicit grapheme helpers use `unicode-segmentation`; existing scalar
+length and substring operations are unchanged.
 
 Local loading is a runtime statement. The loader canonicalizes identity, tracks
 active files, consults a host policy, and evaluates each parsed file in the current

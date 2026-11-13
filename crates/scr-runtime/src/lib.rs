@@ -45,7 +45,7 @@ pub struct RuntimeOptions {
     /// Optional execution budget, reset for each execute call.
     pub instruction_limit: Option<u64>,
     pub context: ContextOptions,
-    /// Logical bytes per value, including collection slots and string contents.
+    /// Logical bytes per value, including collection slots, string/byte contents, and reported native payloads.
     /// None preserves unrestricted payload sizes; this is not a process heap cap.
     pub max_value_bytes: Option<usize>,
     /// Live lexical scopes, including retained closure environments and globals.
