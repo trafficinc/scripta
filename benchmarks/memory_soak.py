@@ -88,9 +88,8 @@ def measure(args, workload):
     return {
         "workload": workload,
         "expected_behavior": (
-            "Captured environments remain until runtime drop; growth is expected."
-            if workload == "closures" else
-            "Memory should settle after warmup; allocator retention may remain."
+            "Memory should settle after warmup; unreachable captures are collected, "
+            "and allocator retention may remain."
         ),
         "operations_per_batch": args.iterations * (2 if workload == "errors" else 1),
         "growth_from_baseline_bytes": growth,

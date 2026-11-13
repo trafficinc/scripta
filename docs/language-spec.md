@@ -587,10 +587,15 @@ Native calls must return before execution can observe cancellation. There are no
 wall-clock or allocation limits.
 
 The runtime uses safe Rust and owns its environments in an arena. Transient
-scopes are reclaimed and slots reused; environments captured by functions remain
-owned until the runtime is dropped. Function references use scope IDs, avoiding
-reference-counted cycles between environments and callables. Hosts control the
-lifetime of native object handles through safe reference-counted ownership.
+scopes are reclaimed and slots reused. A tracing collector reclaims captured
+environments once they are unreachable from globals, active calls, or callable
+values retained by the evaluator or host. Collection runs automatically during
+execution and at execution boundaries; hosts can request it through
+`Runtime::collect_garbage()`. Function references use scope IDs, allowing recursive
+closure/environment cycles to be reclaimed. Opaque native ownership cycles are
+conservative roots and require host cleanup. Hosts control native object handles
+through safe reference-counted ownership. Collection timing is not an explicit
+resource-close guarantee, and freed memory need not immediately reduce RSS.
 
 ## Planned features
 

@@ -59,7 +59,8 @@ cargo test -p scr-runtime --locked
 
 They cover 10,000 transient operations in a reused runtime, scope arena slot
 reuse, repeated exceptions and instruction-limit failures, discarded closure
-retention, scope-limit enforcement, and resource release when runtimes drop.
+reclamation, host-held callbacks, recursive cycles, scope-limit enforcement, and
+resource release when runtimes drop.
 Resource drop counters verify ownership cleanup; they do not measure allocator
 bytes or claim that every allocation is tracked.
 
@@ -74,8 +75,8 @@ The driver runs four separate processes: temporary collections, caught errors,
 discarded closures, and repeated runtime creation/destruction. Each runs three
 warmup batches followed by 20 measured batches of 500 iterations by default.
 Use `--warmups`, `--batches`, and `--iterations` to extend a run. Repeat
-`--workload transient --workload errors --workload recreate` to run longer without
-the intentionally growing closure workload. `--worker` accepts
+`--workload transient --workload errors --workload recreate` to select a subset.
+All four workloads can be included in extended runs. `--worker` accepts
 an explicit executable path for target-specific builds. JSON output paths must
 be new files, and their parent directories must exist. Reports include the worker
 SHA-256 for identifying the measured build. The driver fails on worker
@@ -89,8 +90,10 @@ discards script output; the report's growing sample list lives in the driver,
 not the measured child. The final sample is taken after the runtime is dropped
 but before the worker exits.
 
-Closure growth is expected under the current arena design, including after a
-closure variable is set to null. Other workloads should settle after warmup.
+All four workloads should settle after warmup. Discarded closure environments
+are now traced and reclaimed automatically, including during a single long
+execution. Deterministic tests check cleanup within that execution as well as
+between batches.
 Freed allocations may remain resident in the allocator, so a runtime drop need
 not return RSS to the startup value. No RSS thresholds gate CI yet: establish
 repeatable native baselines before choosing platform-specific growth bounds.
