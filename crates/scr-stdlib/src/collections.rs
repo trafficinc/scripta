@@ -3,7 +3,7 @@ use scr_runtime::{
     MapKey, NativeError, NativeFunction, NativeResult, NativeSignature, NativeType, Runtime,
     RuntimeContext, Value,
 };
-use std::mem::size_of;
+use std::{collections::HashMap, mem::size_of};
 
 fn resource(message: &str) -> NativeError {
     NativeError::new("ResourceLimitError", message)
@@ -295,41 +295,32 @@ fn map_call(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> NativeR
 
 // Borrowed output plans let generated keys and nested results be measured in
 // full, at their final depth, before cloning any input payloads.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Key<'a> {
-    Stored(&'a MapKey),
-    Generated(&'a Value),
-    Name(&'static str),
+    Int(i64),
+    Text(&'a str),
 }
 
-impl Key<'_> {
+impl<'a> Key<'a> {
+    fn stored(key: &'a MapKey) -> Self {
+        match key {
+            MapKey::Int(i) => Self::Int(*i),
+            MapKey::String(s) => Self::Text(s),
+        }
+    }
+
     fn bytes(self) -> NativeResult<usize> {
         let text = match self {
-            Self::Stored(MapKey::String(s)) | Self::Generated(Value::String(s)) => s.len(),
-            Self::Name(s) => s.len(),
-            _ => 0,
+            Self::Text(s) => s.len(),
+            Self::Int(_) => 0,
         };
         add(size_of::<MapKey>(), text)
     }
 
     fn owned(self) -> MapKey {
         match self {
-            Self::Stored(k) => k.clone(),
-            Self::Generated(Value::Int(i)) => MapKey::Int(*i),
-            Self::Generated(Value::String(s)) => MapKey::String(s.clone()),
-            Self::Name(s) => MapKey::String(s.into()),
-            _ => unreachable!("validated generated key"),
-        }
-    }
-
-    fn same(self, other: Self) -> bool {
-        match (self, other) {
-            (Self::Stored(a), Self::Stored(b)) => a == b,
-            (Self::Generated(a), Self::Generated(b)) => a == b,
-            (Self::Stored(a), Self::Generated(b)) | (Self::Generated(b), Self::Stored(a)) => {
-                key_matches(a, b)
-            }
-            _ => unreachable!("data keys"),
+            Self::Int(i) => MapKey::Int(i),
+            Self::Text(s) => MapKey::String(s.into()),
         }
     }
 }
@@ -428,7 +419,8 @@ fn selected_list<'a>(
 
 fn generated_key(value: &Value) -> NativeResult<Key<'_>> {
     match value {
-        Value::Int(_) | Value::String(_) => Ok(Key::Generated(value)),
+        Value::Int(i) => Ok(Key::Int(*i)),
+        Value::String(s) => Ok(Key::Text(s)),
         _ => Err(NativeError::type_error("map keys must be ints or strings")),
     }
 }
@@ -490,6 +482,7 @@ fn column<'a>(
 ) -> NativeResult {
     let mut values = Vec::new();
     let mut entries: Vec<(Key<'a>, Output<'a>)> = Vec::new();
+    let mut positions = HashMap::new();
     let mut bytes = budget(context, size_of::<Value>())?;
     for row in rows {
         context.check_cancelled()?;
@@ -503,7 +496,14 @@ fn column<'a>(
                 generated_key(lookup(context, row, index)?.ok_or_else(|| {
                     NativeError::new("RangeError", "column index field is missing")
                 })?)?;
-            put_entry(context, &mut entries, &mut bytes, key, Output::Value(value))?;
+            put_entry(
+                context,
+                &mut entries,
+                &mut positions,
+                &mut bytes,
+                key,
+                Output::Value(value),
+            )?;
         } else {
             bytes = budget(context, add(bytes, measure(context, value, 1)?)?)?;
             reserve(&mut values)?;
@@ -521,16 +521,15 @@ fn column<'a>(
 fn put_entry<'a>(
     context: &RuntimeContext<'_>,
     entries: &mut Vec<(Key<'a>, Output<'a>)>,
+    positions: &mut HashMap<Key<'a>, usize>,
     minimum_bytes: &mut usize,
     key: Key<'a>,
     value: Output<'a>,
 ) -> NativeResult<()> {
-    for (existing, stored) in entries.iter_mut() {
-        context.check_cancelled()?;
-        if existing.same(key) {
-            *stored = value;
-            return Ok(());
-        }
+    context.check_cancelled()?;
+    if let Some(&position) = positions.get(&key) {
+        entries[position].1 = value;
+        return Ok(());
     }
     // Future duplicate keys can replace large values with smaller ones. Count
     // only keys and Value slots here; finish measures the final winning values.
@@ -539,6 +538,10 @@ fn put_entry<'a>(
         add(add(*minimum_bytes, key.bytes()?)?, size_of::<Value>())?,
     )?;
     reserve(entries)?;
+    positions
+        .try_reserve(1)
+        .map_err(|_| resource("collection key index allocation failed"))?;
+    positions.insert(key, entries.len());
     entries.push((key, value));
     Ok(())
 }
@@ -612,8 +615,8 @@ fn list_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Nativ
                 (&items[1..], &items[0])
             };
             Output::Map(vec![
-                (Key::Name("items"), selected_list(context, retained)?),
-                (Key::Name("value"), Output::Value(value)),
+                (Key::Text("items"), selected_list(context, retained)?),
+                (Key::Text("value"), Output::Value(value)),
             ])
             .finish(context)
         }
@@ -629,7 +632,7 @@ fn list_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Nativ
             let replacement = args.get(3).map(list).unwrap_or(&[]);
             Output::Map(vec![
                 (
-                    Key::Name("items"),
+                    Key::Text("items"),
                     selected_list(
                         context,
                         items[..start]
@@ -639,7 +642,7 @@ fn list_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Nativ
                     )?,
                 ),
                 (
-                    Key::Name("removed"),
+                    Key::Text("removed"),
                     selected_list(context, &items[start..start + length])?,
                 ),
             ])
@@ -691,6 +694,7 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
         return column(context, list(&args[0]), &args[1], Some(&args[2]));
     }
     let mut result = Vec::new();
+    let mut positions = HashMap::new();
     let mut bytes = budget(context, size_of::<Value>())?;
     if name == "combine" {
         let keys = list(&args[0]);
@@ -706,6 +710,7 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
             put_entry(
                 context,
                 &mut result,
+                &mut positions,
                 &mut bytes,
                 generated_key(key)?,
                 Output::Value(value),
@@ -718,27 +723,35 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
         for (key, value) in entries {
             context.check_cancelled()?;
             if value == &args[1] {
-                return Output::Key(Key::Stored(key)).finish(context);
+                return Output::Key(Key::stored(key)).finish(context);
             }
         }
         return Output::Value(&Value::Null).finish(context);
     }
+    // Borrow keys and values, and retain the ordered input as the source of
+    // output order. Hash table iteration never determines collection order.
+    let mut right_index = if matches!(name, "merge" | "replace" | "diffKeys" | "intersectKeys") {
+        key_index(context, map(&args[1]))?
+    } else {
+        HashMap::new()
+    };
     for (key, value) in entries {
         context.check_cancelled()?;
         if name == "flip" {
             put_entry(
                 context,
                 &mut result,
+                &mut positions,
                 &mut bytes,
                 generated_key(value)?,
-                Output::Key(Key::Stored(key)),
+                Output::Key(Key::stored(key)),
             )?;
             continue;
         }
         let mut output = value;
         let keep = match name {
             "merge" | "replace" => {
-                output = lookup_key(context, map(&args[1]), key)?.unwrap_or(value);
+                output = right_index.remove(&Key::stored(key)).unwrap_or(value);
                 true
             }
             "diff" | "intersect" => {
@@ -753,7 +766,7 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
                 found == (name == "intersect")
             }
             "diffKeys" | "intersectKeys" => {
-                lookup_key(context, map(&args[1]), key)?.is_some() == (name == "intersectKeys")
+                right_index.contains_key(&Key::stored(key)) == (name == "intersectKeys")
             }
             "reverse" => true,
             _ => unreachable!("registered extra map helper"),
@@ -763,7 +776,7 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
                 context,
                 &mut result,
                 &mut bytes,
-                Key::Stored(key),
+                Key::stored(key),
                 Output::Value(output),
             )?;
         }
@@ -771,12 +784,12 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
     if name == "merge" {
         for (key, value) in map(&args[1]) {
             context.check_cancelled()?;
-            if lookup_key(context, entries, key)?.is_none() {
+            if right_index.contains_key(&Key::stored(key)) {
                 append_entry(
                     context,
                     &mut result,
                     &mut bytes,
-                    Key::Stored(key),
+                    Key::stored(key),
                     Output::Value(value),
                 )?;
             }
@@ -788,18 +801,20 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
     Output::Map(result).finish(context)
 }
 
-fn lookup_key<'a>(
+fn key_index<'a>(
     context: &RuntimeContext<'_>,
     entries: &'a [(MapKey, Value)],
-    key: &MapKey,
-) -> NativeResult<Option<&'a Value>> {
-    for (candidate, value) in entries {
+) -> NativeResult<HashMap<Key<'a>, &'a Value>> {
+    context.check_cancelled()?;
+    let mut index = HashMap::new();
+    index
+        .try_reserve(entries.len())
+        .map_err(|_| resource("collection key index allocation failed"))?;
+    for (key, value) in entries {
         context.check_cancelled()?;
-        if candidate == key {
-            return Ok(Some(value));
-        }
+        index.insert(Key::stored(key), value);
     }
-    Ok(None)
+    Ok(index)
 }
 
 pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {

@@ -145,20 +145,27 @@ The dependency-free harness reports CSV medians from nine measured runs after
 two warmups and checks result lengths. Parsing, registration, and fixture setup
 are excluded; argument copying, runtime validation, and result assignment are
 included. These are end-to-end helper timings, not isolated native-call timings
-or CI performance thresholds. Several helpers use repeated linear key/value
-searches and can take quadratic time; use these measurements before choosing an
-indexing strategy, especially because strict value equality supports nested
-collections and identity-based objects/callables.
+or CI performance thresholds. Map key operations use temporary borrowed-key
+hash indexes and preserve ordered output vectors. Value-based comparisons still
+use repeated searches and can take quadratic time: strict value equality
+supports nested collections and identity-based objects/callables.
 
-A local macOS arm64 run with Rust 1.99.1 produced these median milliseconds
-using the optimized Cargo bench profile. Results are machine-dependent and
-establish a baseline for future indexing work, not a cross-platform guarantee.
+A local macOS arm64 comparison with Rust 1.99.1 produced these median
+milliseconds at 2048 input entries using the optimized Cargo bench profile.
+The before and after runs used the same harness. Results are machine-dependent,
+not a cross-platform guarantee; small-input timings are also sensitive to
+noise and hash-index overhead.
 
-| Operation | 128 entries | 512 entries | 2048 entries |
+| Operation | Before indexes | With indexes | Speedup |
 | --- | ---: | ---: | ---: |
-| Merge, disjoint keys | 0.131 | 1.178 | 9.985 |
-| Combine, distinct keys | 0.075 | 0.525 | 5.976 |
-| Indexed column, distinct indexes | 0.077 | 0.407 | 5.090 |
+| Merge, disjoint keys | 10.006 | 0.683 | 14.6× |
+| Replace, disjoint keys | 5.496 | 0.401 | 13.7× |
+| Combine, distinct keys | 6.000 | 0.467 | 12.9× |
+| Flip, distinct values | 4.934 | 0.461 | 10.7× |
+| Indexed column, distinct indexes | 5.137 | 0.534 | 9.6× |
+| Key difference, disjoint keys | 5.346 | 0.375 | 14.3× |
+| Key intersection, identical keys | 2.903 | 0.368 | 7.9× |
+| Value difference, disjoint values | 8.165 | 8.134 | 1.0× |
 
 
 ## Distribution validation
