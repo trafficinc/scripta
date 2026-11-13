@@ -34,6 +34,18 @@ process.scr, and organize.scr. The latter legacy organizer moves PDFs when run,
 so prefer file-organizer.scr for a preview-first workflow. process.scr explicitly
 requires Git. Library helpers require <?scr even when loaded with require_once.
 
+The `packages/` example installs a local versioned library and loads it by name:
+
+```sh
+cd examples/packages
+scr install --locked --offline
+scr main.scr
+```
+
+It prints `Hello, packages!`. Its manifest and lockfile are included; installed
+files go in the ignored `.scripta/` directory. See [package management](../docs/packages.md)
+for Git sources, version constraints, and updates.
+
 The cross-platform release_examples integration suite uses temporary directories,
 loopback HTTP, and the scr executable itself for child-process testing. It does
 not invoke public endpoints, Git, Python, Node.js, or PHP.

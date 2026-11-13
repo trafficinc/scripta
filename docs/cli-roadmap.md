@@ -25,6 +25,32 @@ instruction and any scope changes with the relevant phase. Approval to start
 and acceptance of completed work are separate decisions; one message may give
 both acceptance of a finished phase and approval to start the next.
 
+### Package management (separate approved scope)
+
+**Approval to start:** The user requested, "ok implement the package mamanger",
+following the design for CLI-integrated package management in this repository.
+This does not approve proposed Phase 7.
+
+**Status:** Ready for review.
+
+The CLI now provides `init`, `add`, `install`, and `update`, using `scripta.toml`,
+versioned `scripta.lock` files, local snapshots, Git semantic-version tags or
+revision pins, SHA-256 checksums, and private transitive dependencies. Script
+loading resolves declared package names without downloading or changing the
+existing shared-scope include behavior. See [packages](packages.md) for the API,
+limits, failure behavior, and deferred registry/publishing features.
+
+**Validation:** `cargo test --workspace --locked`,
+`cargo clippy --workspace --all-targets --locked -- -D warnings`,
+`cargo fmt --all -- --check`, and `git diff --check` pass locally on macOS.
+Workspace tests need local port access for the existing loopback HTTP fixtures.
+Seven package integration tests cover Git version selection/pins, transitive
+isolation, local snapshots, offline installs, integrity checks, cycles, failed
+installation preservation, path validation, and runtime permissions/policies.
+The `examples/packages` demonstration installs with `--locked --offline`, prints
+`Hello, packages!`, and both scripts pass `scr fmt --check`. Linux/Windows
+execution remains for CI; these results do not establish a passing CI run.
+
 ## Work already implemented
 
 List growth supports `$items[] = value`, assignment at exactly the list's current

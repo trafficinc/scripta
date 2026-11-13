@@ -94,6 +94,7 @@ pub struct Runtime {
     loaded_modules: std::collections::HashSet<std::path::PathBuf>,
     active_modules: Vec<std::path::PathBuf>,
     module_policy: Option<Rc<modules::ModulePolicy>>,
+    module_resolver: Option<Rc<modules::ModuleResolver>>,
 }
 
 /// A resolved assignment target. Index expressions and object receivers are

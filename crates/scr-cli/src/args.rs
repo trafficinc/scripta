@@ -12,6 +12,11 @@ Usage: scr version
        scr <file> [arguments...]
        scr check <file>
        scr fmt [--check] <file>
+       scr init
+       scr add <name> --path <dir>
+       scr add <name> --git <url> (--version <constraint> | --rev <ref>)
+       scr install [--locked] [--offline]
+       scr update [--offline]
 
 Options: --help, -h, --version
 Use scr run -- <file> for paths starting with a dash or matching command names.
@@ -19,6 +24,7 @@ Arguments after the script path belong to the script; -- ends script option quer
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    Package(Vec<OsString>),
     Help,
     Version,
     VersionVerbose,
@@ -48,6 +54,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
     let Some(first) = args.first() else {
         return Err(UsageError("expected a command or source file".into()));
     };
+    if matches!(first.to_str(), Some("init" | "add" | "install" | "update")) {
+        return Ok(Command::Package(args));
+    }
     if matches!(first.to_str(), Some("version" | "--version"))
         && args.len() == 2
         && args[1] == "--verbose"

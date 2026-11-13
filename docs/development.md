@@ -94,6 +94,7 @@ and syntax check, not complete static type checking of a dynamically typed langu
 | E0401 | Runtime/native failure, with stack trace |
 | E0501 | Formatter token-verification failure (no write) |
 | E0502 | Source needs formatting in `fmt --check` |
+| E0601 | Package command, manifest, resolution, or installation failure |
 
 Lexical, syntax, declaration, formatter, and runtime failures exit 1. Success is 0;
 explicit script `exit(code)` remains unchanged; cooperative interruption is 130.

@@ -48,7 +48,7 @@ generated HTML or JSON through an existing web server when you need a dashboard.
 - **Structured data and APIs:** lists, maps, JSON, HTTPS requests, UTC dates,
   and structured local logging.
 - **Reusable scripts:** default/variadic parameters, anonymous functions, lexical
-  captures, and local `require` / `require_once`.
+  captures, local `require` / `require_once`, and versioned Git/local packages.
 - **Developer tools:** syntax checks, a comment-preserving formatter, error codes,
   source locations, and runtime stack traces.
 - **A standalone interpreter:** the installed executable uses platform system
@@ -380,6 +380,20 @@ Local script reuse uses `require "lib/helpers.scr"` or
 `require_once "lib/config.scr"`. Relative paths resolve against the including file;
 includes share their caller's current scope. See the [module contract](docs/language-spec.md#local-script-loading).
 
+Shared libraries can be installed with the built-in package manager:
+
+```sh
+scr init
+scr add helpers --path ./lib/helpers
+# Git sources can select version tags or a specific revision:
+scr add helpers --git https://example.com/team/helpers.git --version '^1.2'
+scr install --locked
+```
+
+Load an installed package with `require_once "helpers";`. Commit `scripta.toml`
+and `scripta.lock`; ignore `.scripta/`. See [packages](docs/packages.md) for package
+metadata, transitive dependencies, offline installs, and update behavior.
+
 ## Examples
 
 Start with [hello.scr](examples/hello.scr), [variables.scr](examples/variables.scr),
@@ -431,7 +445,7 @@ continue to bypass catches.
 Regex support, Unicode normalization, and string indexing remain outside these phases.
 
 Strict booleans, explicit conversions, collection value semantics, and block
-scope are existing language choices. Classes, a package manager, and a web
+scope are existing language choices. Classes and a web
 runtime are separate scope decisions rather than prerequisites for CLI scripts.
 
 ## Limits and diagnostics
