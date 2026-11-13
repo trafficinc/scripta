@@ -43,6 +43,8 @@ fn measure(context: &RuntimeContext<'_>, value: &Value, depth: usize) -> NativeR
     let mut bytes = size_of::<Value>();
     match value {
         Value::String(s) => bytes = add(bytes, s.len())?,
+        Value::Bytes(value) => bytes = add(bytes, value.len())?,
+        Value::NativeObject(object) => bytes = add(bytes, object.payload_bytes())?,
         Value::List(values) => {
             for value in values {
                 bytes = budget(context, add(bytes, measure(context, value, depth + 1)?)?)?;
@@ -488,6 +490,7 @@ fn column<'a>(
 ) -> NativeResult {
     let mut values = Vec::new();
     let mut entries: Vec<(Key<'a>, Output<'a>)> = Vec::new();
+    let mut bytes = budget(context, size_of::<Value>())?;
     for row in rows {
         context.check_cancelled()?;
         let Value::Map(row) = row else {
@@ -500,8 +503,9 @@ fn column<'a>(
                 generated_key(lookup(context, row, index)?.ok_or_else(|| {
                     NativeError::new("RangeError", "column index field is missing")
                 })?)?;
-            put_entry(context, &mut entries, key, Output::Value(value))?;
+            put_entry(context, &mut entries, &mut bytes, key, Output::Value(value))?;
         } else {
+            bytes = budget(context, add(bytes, measure(context, value, 1)?)?)?;
             reserve(&mut values)?;
             values.push(Output::Value(value));
         }
@@ -517,6 +521,7 @@ fn column<'a>(
 fn put_entry<'a>(
     context: &RuntimeContext<'_>,
     entries: &mut Vec<(Key<'a>, Output<'a>)>,
+    minimum_bytes: &mut usize,
     key: Key<'a>,
     value: Output<'a>,
 ) -> NativeResult<()> {
@@ -527,6 +532,30 @@ fn put_entry<'a>(
             return Ok(());
         }
     }
+    // Future duplicate keys can replace large values with smaller ones. Count
+    // only keys and Value slots here; finish measures the final winning values.
+    *minimum_bytes = budget(
+        context,
+        add(add(*minimum_bytes, key.bytes()?)?, size_of::<Value>())?,
+    )?;
+    reserve(entries)?;
+    entries.push((key, value));
+    Ok(())
+}
+
+fn append_entry<'a>(
+    context: &RuntimeContext<'_>,
+    entries: &mut Vec<(Key<'a>, Output<'a>)>,
+    bytes: &mut usize,
+    key: Key<'a>,
+    value: Output<'a>,
+) -> NativeResult<()> {
+    // These entries already have their final values, so check their full size
+    // before growing even the borrowed output plan.
+    *bytes = budget(
+        context,
+        add(add(*bytes, key.bytes()?)?, value.bytes(context, 1)?)?,
+    )?;
     reserve(entries)?;
     entries.push((key, value));
     Ok(())
@@ -662,6 +691,7 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
         return column(context, list(&args[0]), &args[1], Some(&args[2]));
     }
     let mut result = Vec::new();
+    let mut bytes = budget(context, size_of::<Value>())?;
     if name == "combine" {
         let keys = list(&args[0]);
         let values = list(&args[1]);
@@ -676,6 +706,7 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
             put_entry(
                 context,
                 &mut result,
+                &mut bytes,
                 generated_key(key)?,
                 Output::Value(value),
             )?;
@@ -698,6 +729,7 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
             put_entry(
                 context,
                 &mut result,
+                &mut bytes,
                 generated_key(value)?,
                 Output::Key(Key::Stored(key)),
             )?;
@@ -727,16 +759,26 @@ fn map_extra(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
             _ => unreachable!("registered extra map helper"),
         };
         if keep {
-            reserve(&mut result)?;
-            result.push((Key::Stored(key), Output::Value(output)));
+            append_entry(
+                context,
+                &mut result,
+                &mut bytes,
+                Key::Stored(key),
+                Output::Value(output),
+            )?;
         }
     }
     if name == "merge" {
         for (key, value) in map(&args[1]) {
             context.check_cancelled()?;
             if lookup_key(context, entries, key)?.is_none() {
-                reserve(&mut result)?;
-                result.push((Key::Stored(key), Output::Value(value)));
+                append_entry(
+                    context,
+                    &mut result,
+                    &mut bytes,
+                    Key::Stored(key),
+                    Output::Value(value),
+                )?;
             }
         }
     }
@@ -761,7 +803,7 @@ fn lookup_key<'a>(
 }
 
 pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
-    use NativeType::{Any, Bool, Int, List, Map, String as Text};
+    use NativeType::{Any, Bool, Float, Int, List, Map, Null, OneOf, String as Text};
     for (name, parameters, optional, returns) in [
         ("remove", vec![List, Int], vec![], List),
         ("slice", vec![List, Int], vec![Int], List),
@@ -818,10 +860,10 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
         ("reverse", vec![List], vec![], List),
         ("chunk", vec![List, Int], vec![], List),
         ("fill", vec![Int, Any], vec![], List),
-        ("search", vec![List, Any], vec![], Any),
+        ("search", vec![List, Any], vec![], OneOf(vec![Int, Null])),
         ("unique", vec![List], vec![], List),
-        ("sum", vec![List], vec![], Any),
-        ("product", vec![List], vec![], Any),
+        ("sum", vec![List], vec![], OneOf(vec![Int, Float])),
+        ("product", vec![List], vec![], OneOf(vec![Int, Float])),
         ("diff", vec![List, List], vec![], List),
         ("intersect", vec![List, List], vec![], List),
         ("column", vec![List, key.clone()], vec![], List),
@@ -839,7 +881,7 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
         ("replace", vec![Map, Map], Map),
         ("combine", vec![List, List], Map),
         ("flip", vec![Map], Map),
-        ("search", vec![Map, Any], Any),
+        ("search", vec![Map, Any], OneOf(vec![Int, Text, Null])),
         ("reverse", vec![Map], Map),
         ("diff", vec![Map, Map], Map),
         ("intersect", vec![Map, Map], Map),
@@ -1082,6 +1124,102 @@ mod tests {
                 c.cancellation = Some(Arc::new(AtomicBool::new(true)));
                 assert_eq!(call(c).unwrap_err().kind, "Interrupted", "{is_map}::{name}");
             });
+        }
+    }
+
+    #[test]
+    fn overwritten_values_do_not_cause_premature_budget_errors() {
+        let large = Value::Bytes(vec![7; 1024].into());
+        let integer = Value::Int(1);
+        let field = Value::String("v".into());
+        let index = Value::String("id".into());
+        let rows = Value::List(
+            [large.clone(), Value::Null]
+                .into_iter()
+                .map(|value| {
+                    Value::Map(vec![
+                        (MapKey::String("id".into()), integer.clone()),
+                        (MapKey::String("v".into()), value),
+                    ])
+                })
+                .collect(),
+        );
+        let required = 2 * size_of::<Value>() + size_of::<MapKey>();
+        for (name, args) in [
+            (
+                "combine",
+                vec![ints(&[1, 1]), Value::List(vec![large.clone(), Value::Null])],
+            ),
+            ("column", vec![rows, field, index]),
+            (
+                "merge",
+                vec![
+                    Value::Map(vec![(MapKey::Int(1), large)]),
+                    Value::Map(vec![(MapKey::Int(1), Value::Null)]),
+                ],
+            ),
+        ] {
+            assert_eq!(
+                with_context(Some(required), |c| map_extra(name, c, &args)).unwrap(),
+                Value::Map(vec![(MapKey::Int(1), Value::Null)]),
+                "{name}"
+            );
+        }
+        let args = [Value::Map(vec![
+            (MapKey::String("x".repeat(1024)), integer.clone()),
+            (MapKey::String("x".into()), integer),
+        ])];
+        assert_eq!(
+            with_context(Some(required + 1), |c| map_extra("flip", c, &args)).unwrap(),
+            Value::Map(vec![(MapKey::Int(1), Value::String("x".into()))])
+        );
+    }
+
+    #[test]
+    fn byte_and_native_object_payloads_count_toward_preflight_limits() {
+        #[derive(Debug)]
+        struct Payload;
+        impl scr_runtime::NativeObject for Payload {
+            fn type_name(&self) -> &str {
+                "Payload"
+            }
+            fn payload_bytes(&self) -> usize {
+                64
+            }
+            fn get_property(&self, _: &str) -> Result<Value, String> {
+                Err("no properties".into())
+            }
+        }
+        for value in [
+            Value::Bytes(vec![7; 64].into()),
+            Value::NativeObject(std::rc::Rc::new(Payload)),
+        ] {
+            let slot = size_of::<Value>();
+            let required = 3 * slot + 128;
+            let args = [Value::Int(2), value.clone()];
+            assert!(with_context(Some(required), |c| list_extra("fill", c, &args)).is_ok());
+            assert_eq!(
+                with_context(Some(required - 1), |c| list_extra("fill", c, &args))
+                    .unwrap_err()
+                    .kind,
+                "ResourceLimitError"
+            );
+            assert!(
+                with_context(Some(2 * slot + 64), |c| list_result(
+                    c,
+                    [&value].into_iter()
+                ))
+                .is_ok()
+            );
+            assert_eq!(
+                with_context(Some(2 * slot + 63), |c| list_result(
+                    c,
+                    [&value].into_iter()
+                ))
+                .unwrap_err()
+                .kind,
+                "ResourceLimitError"
+            );
         }
     }
 

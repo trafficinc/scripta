@@ -139,6 +139,27 @@ for checked Scripta/Bash/Python CLI fixtures. Workspace Rust forbids unsafe code
 through inherited Cargo lints. Source excerpts now mask literal/comment contents;
 error codes and original Unicode column positions are preserved.
 
+Run `cargo bench -p scr-stdlib --bench collections --locked --offline` to compare
+map helpers at 128, 512, and 2048 entries, including mixed integer/string keys.
+The dependency-free harness reports CSV medians from nine measured runs after
+two warmups and checks result lengths. Parsing, registration, and fixture setup
+are excluded; argument copying, runtime validation, and result assignment are
+included. These are end-to-end helper timings, not isolated native-call timings
+or CI performance thresholds. Several helpers use repeated linear key/value
+searches and can take quadratic time; use these measurements before choosing an
+indexing strategy, especially because strict value equality supports nested
+collections and identity-based objects/callables.
+
+A local macOS arm64 run with Rust 1.99.1 produced these median milliseconds
+using the optimized Cargo bench profile. Results are machine-dependent and
+establish a baseline for future indexing work, not a cross-platform guarantee.
+
+| Operation | 128 entries | 512 entries | 2048 entries |
+| --- | ---: | ---: | ---: |
+| Merge, disjoint keys | 0.131 | 1.178 | 9.985 |
+| Combine, distinct keys | 0.075 | 0.525 | 5.976 |
+| Indexed column, distinct indexes | 0.077 | 0.407 | 5.090 |
+
 
 ## Distribution validation
 
