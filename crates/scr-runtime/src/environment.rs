@@ -1,5 +1,8 @@
-use crate::Value;
-use std::collections::HashMap;
+use crate::{Value, value::Function};
+use std::{
+    collections::HashMap,
+    rc::{Rc, Weak},
+};
 
 #[derive(Default)]
 pub(crate) struct Scope {
@@ -15,6 +18,11 @@ pub(crate) struct Scope {
 pub(crate) struct Environments {
     scopes: Vec<Option<Scope>>,
     free: Vec<usize>,
+    // Includes suspended callers, which need not be lexical parents of current.
+    active: Vec<usize>,
+    functions: Vec<Weak<Function>>,
+    allocations_since_collection: usize,
+    collection_threshold: usize,
     pub current: usize,
     pub live: usize,
 }
@@ -24,6 +32,10 @@ impl Default for Environments {
         Self {
             scopes: vec![Some(Scope::default())],
             free: Vec::new(),
+            active: vec![0],
+            functions: Vec::new(),
+            allocations_since_collection: 0,
+            collection_threshold: 256,
             current: 0,
             live: 1,
         }
@@ -52,10 +64,13 @@ impl Environments {
         };
         let previous = self.current;
         self.current = id;
+        self.active.push(id);
         previous
     }
     pub fn leave(&mut self, previous: usize) {
         let id = self.current;
+        let active = self.active.pop();
+        debug_assert_eq!(active, Some(id));
         self.current = previous;
         if !self.scope(id).captured {
             self.live -= 1;
@@ -71,6 +86,77 @@ impl Environments {
             id = scope.parent;
         }
     }
+    pub fn track_function(&mut self, function: &Rc<Function>) {
+        self.functions.push(Rc::downgrade(function));
+        self.allocations_since_collection = self.allocations_since_collection.saturating_add(1);
+    }
+
+    pub fn collect_if_needed(&mut self) {
+        if self.allocations_since_collection >= self.collection_threshold {
+            self.collect();
+        }
+    }
+
+    /// Trace lexical environments, preserving callable references outside the arena.
+    /// The registry contains weak references only and does not keep functions alive.
+    pub fn collect(&mut self) -> usize {
+        let functions: Vec<_> = self.functions.iter().filter_map(Weak::upgrade).collect();
+        let mut internal = HashMap::<*const Function, usize>::new();
+        for scope in self.scopes.iter().flatten() {
+            visit_callables(scope, |callable| {
+                *internal.entry(Rc::as_ptr(callable)).or_default() += 1;
+            });
+        }
+        // Only functions created by this arena occur in this map. Foreign-runtime
+        // callables may be stored as values but must never supply our scope IDs.
+        let mut environments = HashMap::new();
+        let mut pending = self.active.clone();
+        for function in &functions {
+            if let Function::User { environment, .. } = function.as_ref() {
+                let pointer = Rc::as_ptr(function);
+                environments.insert(pointer, *environment);
+                // Discount every arena Value edge plus our single temporary upgrade.
+                // Remaining owners are evaluator temporaries, host-held Values, or
+                // opaque native captures: all must conservatively protect the scope.
+                if Rc::strong_count(function) > internal.get(&pointer).copied().unwrap_or(0) + 1 {
+                    pending.push(*environment);
+                }
+            }
+        }
+        let mut marked = vec![false; self.scopes.len()];
+        while let Some(id) = pending.pop() {
+            if marked[id] {
+                continue;
+            }
+            marked[id] = true;
+            let scope = self.scope(id);
+            if let Some(parent) = scope.parent {
+                pending.push(parent);
+            }
+            visit_callables(scope, |callable| {
+                if let Some(environment) = environments.get(&Rc::as_ptr(callable)) {
+                    pending.push(*environment);
+                }
+            });
+        }
+        let mut reclaimed = 0;
+        for (id, scope) in self.scopes.iter_mut().enumerate() {
+            if !marked[id] && scope.is_some() {
+                *scope = None;
+                self.free.push(id);
+                self.live -= 1;
+                reclaimed += 1;
+            }
+        }
+        drop(functions);
+        self.functions
+            .retain(|function| function.strong_count() > 0);
+        self.allocations_since_collection = 0;
+        // Amortize scans when the program intentionally retains many closures.
+        self.collection_threshold = 256.max(self.live.saturating_add(self.functions.len()));
+        reclaimed
+    }
+
     pub fn find(&self, name: &str, function: bool) -> Option<usize> {
         let mut id = Some(self.current);
         let mut in_function = false;
@@ -90,6 +176,25 @@ impl Environments {
             id = scope.parent;
         }
         None
+    }
+}
+
+// No user property access or native callbacks during tracing. Opaque native-held
+// callables are counted as external roots instead. Traverse owned collections
+// iteratively so collection itself does not add recursive stack depth.
+fn visit_callables(scope: &Scope, mut visit: impl FnMut(&Rc<Function>)) {
+    let mut values: Vec<_> = scope
+        .variables
+        .values()
+        .chain(scope.functions.values())
+        .collect();
+    while let Some(value) = values.pop() {
+        match value {
+            Value::Callable(callable) => visit(&callable.0),
+            Value::List(items) => values.extend(items),
+            Value::Map(items) => values.extend(items.iter().map(|(_, value)| value)),
+            _ => {}
+        }
     }
 }
 

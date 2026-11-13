@@ -146,8 +146,17 @@ impl Runtime {
                 self.error("execution instruction limit exceeded", span),
             ));
         }
+        self.environments.collect_if_needed();
         self.steps = self.steps.saturating_add(1);
         Ok(())
+    }
+
+    /// Reclaim unreachable captured lexical scopes and return the number reclaimed.
+    /// Globals, active calls, and callable Values retained by hosts stay alive.
+    /// Native-held callbacks are conservative roots; opaque native ownership cycles
+    /// are not collected. Freed storage may remain resident in the allocator.
+    pub fn collect_garbage(&mut self) -> usize {
+        self.environments.collect()
     }
 
     /// Register a native implementation with a required positional signature.
@@ -271,6 +280,7 @@ impl Runtime {
         program: &Program,
         output: &mut impl Write,
     ) -> std::result::Result<u8, RuntimeError> {
+        self.collect_garbage();
         self.steps = 0;
         if self
             .options
@@ -334,6 +344,7 @@ impl Runtime {
                 self.loaded_modules.insert(path);
             }
         }
+        self.collect_garbage();
         result
     }
 
@@ -805,12 +816,14 @@ impl Runtime {
             }
         }
         self.environments.capture();
-        Ok(Value::Callable(Callable(Rc::new(Function::User {
+        let function = Rc::new(Function::User {
             declaration: declaration.clone(),
             environment: self.environments.current,
             owner: self.identity.clone(),
             source: self.source.clone(),
-        }))))
+        });
+        self.environments.track_function(&function);
+        Ok(Value::Callable(Callable(function)))
     }
 
     fn call(
@@ -1105,6 +1118,13 @@ impl Runtime {
             .map(|_| ())
     }
     fn enter_scope(&mut self, parent: usize, span: Span) -> Result<usize> {
+        if self
+            .options
+            .max_scopes
+            .is_some_and(|limit| self.environments.live >= limit)
+        {
+            self.collect_garbage();
+        }
         if self
             .options
             .max_scopes

@@ -94,9 +94,30 @@ scope, with the definition source active. Variadic annotations check elements,
 then the collected list is validated against depth/value budgets. Anonymous
 and named nested functions share capture, ownership, and source retention rules;
 they do not acquire access to global variables. Uncaptured scopes are released
-on all control-flow paths and their slots reused. Captured environments are conservatively retained
-until the runtime is dropped, avoiding reference-counted environment/function
-cycles. A callable from one runtime cannot execute in another runtime.
+on all control-flow paths and their slots reused. Captured environments use a
+small stop-the-world tracing collector. Globals and all active scopes (including
+suspended callers) are roots; tracing follows lexical parents and callable values
+inside lists/maps, variables, and function bindings. Unreachable captured scopes,
+including recursive environment/function cycles, are dropped and slots reused.
+A callable from one runtime cannot execute in another runtime.
+
+A weak user-function registry supports host/evaluator roots without changing the
+public Value API: the collector counts callable references in every arena value,
+then compares those counts with each function's Rc strong count, discounting its
+own temporary upgrade. Any remaining reference conservatively roots the captured
+environment. This protects host-held callbacks, expression temporaries, and
+callbacks hidden in native objects or native function implementations. Native
+property getters and callback bodies are never invoked during tracing. Opaque
+native ownership cycles are not collected and can retain environments; hosts
+must break those cycles themselves.
+
+Collection runs at execute entry/exit, at statement/loop checkpoints after a
+threshold of user-function allocations, and before a scope limit rejects an
+allocation. The initial threshold is 256 function allocations and grows with the
+surviving scope/function population to amortize scans. Hosts can also call
+`Runtime::collect_garbage()`, which returns the number of reclaimed scopes.
+Collection is synchronous; no bounded pause-time guarantee or hard RSS ceiling
+is provided. Arena/allocator capacity can remain at its high-water mark.
 
 Internal control-flow signals carry return, break, continue, exit, explicit throw,
 and runtime failure through nested statements. Loop/function/catch boundaries

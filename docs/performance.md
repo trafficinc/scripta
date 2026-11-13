@@ -179,12 +179,18 @@ budget; File::copy already streams. Without a configured byte limit, File::read
 retains its existing whole-file behavior. OS/container memory limits are still
 needed when enforcing a hard process memory ceiling.
 
-Captured lexical environments remain in the runtime arena until runtime drop;
-unreachable closures are not garbage-collected during a long-lived runtime.
-The new live-scope ceiling bounds that retention when configured. Resources still
-referenced by globals/captured environments intentionally remain owned until those
-references/runtime are dropped; an exception does not erase globals. Uncaptured
-transient scopes unwind immediately. No daemon or new GC architecture is added.
+Captured lexical environments now use a synchronous tracing collector. It reclaims
+unreachable captures during long executions, at execution boundaries, and before
+rejecting a scope allocation at its configured limit. Globals, active callers,
+evaluator temporaries, and host-held callable values remain protected. Hosts may
+request collection with `Runtime::collect_garbage()` (reclaimed scope count).
+Opaque native ownership cycles are conservatively retained; hosts must break
+those cycles. Uncaptured transient scopes still unwind immediately. Collection
+can pause execution, and freed storage may stay resident in the allocator.
+See [architecture](architecture.md) for roots and scheduling, and the
+[memory soak harness](../benchmarks/README.md#long-running-memory-behavior) for
+current RSS measurements. The historical performance tables above predate this
+collector and are not measurements of its overhead.
 
 Diagnostic redaction is conservative and can hide benign credential-shaped text.
 It cannot identify every arbitrary unmarked secret embedded in a user-thrown
