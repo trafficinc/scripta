@@ -29,3 +29,7 @@ scr-parser.workspace = true
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "collections"
+harness = false

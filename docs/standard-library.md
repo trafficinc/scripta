@@ -352,7 +352,12 @@ echo Json::encode(Map::values(Map::remove($config, "optional"))) . "\n"; // ["wo
 Helpers need no OS capability, network access, or external command. Before
 copying result collections, they check the 128-level nesting limit and optional
 `max_value_bytes` budget using the runtime's logical accounting: one Value slot
-per value, UTF-8 string bytes, and MapKey slots plus string-key bytes. Detected
+per value, UTF-8 string bytes, byte buffers, reported native-object payloads,
+and MapKey slots plus string-key bytes. Growing map and column output plans
+check sizes before reserving additional entries. When duplicate keys may still
+overwrite values, the early check counts keys and Value slots; the complete
+winning values are checked before copying, so overwritten payloads do not cause
+premature failures. Detected
 size overflows, byte-budget violations, and fallible result reservations raise
 `ResourceLimitError`; input arguments and returned booleans also remain subject
 to the runtime's ordinary value checks. These limits do not bound process RSS

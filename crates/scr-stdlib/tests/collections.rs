@@ -371,6 +371,73 @@ fn concatenation_checks_output_budget_and_leaves_failed_assignment_unchanged() {
     assert_eq!(runtime.get_global("result"), Some(&ints(&[2])));
 }
 
+#[test]
+fn generated_results_fail_without_changing_destinations_or_inputs() {
+    let slot = std::mem::size_of::<Value>();
+    let key = std::mem::size_of::<MapKey>();
+    for (expression, limit) in [
+        ("List::fill(4, $left)", 5 * slot),
+        ("List::chunk($left, 1)", 4 * slot),
+        ("List::splice($left, 1, 1, $right)", 5 * slot),
+        (
+            "Map::merge($leftMap, $rightMap)",
+            (2 * slot + key + 1).max(3 * slot),
+        ),
+    ] {
+        let mut runtime = runtime(Some(limit));
+        execute(
+            &mut runtime,
+            "$left = [1, 2]; $right = [3, 4]; $leftMap = ['a' => 1]; $rightMap = ['b' => 2];",
+        );
+        execute(
+            &mut runtime,
+            &format!(
+                "$result = 'unchanged'; $caught = false; try {{ $result = {expression}; }} catch (ResourceLimitError $e) {{ $caught = true; }}"
+            ),
+        );
+        assert_eq!(
+            runtime.get_global("caught"),
+            Some(&Value::Bool(true)),
+            "{expression}"
+        );
+        assert_eq!(
+            runtime.get_global("result"),
+            Some(&Value::String("unchanged".into())),
+            "{expression}"
+        );
+        assert_eq!(runtime.get_global("left"), Some(&ints(&[1, 2])));
+        assert_eq!(runtime.get_global("right"), Some(&ints(&[3, 4])));
+        assert_eq!(runtime.get_global("leftMap"), Some(&evaluate("['a' => 1]")));
+        assert_eq!(
+            runtime.get_global("rightMap"),
+            Some(&evaluate("['b' => 2]"))
+        );
+        execute(&mut runtime, "$result = List::slice($left, 1);");
+        assert_eq!(runtime.get_global("result"), Some(&ints(&[2])));
+    }
+}
+
+#[test]
+fn repeated_byte_buffers_fail_before_assignment_when_output_exceeds_budget() {
+    let mut runtime = runtime(Some(4 * std::mem::size_of::<Value>() + 16));
+    runtime
+        .set_global("payload", Value::Bytes(vec![7; 16].into()))
+        .unwrap();
+    execute(
+        &mut runtime,
+        "$result = 'unchanged'; $caught = false; try { $result = List::fill(4, $payload); } catch (ResourceLimitError $e) { $caught = true; }",
+    );
+    assert_eq!(runtime.get_global("caught"), Some(&Value::Bool(true)));
+    assert_eq!(
+        runtime.get_global("result"),
+        Some(&Value::String("unchanged".into()))
+    );
+    assert_eq!(
+        runtime.get_global("payload"),
+        Some(&Value::Bytes(vec![7; 16].into()))
+    );
+}
+
 fn assert_expression(expression: &str, expected: &str) {
     assert_eq!(evaluate(expression), evaluate(expected), "{expression}");
 }
