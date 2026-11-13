@@ -52,6 +52,42 @@ The `examples/packages` demonstration installs with `--locked --offline`, prints
 `Hello, packages!`, and both scripts pass `scr fmt --check`. Linux/Windows
 execution remains unverified by these local results.
 
+### Aliased requires (separate approved scope)
+
+**Approval to start:** The user requested “ok do this then” after choosing
+`require_once "helpers" as Helpers;` with `Helpers::function()` calls, isolated
+module scopes, and unchanged unaliased includes.
+
+**Status:** Ready for review.
+
+The optional `as Alias` works with both require forms and local files or installed
+packages. Module functions/variables are isolated from the caller; aliases are
+lexical and cannot shadow registered namespaces or bind a different file.
+`require_once` shares a cached canonical-path instance, while `require` initializes
+a fresh scope and publishes it on success. Dependencies retain source-relative
+resolution and installed versions stay isolated. Alias and cache references are
+traced by the collector, and cached roots count toward scope limits. Failed
+initialization restores runtime state and preserves previous bindings; external
+effects and already initialized dependencies are not rolled back. See
+[package aliases](packages.md#package-aliases-and-isolation).
+
+**Validation:** Local macOS ARM64 workspace tests passed with both
+`--all-features` and `--no-default-features`, using `--locked --offline` and running
+sequentially outside the sandbox for existing loopback HTTP/TLS fixtures. Eleven
+focused module-alias tests cover duplicate names, scope isolation, shared once
+state, fresh requires, conflict errors, nested includes/aliases, GC/callback
+retention, cached empty modules, retry/fatal/exit cleanup, permissions/policy,
+scope pressure, canonical identity, source diagnostics, and formatter/check
+behavior. Installed-package tests verify two private dependency versions with
+identical function and alias names, plus checksum enforcement. Parser tests cover
+valid expressions/aliases and malformed bindings. The final self-entry once-state
+fix also passed focused tests and the no-default-features workspace suite.
+
+All-feature Clippy with warnings denied, Rust formatting, `git diff --check`, and
+the package example's `scr fmt --check` passed. The local package example installed
+with `--locked --offline` and printed `Hello, packages!`. No standard-library
+exports were added. These are local results, not Linux/Windows validation.
+
 ### SQLite built-in extension (separate approved scope)
 
 **Approval to start:** The user said "ok do it" after approving the plan for an

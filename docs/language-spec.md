@@ -142,7 +142,7 @@ operations chain from left to right.
 | 7 | `+ -` | Addition / subtraction, left |
 | 8 | `* / %` | Multiplication / division / remainder, left |
 | 9 | `+ - !` (prefix) | Unary positive / negative / logical NOT, right |
-| 10 | `(...) [...] ->name ::name(...)` (postfix) | Call / index / property / native call, left |
+| 10 | `(...) [...] ->name ::name(...)` (postfix) | Call / index / property / qualified call, left |
 
 Arithmetic and concatenation are separate operators: `"Count: " . 1 + 2`
 parses as `"Count: " . (1 + 2)` without inserting a conversion. Any operand type
@@ -158,10 +158,11 @@ any expression at their binding power. A call has an expression callee and zero
 or more comma-separated arguments; calls may chain, for example `$f()(1)`.
 Call argument lists do not accept trailing commas.
 
-Native calls use `Identifier::name(arguments)`, for example
-`Process::run("git", ["status"])`. The namespace must be a bare identifier and
-the member must be followed by an argument list. This is native API syntax;
-classes and object declarations are not part of this grammar. Property members
+Qualified calls use `Identifier::name(arguments)`, for example
+`Process::run("git", ["status"])` or `Helpers::greet("Ada")`. The namespace must be
+a bare identifier naming a registered native module or a require alias, and the
+member must be followed by an argument list. Classes and object declarations
+are not part of this grammar. Property members
 must be identifiers; dynamic member syntax is not supported. Index reads require
 one expression inside brackets. Empty brackets are a write-only list append
 target and must be followed immediately by plain `=` assignment.
@@ -614,7 +615,9 @@ require "lib/helpers.scr";
 require_once "lib/config.scr";
 ```
 
-`require expression;` and `require_once expression;` are statements. The expression
+`require expression;` and `require_once expression;` are statements. Both accept
+an optional unquoted alias: `require_once expression as Helpers;`, with calls as
+`Helpers::functionName(...)`. The expression
 must evaluate to a nonempty string naming a local UTF-8 file. Every file is lexed
 independently and must start with `<?scr` under the normal opening-tag rules
 (including the existing BOM/shebang handling). Each file is fully parsed before
@@ -627,13 +630,12 @@ file retains that definition file for later relative requires and diagnostics.
 Absolute local paths are supported; remote URLs are rejected. For hosts without
 a script filename, relative requires use the runtime working directory.
 
-Included statements execute in source order, at the require statement, without
-an extra scope. At top level, variables/functions become available in the caller's
-top-level scope; inside a block or function, existing lexical scope rules apply.
+Without an alias, included statements execute in source order at the require
+statement without an extra scope. At top level, variables/functions become
+available in the caller's top-level scope; inside a block or function, existing lexical scope rules apply.
 Assignments update the nearest visible binding. Includes do not bypass function
-isolation from global variables, and introduce no namespace or exported-symbol
-mechanism. Included function declarations become available when encountered;
-they are not hoisted before earlier statements in that included file. The entry
+isolation from global variables. Unaliased includes introduce no namespace.
+Included function declarations become available when encountered; they are not hoisted before earlier statements in that included file. The entry
 program retains its existing direct top-level function hoisting behavior.
 
 `require` executes on each call (and can therefore encounter a duplicate function
@@ -644,6 +646,32 @@ includes are not marked complete and may be retried; earlier side effects are
 not rolled back. Active files are checked for circular inclusion before the
 once check; cycles raise `CircularIncludeError`, including self-inclusion of
 the entry script. Calls and includes share the runtime depth limit (maximum 64).
+
+With `as Alias`, the file executes in an isolated lexical root without a caller
+parent. Its functions/variables stay separate; registered native functions are
+available through a native-only fallback. Module functions capture the root's
+private state. Direct module-scope functions are public through `Alias::name()`;
+there is no export declaration or alias access to variables. Aliases are lexical
+and case-sensitive, with normal identifier spelling. Module-internal aliases do
+not become caller aliases. Calls require parentheses, like native qualified calls.
+
+Successful aliased loads are cached by canonical entry path per runtime.
+`require_once` reuses that instance, even under a second alias. Aliased `require`
+executes in a fresh isolated root, binds only on success, and updates the cached
+instance; older aliases/callbacks retain their previous instance. A visible alias
+cannot name a different canonical file (`ModuleAliasError`), and registered native
+namespaces cannot be shadowed. Missing functions on a bound alias raise
+`ModuleError`. Resolution/policy/permission checks and active-cycle detection
+precede cache reuse. Separate installed versions have separate canonical paths.
+
+Unaliased `require_once` completion is tracked per enclosing module root (or the
+application global root), independently of the aliased cache. Local unaliased
+includes share that root's lexical rules. Successful cached roots remain alive
+until runtime drop and count toward scope limits; aliases and retained callables
+also keep older instances reachable through tracing. Failed initialization
+restores scope/source/loading state, publishes no new alias/cache entry, and
+preserves previous bindings. Earlier external effects and successful dependency
+loads are not rolled back. See [package aliases](packages.md#package-aliases-and-isolation).
 
 By default a required file may be at most 8 MiB; hosts/CLI can configure the shared
 source byte ceiling. Missing/unresolvable dependencies raise
