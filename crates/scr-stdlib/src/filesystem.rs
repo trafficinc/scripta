@@ -1,5 +1,7 @@
-//! Filesystem modules, implemented only through Rust's standard library.
+//! Filesystem modules with native path handling and host policy checks.
 use crate::paths;
+#[path = "atomic_writes.rs"]
+mod atomic_writes;
 #[path = "file_streams.rs"]
 mod streams;
 use scr_runtime::{
@@ -386,6 +388,7 @@ enum Operation {
     Exists,
     Read,
     Write,
+    WriteAtomic,
     Append,
     Copy,
     Move,
@@ -412,6 +415,7 @@ pub fn register(runtime: &mut Runtime, policy: FilesystemPolicy) -> NativeResult
         ("File::exists", Exists, 1, Bool),
         ("File::read", Read, 1, Text),
         ("File::write", Write, 2, Null),
+        ("File::writeAtomic", WriteAtomic, 2, Null),
         ("File::append", Append, 2, Null),
         ("File::copy", Copy, 2, Null),
         ("File::move", Move, 2, Null),
@@ -466,7 +470,7 @@ fn perform(
     let path = paths::resolve(context, value)?;
     let writing = matches!(
         operation,
-        Write | Append | Move | Delete | Create | CreateAll | Remove
+        Write | WriteAtomic | Append | Move | Delete | Create | CreateAll | Remove
     );
     policy.check(context, &path, writing)?;
     match operation {
@@ -485,6 +489,10 @@ fn perform(
             Ok(Value::Bool(exists))
         }
         Read => read_text(context, &path),
+        WriteAtomic => {
+            atomic_writes::write(context, &path, paths::string(&args[1])?, policy)?;
+            Ok(Value::Null)
+        }
         Write | Append => {
             let contents = args
                 .get(1)

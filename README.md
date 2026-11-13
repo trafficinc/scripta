@@ -347,8 +347,11 @@ cd /srv/scripta-dashboard
 
 Ensure the web-server account can traverse the directory and read the generated
 files. Schedule the same `cd` and `scr run` command in cron to refresh the data.
-For concurrent readers, generate replacement files beside the published files
-and rename them into place after successful generation. The sample report is a
+Use `File::writeAtomic` in the report script so concurrent readers receive a
+complete old or new version of each file. New Unix files start private; after the
+first run, grant the web server read access to the public reports (for example,
+`chmod 644 public/status.json public/index.html`). Later replacements preserve
+these ordinary permission bits. Each file is published independently. The sample report is a
 starting point: add `System` metrics, HTML, and browser-side JavaScript that polls
 `status.json` to turn it into a dashboard.
 
@@ -393,7 +396,7 @@ examples and have not been deployment-tested in this checkout.
 
 ## Standard library
 
-The [complete reference](docs/standard-library.md) documents all **105 functions**,
+The [complete reference](docs/standard-library.md) documents all **106 functions**,
 return values, native objects, limits, and errors.
 
 | Modules | Use |

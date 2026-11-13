@@ -39,6 +39,7 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
         "server-health.scr",
         "http-client.scr",
         "command-runner.scr",
+        "atomic-report.scr",
     ];
     for name in names {
         scr_cli::pipeline::check(&fs::read_to_string(example(name)).unwrap()).unwrap();
@@ -441,7 +442,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
     let modules = [
         (
             "File",
-            "exists read write append copy move delete size modified extension openLines readLine close",
+            "exists read write writeAtomic append copy move delete size modified extension openLines readLine close",
         ),
         (
             "Dir",
@@ -477,5 +478,46 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 105);
+    assert_eq!(count, 106);
+}
+
+#[test]
+fn atomic_report_previews_and_publishes_complete_json_before_and_after_formatting() {
+    let source = fs::read_to_string(example("atomic-report.scr")).unwrap();
+    let formatted = scr_cli::formatter::format(&source).unwrap();
+    assert_eq!(source, formatted);
+    for source in [source, formatted] {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("report.scr");
+        let destination = dir.path().join("report.json");
+        fs::write(&script, source).unwrap();
+        let invoke = |apply: bool| {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_scr"));
+            command
+                .current_dir(dir.path())
+                .arg(&script)
+                .arg(&destination)
+                .env("PATH", dir.path());
+            if apply {
+                command.arg("--apply");
+            }
+            success(command.output().unwrap())
+        };
+        assert!(invoke(false).starts_with("Would atomically write:"));
+        assert!(!destination.exists());
+        assert!(invoke(true).starts_with("Updated report:"));
+        fs::write(&destination, "obsolete contents").unwrap();
+        invoke(true);
+        let mut rt = scr_runtime::Runtime::new();
+        scr_stdlib::register(&mut rt).unwrap();
+        rt.set_global(
+            "json",
+            scr_runtime::Value::String(fs::read_to_string(&destination).unwrap()),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        rt.execute_source("<?scr $report=Json::decode($json); echo $report['status']; echo type($report['generatedAt']);", &mut output).unwrap();
+        assert_eq!(output, b"okint");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
 }

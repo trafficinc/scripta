@@ -88,6 +88,48 @@ the package example's `scr fmt --check` passed. The local package example instal
 with `--locked --offline` and printed `Hello, packages!`. No standard-library
 exports were added. These are local results, not Linux/Windows validation.
 
+### Atomic file replacement (separate approved scope)
+
+**Approval to start:** The user requested “ok do the plan” for
+`File::writeAtomic(path, contents)`, sibling staging, explicit commit semantics,
+permissions/policy checks, cleanup, failure/concurrency tests, and updated report
+guidance. This does not authorize a separate source-file replace API.
+
+**Status:** Ready for review.
+
+`File::writeAtomic` stages bounded UTF-8 writes in the destination directory,
+synchronizes/closes the staged file, and publishes through tempfile's native
+same-filesystem replacement without a delete/copy fallback. Existing regular
+files need write access; final symlinks, nonregular and read-only targets are
+rejected. Unix ordinary mode bits are preserved (special bits stripped), new
+Unix files start private, and Windows uses directory-inherited ACLs. Other
+metadata is not preserved. Precommit failures/cancellation remove staging files
+and preserve the destination; successful publication has no postcommit
+cancellation check. There is no directory synchronization, hard durability
+promise, multi-file transaction, or adversarial path-race sandbox.
+
+The library now has 106 exports. The report example previews unless `--apply`
+is given, and the static-web guide uses atomic writes with first-run reader
+permissions. See the [contract](standard-library.md#atomic-file-replacement).
+
+**Validation:** On macOS ARM64, `cargo test --workspace --all-features --locked
+--offline` passed outside the sandbox for the existing loopback HTTP/TLS fixtures.
+Five focused unit tests cover injected partial writes, commit failures,
+precommit/postcommit cancellation, destination revalidation, and actual cleanup
+failure propagation. Six filesystem integration tests cover Unicode/empty
+creation/replacement, strict signatures, invalid targets, write/root permissions,
+read-only files, Unix modes/symlinks/open descriptors, and concurrent-reader
+old/new snapshots. The improved cleanup-failure test also passed its targeted
+unit run after the workspace run. A Windows-only test holds a handle without
+delete sharing and checks replacement failure preserves the original; this test
+has not been executed on Windows here.
+
+The CLI report example passed preview/no-write, create/replace, parsed JSON,
+formatter equivalence, and no-staging-file checks. The export reference test now
+expects 106 functions. All-feature Clippy with warnings denied, Rust formatting,
+`git diff --check`, and `scr fmt --check examples/atomic-report.scr` passed.
+These are local macOS results, not Linux/Windows validation.
+
 ### SQLite built-in extension (separate approved scope)
 
 **Approval to start:** The user said "ok do it" after approving the plan for an

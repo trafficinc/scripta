@@ -729,3 +729,13 @@ directory. Script input then observes EOF. `scr run -- -` selects a literal file
 File-backed scripts can consume piped records with bounded `Cli::readLine`,
 which returns a string or null at EOF. See the [input API](standard-library.md#script-arguments-and-prompts)
 for byte limits, permissions, cancellation, and failure recovery.
+
+
+## Atomic file output
+
+`File::writeAtomic(path, contents): null` stages UTF-8 contents in the destination
+parent directory, then atomically publishes a complete replacement. It follows
+filesystem write/root permissions and rejects final symlinks and nonregular or
+read-only destinations. It does not change `File::write` or `File::move` semantics.
+See the [atomic replacement contract](standard-library.md#atomic-file-replacement)
+for metadata, cancellation, concurrency, cleanup, and durability limits.

@@ -1,0 +1,16 @@
+<?scr
+// Usage: scr examples/atomic-report.scr report.json [--apply]
+$path = Cli::arg(0);
+if ($path === null) {
+    echo "Usage: scr examples/atomic-report.scr <output-file> [--apply]\n";
+    exit 2;
+}
+$report = ["status" => "ok", "generatedAt" => Date::now()];
+$contents = Json::pretty($report) . "\n";
+if (!Cli::has("apply")) {
+    echo "Would atomically write: " . $path . "\n";
+    echo $contents;
+    exit 0;
+}
+File::writeAtomic($path, $contents);
+echo "Updated report: " . $path . "\n";
