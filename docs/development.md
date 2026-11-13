@@ -163,3 +163,17 @@ behavior; see the [full contract](packages.md#package-aliases-and-isolation).
 
 Focused tests live in `crates/scr-cli/tests/module_aliases.rs`, alongside installed
 package/version/integrity coverage in `packages.rs` and parser statement tests.
+
+
+## Atomic file writes
+
+`File::writeAtomic` uses sibling staging and tempfile's native replacement backend
+in `scr-stdlib/src/atomic_writes.rs`. Production staging and publication paths have
+private I/O seams for deterministic failure tests; no script fault-injection API
+is exposed. Unit tests cover partial writes, commit/cancellation boundaries,
+cleanup failures, and destination revalidation. Integration tests in
+`crates/scr-stdlib/tests/atomic_writes.rs` cover the public API, policies,
+permissions, concurrent readers, and a Windows delete-sharing failure fixture.
+The report example is checked through the CLI release-example suite. See the
+[public contract](standard-library.md#atomic-file-replacement) before changing
+permissions, commit ordering, or durability behavior.

@@ -44,7 +44,7 @@ registered by default.
 
 ## Release 0.1.0 export index
 
-This reference covers all 105 registered functions in the default library, plus
+This reference covers all 106 registered functions in the default library, plus
 native response/entry properties and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -56,7 +56,7 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Math | `Math::abs`, `Math::min`, `Math::max`, `Math::floor`, `Math::ceil`, `Math::round` | [Math](#math) |
 | List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort` | [Collections](#collections) |
 | Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove` | [Collections](#collections) |
-| File | `File::exists`, `File::read`, `File::write`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close` | [Filesystem](#filesystem-and-paths) |
+| File | `File::exists`, `File::read`, `File::write`, `File::writeAtomic`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close` | [Filesystem](#filesystem-and-paths) |
 | Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
 | Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute` | [Paths](#filesystem-and-paths) |
 | Process | `Process::run`, `Process::spawn`, `Process::shell`, `Process::wait`, `Process::poll`, `Process::kill`, `Process::exists`, `Process::currentId` | [Processes](#processes) |
@@ -365,6 +365,7 @@ and does not affect other runtimes. Existing `DirEntry` snapshots keep their pat
 | `File::exists(path): bool` | True for a regular file. Missing paths, directories, and final symlinks return false. Permission and other inspection failures raise exceptions. |
 | `File::read(path): string` | Reads a complete regular file as UTF-8. Invalid file bytes raise `EncodingError`. |
 | `File::write(path, contents): null` | Creates or truncates a regular file, replacing its contents. Parent directories must exist. |
+| `File::writeAtomic(path: string, contents: string): null` | Stages a complete UTF-8 file beside the destination, then atomically creates or replaces it. Parent directory must exist; final symlinks, nonregular files, and read-only destinations are rejected. |
 | `File::append(path, contents): null` | Creates a missing file or appends UTF-8 bytes to a regular file. |
 | `File::copy(source, destination): null` | Copies bytes, including binary files, to a new file. Refuses any existing destination, including symlinks and directories. Does not copy metadata/permissions. |
 | `File::move(source, destination): null` | Moves a regular file to a new name, refusing any existing destination. Uses exclusive hard-link creation followed by source removal; cross-device/unsupported-link errors fall back to exclusive copy then removal. |
@@ -384,6 +385,52 @@ new-file metadata. Writes/appends are not atomic replacements and may leave part
 contents on cancellation or I/O failure. Copy failure attempts to delete its newly
 created partial destination and reports any cleanup error. Reads, writes, copies,
 and listings check cancellation between chunks or entries.
+
+### Atomic file replacement
+
+`File::writeAtomic(path, contents)` requires `filesystem.write` and the registered
+filesystem write/root policy, including access to the destination's parent.
+It creates an exclusively named `.scripta-write-*` temporary file in that parent,
+writes in 64 KiB chunks with cancellation checks, applies supported permissions,
+synchronizes the staged file, closes its data handle, and publishes it with a
+same-filesystem rename/replacement. It never deletes the destination first or
+falls back to copying over it. Both arguments must be strings; normal path
+validation and runtime value limits apply. It returns null on success.
+
+At the destination path, concurrent readers opening the file see complete old or
+new contents on filesystems that support atomic replacement. Readers holding an
+old Unix descriptor keep reading the old file. Concurrent writers use
+last-successful-replacement behavior; there is no compare-and-swap or multi-file
+transaction. Windows handles opened without delete sharing may block replacement;
+this raises an exception and leaves the old file in place.
+
+Existing regular files must allow OS write access and must not be read-only.
+On Unix, replacement preserves the currently observed ordinary rwx permission
+bits; setuid, setgid, and sticky bits are stripped. New Unix files use private
+`0600` permissions, subject to umask. On Windows, new files inherit directory
+ACLs; custom target ACLs are not copied. Replacement uses a new file owned under
+the writer's normal creation rules: ownership/group, timestamps, extended
+attributes, hard-link identity, and other metadata are not preserved. Existing
+hard links continue to name the old file. For public web reports, grant reader
+access once after initial creation; Unix mode bits then survive replacements.
+
+Signature, permission, path, read-only, write, synchronization, and replacement
+failures use the existing TypeError/PathError/PermissionError/filesystem error
+categories. Cancellation is checked before commit; no cancellation check or other
+fallible operation follows a successful commit. Failures before publication leave
+the destination unchanged by this operation. Temporary files are explicitly
+removed on ordinary failure/cancellation, with cleanup failures appended to the
+original error. Abrupt termination may leave a staging file behind.
+
+File synchronization reduces crash exposure, but the parent directory is not
+synchronized: this API does not guarantee power-loss durability. Filesystem root
+and symlink checks retain their existing concurrent-path-race limitations; this
+is not an adversarial filesystem sandbox. Atomicity ultimately depends on the
+underlying filesystem, especially for network or unusual mounts. Each platform
+needs native validation before support is claimed.
+
+Try [atomic-report.scr](../examples/atomic-report.scr): preview with
+`scr examples/atomic-report.scr report.json`, then add `--apply` to publish it.
 
 | Directory method | Behavior |
 | --- | --- |

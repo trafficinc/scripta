@@ -14,6 +14,7 @@ package or source checkout; sample input directories must already exist.
 | file-organizer.scr | `scr examples/file-organizer.scr downloads organized` | Previews shallow file moves grouped by extension; --apply performs them, refusing collisions. |
 | log-cleaner.scr | `scr examples/log-cleaner.scr logs --days=30` | Previews regular .log files older than the threshold; --apply deletes only those files. |
 | directory-backup.scr | `scr examples/directory-backup.scr documents backup-new` | Previews recursive copying to a new destination with an existing parent, outside the source tree; --apply copies bytes without overwrite. |
+| atomic-report.scr | `scr examples/atomic-report.scr report.json --apply` | Previews without --apply; publishes a complete JSON report using atomic file replacement. Parent directory must exist. |
 | server-health.scr | `scr examples/server-health.scr` | Local JSON metrics, system RAM and interval-based CPU sample; optional first argument selects a disk path. |
 | http-client.scr | `scr examples/http-client.scr https://example.com/api/status` | Explicit bounded HTTPS/HTTP request and JSON output. Needs the endpoint and valid TLS. |
 | command-runner.scr | `scr examples/command-runner.scr git '["status","--short"]'` | Explicit executable plus JSON array of literal arguments, bounded capture/timeout; needs the chosen executable. |
