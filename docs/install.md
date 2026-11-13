@@ -14,7 +14,8 @@ checks file integrity; it does not replace trust in the release source/signing.
 There is no curl-to-shell installer or automatic privileged installation.
 
 The extracted directory contains the standalone executable, LICENSE, dependency
-notices, examples, reference documentation, and release.json with file hashes.
+notices, examples, runnable playgrounds and their fixtures, reference
+documentation, and release.json with file hashes.
 Only the executable needs to be on PATH. Python, Node.js, PHP, Docker, Rust, Cargo,
 and a network connection are not needed to run local scripts after installation.
 Archive extraction/checksum utilities are installation tools, not interpreter

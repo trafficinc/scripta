@@ -333,8 +333,9 @@ fn package(
     for name in ["LICENSE", "README.md"] {
         files.insert(name.into(), fs::read(root().join(name))?);
     }
-    collect(&root().join("docs"), "docs", &mut files)?;
-    collect(&root().join("examples"), "examples", &mut files)?;
+    for directory in ["docs", "examples", "playground"] {
+        collect(&root().join(directory), directory, &mut files)?;
+    }
     notices(&mut files, target, features)?;
     let inventory: BTreeMap<_, _> = files
         .iter()
@@ -657,13 +658,16 @@ fn smoke(path: &Path) -> Result<()> {
             return Err(fail("packaged example output differs"));
         }
     }
+    // Exercise the shipped collection APIs from the extracted package, with
+    // the same cleared environment and package-only PATH as the other smoke checks.
+    execute(&["run", "playground/collections.scr"])?;
     let offline = r#"<?scr require_once "examples/lib/helpers.scr"; $data=Json::decode("{\"status\":\"offline\"}"); File::write("offline.json",Json::encode($data)); echo statusLabel(File::read("offline.json")) . "\n"; echo Date::format(Date::parse("2026-01-01T00:00:00Z"),"%Y") . "\n"; Log::info("local smoke complete");"#;
     fs::write(directory.join("offline.scr"), offline)?;
     let output = execute(&["run", "offline.scr"])?;
     if output.stdout != b"Status: offline\n2026\n" {
         return Err(fail("offline smoke output differs"));
     }
-    let validation = json!({"version":version,"target":target,"binary_sha256":manifest["binary_sha256"],"archive_sha256":digest(&fs::read(path)?),"host_os":env::consts::OS,"host_arch":env::consts::ARCH,"offline_smoke":"passed with cleared environment and PATH containing only extracted package","workspace_tests":"must be checked in the associated CI run; not inferred from smoke"});
+    let validation = json!({"version":version,"target":target,"binary_sha256":manifest["binary_sha256"],"archive_sha256":digest(&fs::read(path)?),"host_os":env::consts::OS,"host_arch":env::consts::ARCH,"offline_smoke":"passed with cleared environment and PATH containing only extracted package, including the collection playground","workspace_tests":"must be checked in the associated native validation record; not inferred from smoke"});
     fs::write(
         path.with_file_name(format!(
             "{}.validation.json",

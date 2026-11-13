@@ -9,13 +9,18 @@ all-platform release.
 - [x] Rust compiler pinned, Cargo.lock retained, unwind/overflow-safe profiles.
 - [x] Required examples and standard-library reference included in package inputs.
 - [ ] Review git diff, licenses/notices, release limitations, and dependency updates.
-- [ ] Reconcile feature-absence and capture-lifetime claims across release notes,
+- [x] Reconcile feature-absence and capture-lifetime claims across release notes,
   architecture, and library docs with the current [package manager](packages.md),
   [collector documentation](performance.md), implementation, and tests.
 - [ ] Verify the source tag exactly matches v0.1.0 and the intended reviewed commit.
 - [ ] Ensure the source tree is clean and source/release settings are committed.
 
 ## Local evidence
+
+The current [local validation record](release-validation.md) identifies the
+source base and uncommitted changes, native environment, feature variants, and
+generated evidence. Earlier artifacts in `dist/` are historical and do not
+replace a fresh run against the intended release source.
 
 - [x] Complete macOS ARM64 debug test suite and Clippy passed during preparation.
 - [x] Declared MSRV check result recorded.

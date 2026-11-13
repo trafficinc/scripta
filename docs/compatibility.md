@@ -2,6 +2,8 @@
 
 Configured build targets are not support claims. A platform is verified only when
 its executable passes native tests and the extracted-package smoke test.
+The [local release-validation record](release-validation.md) describes the
+current macOS ARM64 source/environment and the evidence retained locally.
 
 | Platform | Rust target / asset suffix | Evidence available here | Status |
 | --- | --- | --- | --- |

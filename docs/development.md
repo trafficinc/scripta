@@ -54,8 +54,10 @@ deadlines/cancellation, runtime-local environment values, options, and prompts.
 Tests in scr-stdlib/tests and scr-cli/tests cover fixture children and CLI invocation
 parity. JSON, verified HTTPS, bounded responses, and local script loading are covered
 by loopback HTTP/TLS and temporary-file integration tests, with no public network
-dependency. Future work includes interpolation, richer exception values,
-collection helpers, broader resource limits, and release packaging. Add runnable examples
+dependency. List and Map helpers, logical value/scope/step budgets, and native
+release packaging are implemented. Interpolation, richer exception values,
+callback-based collection transforms, and recursive merge variants remain
+unimplemented. Add runnable examples
 when each feature works; the fixtures in `tests/fixtures` exercise complete
 statements, Hello World output, script exit codes, and runtime stack traces.
 

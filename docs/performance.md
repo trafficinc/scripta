@@ -184,7 +184,9 @@ needed when enforcing a hard process memory ceiling.
 Captured lexical environments now use a synchronous tracing collector. It reclaims
 unreachable captures during long executions, at execution boundaries, and before
 rejecting a scope allocation at its configured limit. Globals, active callers,
-evaluator temporaries, and host-held callable values remain protected. Hosts may
+evaluator temporaries, host-held callable values, and successful cached module
+roots remain protected. Replacing a cached module instance does not discard
+older instances that are still reachable through aliases or callables. Hosts may
 request collection with `Runtime::collect_garbage()` (reclaimed scope count).
 Opaque native ownership cycles are conservatively retained; hosts must break
 those cycles. Uncaptured transient scopes still unwind immediately. Collection

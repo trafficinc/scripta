@@ -554,8 +554,11 @@ Nested assignment never creates missing intermediate collections. Indexing
 other types is an error.
 
 The standard library's `List` and `Map` namespaces add collection helpers without
-new syntax. List removal, slicing, concatenation, membership, and homogeneous
-sorting preserve strict value semantics. `Map::has` and `Map::get` safely handle
+new syntax. List end operations, splice, slicing, concatenation, chunking, fill,
+search, uniqueness, numeric aggregation, comparisons, and homogeneous sorting
+preserve strict value semantics. Map merging, replacement, construction,
+flipping, comparisons, and record-column extraction preserve typed keys and
+defined entry order. `Map::has` and `Map::get` safely handle
 absent keys, while normal indexing still requires an existing key. Map keys and
 values can be projected in insertion order, and removal returns an independent
 map. Invalid helper arguments and bounds raise catchable native errors; core
@@ -592,8 +595,10 @@ Statements and loop back edges check both, including empty infinite loops. Budge
 units are checkpoints, not CPU instructions, and reset on each execute call.
 Cancellation flags remain set until cleared by the host. Interruption bypasses
 script catches and reports a runtime error after unwinding calls and scopes.
-Native calls must return before execution can observe cancellation. There are no
-wall-clock or allocation limits.
+Native helpers must check cancellation cooperatively or return before the
+evaluator can observe it. Optional logical-value byte and live-scope budgets
+are not aggregate allocation/RSS limits, and there is no interpreter-wide
+wall-clock deadline. Individual native operations can impose their own timeouts.
 
 The runtime uses safe Rust and owns its environments in an arena. Transient
 scopes are reclaimed and slots reused. A tracing collector reclaims captured
@@ -609,9 +614,10 @@ resource-close guarantee, and freed memory need not immediately reduce RSS.
 ## Planned features
 
 Interpolation, variable annotation syntax, richer exception types, and
-callback-based collection transforms and pop remain future work.
-List and map helpers for removal, slicing, concatenation, membership, sorting,
-construction, projection, and safe lookup are implemented.
+callback-based collection transforms remain future work. Recursive map merge
+variants are not implemented. List and map helpers, including `List::pop`,
+`List::shift`, splice, aggregation, comparisons, and column extraction, are
+implemented alongside construction, projection, and safe lookup.
 List growth through `[] =` and assignment at the current length is implemented.
 
 

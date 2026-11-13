@@ -158,8 +158,10 @@ modules depend on this public runtime API; the runtime never imports modules or
 matches their names. See [registration guide](standard-library.md#registering-rust-modules).
 
 Calls are limited to 64 active script/native frames, with configurable lower
-limits. Optional checkpoint budgets and host cancellation bound execution;
-allocation and wall-clock limits remain future work.
+limits. Optional checkpoint, logical-value byte, and live-scope budgets plus host
+cancellation bound execution. These do not impose an aggregate allocation/RSS
+ceiling or an interpreter-wide wall-clock deadline; individual native operations
+such as HTTP requests and subprocesses have their own timeouts.
 
 
 ## Filesystem modules

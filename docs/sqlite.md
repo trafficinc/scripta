@@ -82,8 +82,9 @@ SQLite NULL, INTEGER, REAL, and TEXT values return as Scripta null, int, float,
 and string respectively. SQLite's storage affinity can change a stored value's
 type; returned integers are not automatically converted to bools.
 
-BLOB values have no binary Scripta equivalent and raise `SqliteTypeError` when
-returned. Use SQL `hex(column)` for text output. Invalid UTF-8 TEXT and non-finite
+BLOB results are not supported by this extension, despite the core `bytes` type,
+and raise `SqliteTypeError` when returned. Use SQL `hex(column)` for text output.
+Invalid UTF-8 TEXT and non-finite
 REAL results also raise `SqliteTypeError`. Duplicate column names are rejected;
 use aliases in joins, such as `SELECT a.id AS a_id, b.id AS b_id ...`. Result maps
 preserve column order and use case-sensitive string keys.
