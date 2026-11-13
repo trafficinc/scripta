@@ -3,7 +3,7 @@ use scr_runtime::{
     NativeError, NativeFunction, NativeResult, NativeSignature, NativeType, Runtime,
     RuntimeContext, Value,
 };
-use std::io::{BufRead, Read};
+use std::io::{BufRead, IsTerminal, Read};
 use std::{cell::Cell, mem::size_of, rc::Rc};
 
 fn option(args: &[String], requested: &str) -> NativeResult<(bool, Option<String>)> {
@@ -80,6 +80,7 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
         ),
     )?;
     for (method, params, returns) in [
+        ("isTerminal", vec![NativeType::String], NativeType::Bool),
         ("args", vec![], NativeType::List),
         (
             "arg",
@@ -104,6 +105,22 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
             NativeFunction::new(
                 NativeSignature::new(params, returns),
                 move |context, args| match method {
+                    "isTerminal" => {
+                        let [Value::String(stream)] = args else {
+                            unreachable!("validated signature");
+                        };
+                        let terminal = match stream.as_str() {
+                            "stdin" => std::io::stdin().is_terminal(),
+                            "stdout" => std::io::stdout().is_terminal(),
+                            "stderr" => std::io::stderr().is_terminal(),
+                            _ => {
+                                return Err(NativeError::type_error(
+                                    "stream must be \"stdin\", \"stdout\", or \"stderr\"",
+                                ));
+                            }
+                        };
+                        Ok(Value::Bool(terminal))
+                    }
                     "args" => context
                         .cli_arguments
                         .iter()

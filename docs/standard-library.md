@@ -61,7 +61,7 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute` | [Paths](#filesystem-and-paths) |
 | Process | `Process::run`, `Process::spawn`, `Process::shell`, `Process::wait`, `Process::poll`, `Process::kill`, `Process::exists`, `Process::currentId` | [Processes](#processes) |
 | Env | `Env::get`, `Env::set`, `Env::has`, `Env::remove`, `Env::all` | [Environment](#environment) |
-| Cli | `Cli::args`, `Cli::arg`, `Cli::has`, `Cli::option`, `Cli::prompt`, `Cli::readLine` | [CLI](#script-arguments-and-prompts) |
+| Cli | `Cli::args`, `Cli::arg`, `Cli::has`, `Cli::option`, `Cli::isTerminal`, `Cli::prompt`, `Cli::readLine` | [CLI](#script-arguments-and-prompts) |
 | System | `System::platform`, `System::architecture`, `System::hostname`, `System::cpuUsage`, `System::memoryUsage`, `System::diskUsage`, `System::uptime`, `System::homeDirectory`, `System::tempDirectory` | [System](#system-information) |
 | Date | `Date::now`, `Date::format`, `Date::parse`, `Date::sleep` | [Dates](#dates) |
 | Log | `Log::info`, `Log::warn`, `Log::error`, `Log::debug`, `Log::setFile` | [Logging](#local-logging) |
@@ -955,6 +955,7 @@ paths starting with a hyphen or matching interpreter commands.
 | `Cli::arg(index)` | Zero-based nonnegative int index; string or null if out of range. |
 | `Cli::has(name): bool` | Whether an option is present before the first `--`. |
 | `Cli::option(name)` | Last occurrence's value string, or null for absent/valueless options. |
+| `Cli::isTerminal(stream: string): bool` | Whether the process's `"stdin"`, `"stdout"`, or `"stderr"` handle connects to a terminal. |
 | `Cli::readLine(maxLineBytes: int optional): string or null` | Reads a bounded UTF-8 stdin line without writing or flushing output. Default raw line limit is 1 MiB; EOF returns null. |
 | `Cli::prompt(message)` | Writes and flushes a string prompt, reads one UTF-8 line, strips LF/CRLF, and returns it; EOF gives null. |
 
@@ -966,6 +967,28 @@ occurrence, even when valueless. Short flags are not bundled: `-abc` is the name
 `abc`. The first `--` stops option queries but stays in Cli::args. No quoting or
 shell parsing is performed on script arguments. Non-UTF-8 arguments raise
 `EncodingError` when exposed; their native encoding is preserved by CLI parsing.
+
+`Cli::isTerminal` accepts exactly `"stdin"`, `"stdout"`, and `"stderr"`
+(case-sensitive). Other names, wrong argument types, and wrong arity raise
+`TypeError`. It returns false for pipes, redirected files, null devices, or when
+the OS cannot determine terminal status. It neither reads nor writes a stream
+and does not require `cli.read` or `cli.prompt` permission. In embedded runtimes,
+it inspects the host process's standard handles, not injected input, output, or
+error writers.
+
+Terminal detection does not guarantee ANSI color or cursor-control support and
+does not interpret `NO_COLOR` or CLI options. Scripts decide those policies:
+
+```scr
+<?scr
+$useColor = Cli::isTerminal("stdout")
+    && !Env::has("NO_COLOR")
+    && Cli::option("color") !== "never";
+
+if (Cli::isTerminal("stdin") && Cli::isTerminal("stdout")) {
+    $name = Cli::prompt("Your name: ");
+}
+```
 
 `Cli::readLine` uses the runtime's buffered input (`Runtime::set_input_stream`)
 and requires `cli.read`, enabled by default independently of `cli.prompt`.
