@@ -18,7 +18,7 @@ locations as a filename, one-based line, and one-based character column.
 ## Public application interfaces
 
 `scr_cli::args::parse` consumes arguments excluding the executable name and
-returns `Result<Command, UsageError>`. `Command` has `Help`, `Version`,
+returns `Result<Command, UsageError>`. `Command` has `Help`, `CommandHelp`, `RunStdin { arguments }`, `Version`,
 `Run { path: PathBuf, arguments: Vec<OsString> }`, `Check(PathBuf)`, and
 `Format { path: PathBuf, check: bool }` variants. Parsing performs no I/O and never
 exits the process. `args::HELP` is the shared CLI usage text. File paths preserve
@@ -33,6 +33,11 @@ runtime with standard-library
 functions registered. The caller supplies a `Write` destination. File loading
 and exit codes belong to the executable, so embedding callers can provide their
 own source and error handling.
+
+`scr_cli::pipeline::run_with_input(source, output, options, input)` accepts an
+owned buffered input reader. The CLI uses an empty reader after consuming stdin
+as source so script input stays at EOF. File-backed execution retains process
+stdin for pipeline records.
 
 The existing crate-root interfaces remain public: `scr_lexer::lex`,
 `scr_parser::{parse, parse_with_diagnostics, parse_expression}`,
@@ -197,7 +202,7 @@ monitors; interrupted execution reports 130 after dropping runtime resources.
 Platform-specific child behavior and limitations are documented in the
 [standard library](standard-library.md#processes). Integration tests use fixture
 executables, bounded temporary capture, injected input/environment, and real CLI
-subprocesses. Local macOS results do not establish Windows/Linux CI success.
+subprocesses. Local macOS results do not establish Windows/Linux validation.
 
 The process backend uses the [process-wrap 8.2.2 API](https://docs.rs/crate/process-wrap/8.2.2)
 with the standard-library frontend. Application-owned setup guards precede the

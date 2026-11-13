@@ -122,6 +122,7 @@ pub enum StatementKind {
     Require {
         path: Expr,
         once: bool,
+        alias: Option<Binding>,
     },
 }
 
@@ -133,7 +134,7 @@ pub struct Block {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
-    /// Variable name without its `$` prefix.
+    /// Bound name; variable bindings omit the `$` prefix.
     pub name: String,
     pub span: Span,
 }

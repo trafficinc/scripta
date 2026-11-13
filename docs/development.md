@@ -12,8 +12,8 @@ cargo run -p scr-cli -- check examples/hello.scr
 cargo run -p scr-cli -- fmt --check examples/hello.scr
 ```
 
-CI runs format, lint, and test checks on Linux, macOS, and Windows. Linux is the
-primary platform. CLI exit codes are 0 for success, 1 for I/O or language errors,
+Run format, lint, and test checks on each platform being validated. CLI exit codes
+are 0 for success, 1 for I/O or language errors,
 and 2 for incorrect command-line usage. `help` and `version` succeed; `--help`,
 `-h`, and `--version` are aliases. `run <file>` executes; `<file>` is shorthand.
 `check <file>` validates lexing and statement syntax, producing no output on
@@ -22,7 +22,12 @@ found, including missing semicolons, legacy equality, and invalid control-flow
 context. It does not resolve variables, enforce type annotations, or execute
 native functions. The runtime executes the implemented statement grammar;
 `check` validates it without running loops, functions, output, throws, or exits.
-Both `run` and `check` accept `--` before a path. No file-extension restriction
+`run`, `check`, and `fmt` accept command-local `--help`/`-h`, and
+`scr help run|check|fmt` prints the same command help with exit 0.
+Both `run` and `check` accept `--` before a path. `scr run -` consumes bounded
+UTF-8 script source from stdin through EOF; `scr run -- -` addresses a literal
+file named `-`. Stdin source uses `<stdin>` in diagnostics and the working
+directory for relative includes/packages. Subsequent script input is at EOF. No file-extension restriction
 is imposed. Non-Unicode paths retain the operating system's native encoding.
 
 Language and command-line integration tests live in `crates/scr-cli/tests` so
@@ -56,9 +61,8 @@ statements, Hello World output, script exit codes, and runtime stack traces.
 
 Local validation on macOS arm64 with Rust/Cargo 1.99.1 passed formatting,
 Clippy with warnings denied, and workspace tests (including lexer, expression,
-statement, recovery, runtime, conversions, and CLI coverage). Linux and Windows
-validation remains covered by the configured CI jobs;
-these local results do not establish a passing CI run.
+statement, recovery, runtime, conversions, and CLI coverage). These local results
+do not establish Linux or Windows validation.
 
 
 ## Formatter and diagnostic tooling
@@ -121,8 +125,8 @@ conversion. Proptest exercises 512 arbitrary-Unicode and token-noise cases per
 parser property and 256 generated valid formatter cases. To reproduce a failure,
 use Proptest's printed seed/regression case; its default regression files remain
 supported. Targeted malformed cases include 10,000-level nesting and operator
-chains. These checks run with the existing Linux/macOS/Windows Cargo CI jobs;
-they improve robustness without claiming exhaustive proof over all resource inputs.
+chains. These checks run as part of the Cargo test suite; they improve robustness
+without claiming exhaustive proof over all resource inputs.
 
 
 ## Performance and runtime safety
@@ -138,7 +142,7 @@ error codes and original Unicode column positions are preserved.
 
 ## Distribution validation
 
-Release profiles, the five native runner targets, reproducible archive metadata,
+Release profiles, the five native build targets, reproducible archive metadata,
 checksum verification, and the test-before-support policy are documented in
 [releases.md](releases.md). Windows builds must use an explicit target for static
 CRT configuration. Native dist tests exercise the optimized executable; test

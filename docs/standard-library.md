@@ -44,7 +44,7 @@ registered by default.
 
 ## Release 0.1.0 export index
 
-This reference covers all 104 registered functions in the default library, plus
+This reference covers all 105 registered functions in the default library, plus
 native response/entry properties and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -61,7 +61,7 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute` | [Paths](#filesystem-and-paths) |
 | Process | `Process::run`, `Process::spawn`, `Process::shell`, `Process::wait`, `Process::poll`, `Process::kill`, `Process::exists`, `Process::currentId` | [Processes](#processes) |
 | Env | `Env::get`, `Env::set`, `Env::has`, `Env::remove`, `Env::all` | [Environment](#environment) |
-| Cli | `Cli::args`, `Cli::arg`, `Cli::has`, `Cli::option`, `Cli::prompt` | [CLI](#script-arguments-and-prompts) |
+| Cli | `Cli::args`, `Cli::arg`, `Cli::has`, `Cli::option`, `Cli::prompt`, `Cli::readLine` | [CLI](#script-arguments-and-prompts) |
 | System | `System::platform`, `System::architecture`, `System::hostname`, `System::cpuUsage`, `System::memoryUsage`, `System::diskUsage`, `System::uptime`, `System::homeDirectory`, `System::tempDirectory` | [System](#system-information) |
 | Date | `Date::now`, `Date::format`, `Date::parse`, `Date::sleep` | [Dates](#dates) |
 | Log | `Log::info`, `Log::warn`, `Log::error`, `Log::debug`, `Log::setFile` | [Logging](#local-logging) |
@@ -311,7 +311,7 @@ contains:
 | `output` | The same writer passed to `Runtime::execute`, shared with echo and prompts. |
 | `error` | Defaults to process stderr; override with `Runtime::set_error_stream`. |
 | `cancellation` | The atomic cancellation flag from runtime options; `check_cancelled()` returns an interruption error. |
-| `permissions` | Automation capabilities are allowed by default: sleep, filesystem read/write, environment read/write, process execute/inspect, system.inspect, log.write, http.request, and cli.prompt. `process.shell` remains opt-in. |
+| `permissions` | Automation capabilities are allowed by default: sleep, filesystem read/write, environment read/write, process execute/inspect, system.inspect, log.write, http.request, cli.read, and cli.prompt. `process.shell` remains opt-in. |
 | `call_span` | Original script span of the native call. |
 | `max_value_bytes` | Optional host logical-value budget; file reads enforce it while buffering, and String helpers check result sizes before allocating output. |
 
@@ -736,6 +736,7 @@ paths starting with a hyphen or matching interpreter commands.
 | `Cli::arg(index)` | Zero-based nonnegative int index; string or null if out of range. |
 | `Cli::has(name): bool` | Whether an option is present before the first `--`. |
 | `Cli::option(name)` | Last occurrence's value string, or null for absent/valueless options. |
+| `Cli::readLine(maxLineBytes: int optional): string or null` | Reads a bounded UTF-8 stdin line without writing or flushing output. Default raw line limit is 1 MiB; EOF returns null. |
 | `Cli::prompt(message)` | Writes and flushes a string prompt, reads one UTF-8 line, strips LF/CRLF, and returns it; EOF gives null. |
 
 Option names may be queried as `name`, `--name`, or `-name`. Recognized forms are
@@ -746,6 +747,36 @@ occurrence, even when valueless. Short flags are not bundled: `-abc` is the name
 `abc`. The first `--` stops option queries but stays in Cli::args. No quoting or
 shell parsing is performed on script arguments. Non-UTF-8 arguments raise
 `EncodingError` when exposed; their native encoding is preserved by CLI parsing.
+
+`Cli::readLine` uses the runtime's buffered input (`Runtime::set_input_stream`)
+and requires `cli.read`, enabled by default independently of `cli.prompt`.
+`maxLineBytes` must be a positive int in platform range; invalid values raise
+`RangeError` and wrong types/arity raise `TypeError` without consuming input.
+The raw byte limit includes the LF/CRLF terminator. A line exactly at the limit
+is accepted. LF and its preceding CR are removed; bare CR and a UTF-8 BOM remain.
+Blank lines return `""`, final unterminated lines are returned, and EOF returns
+`null` repeatedly. Unicode is decoded after assembling the bounded line.
+
+Line reads check cancellation between chunks of at most 8 KiB and after reading.
+The logical result budget includes a Value slot plus UTF-8 payload bytes, allowing
+two terminator bytes while buffering. Size/budget/allocation failures raise
+`ResourceLimitError`, invalid UTF-8 raises `EncodingError`, OS failures raise
+`IoError`, and cancellation raises `Interrupted`. A failure inside the read
+operation disables subsequent `Cli::readLine` and `Cli::prompt` calls for that
+registration with `InputError`; no partial line is returned and no unbounded
+attempt is made to drain the failed line. Permission/signature/range failures
+leave input available. Replacing an embedding runtime's input reader does not
+reset this failed state; use a fresh runtime/registration. A synchronous read
+blocked waiting for input must return before cancellation can be observed.
+
+`Cli::readLine` and `Cli::prompt` share the same buffered cursor. For example:
+
+```scr
+<?scr
+while (($line = Cli::readLine(65536)) !== null) {
+    echo $line . "\n";
+}
+```
 
 Prompts use the runtime output writer and configurable buffered input
 (`Runtime::set_input_stream`). They require `cli.prompt`, enabled by default.

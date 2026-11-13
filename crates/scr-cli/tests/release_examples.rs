@@ -450,7 +450,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Path", "join filename extension parent normalize absolute"),
         ("Process", "run spawn shell wait poll kill exists currentId"),
         ("Env", "get set has remove all"),
-        ("Cli", "args arg has option prompt"),
+        ("Cli", "args arg has option prompt readLine"),
         (
             "System",
             "platform architecture hostname cpuUsage memoryUsage diskUsage uptime homeDirectory tempDirectory",
@@ -477,5 +477,5 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 104);
+    assert_eq!(count, 105);
 }

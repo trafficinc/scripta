@@ -1,6 +1,7 @@
 use crate::{Value, value::Function};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    path::PathBuf,
     rc::{Rc, Weak},
 };
 
@@ -14,11 +15,20 @@ struct CollectionWork {
     values_visited: usize,
 }
 
+#[derive(Clone)]
+pub(crate) struct ModuleAlias {
+    pub path: PathBuf,
+    pub scope: usize,
+}
+
 #[derive(Default)]
 pub(crate) struct Scope {
     pub parent: Option<usize>,
     pub variables: HashMap<String, Value>,
     pub functions: HashMap<String, Value>,
+    pub aliases: HashMap<String, ModuleAlias>,
+    // require_once identity is local to the enclosing isolated module or globals.
+    pub loaded_modules: HashSet<PathBuf>,
     pub captured: bool,
     pub function_boundary: bool,
 }
@@ -39,6 +49,8 @@ pub(crate) struct Environments {
     collections: usize,
     pub current: usize,
     pub live: usize,
+    // Successful isolated module instances are roots for this runtime's lifetime.
+    pub module_cache: HashMap<PathBuf, usize>,
 }
 
 impl Default for Environments {
@@ -56,6 +68,7 @@ impl Default for Environments {
             collections: 0,
             current: 0,
             live: 1,
+            module_cache: HashMap::new(),
         }
     }
 }
@@ -145,6 +158,7 @@ impl Environments {
         // callables may be stored as values but must never supply our scope IDs.
         let mut environments = HashMap::new();
         let mut pending = self.active.clone();
+        pending.extend(self.module_cache.values().copied());
         for function in &functions {
             if let Function::User { environment, .. } = function.as_ref() {
                 let pointer = Rc::as_ptr(function);
@@ -168,6 +182,7 @@ impl Environments {
                 work.scopes_marked += 1;
             }
             let scope = self.scope(id);
+            pending.extend(scope.aliases.values().map(|alias| alias.scope));
             if let Some(parent) = scope.parent {
                 pending.push(parent);
             }
@@ -204,6 +219,33 @@ impl Environments {
             self.collections += 1;
         }
         reclaimed
+    }
+
+    pub fn find_alias(&self, name: &str) -> Option<&ModuleAlias> {
+        let mut id = Some(self.current);
+        while let Some(current) = id {
+            let scope = self.scope(current);
+            if let Some(alias) = scope.aliases.get(name) {
+                return Some(alias);
+            }
+            id = scope.parent;
+        }
+        None
+    }
+
+    pub fn module_root(&self) -> usize {
+        let mut id = self.current;
+        while let Some(parent) = self.scope(id).parent {
+            id = parent;
+        }
+        id
+    }
+
+    pub fn has_alias(&self, name: &str) -> bool {
+        self.scopes
+            .iter()
+            .flatten()
+            .any(|scope| scope.aliases.contains_key(name))
     }
 
     pub fn find(&self, name: &str, function: bool) -> Option<usize> {

@@ -3,7 +3,7 @@
 ## Choose a verified release candidate
 
 Use an archive whose target is marked verified in the release's compatibility
-matrix and whose associated native CI/test records are green. See
+matrix and whose associated native test records show passing results. See
 [compatibility.md](compatibility.md) for the current evidence; configured targets
 that are still pending are not supported-download promises. This work prepares
 release candidates and does not itself publish a GitHub Release.

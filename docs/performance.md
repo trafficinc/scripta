@@ -5,8 +5,8 @@
 Measured on 2026-11-12: macOS-27.0.1-arm64-arm-64bit, 8 logical CPUs,
 Rust 1.99.1, default Cargo release profile (no custom LTO/strip settings),
 Python 3.9.6, and GNU bash, version 3.2.57(1)-release (arm64-apple-darwin26).
-Only macOS arm64 measurements are reported. Linux/Windows have CI compatibility
-coverage; this report contains no Raspberry Pi, VPS, Linux, or Windows estimates.
+Only macOS arm64 measurements are reported. This report contains no Raspberry Pi,
+VPS, Linux, or Windows estimates.
 
 The runner takes two warmups followed by 11 measured launches for each fixture/
 language, validates every output checksum, and records every observation plus
