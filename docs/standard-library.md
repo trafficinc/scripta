@@ -238,6 +238,9 @@ and [log analyzer](../playground/log-analyzer.scr) for complete examples.
 
 ## Registering Rust modules
 
+For a complete extension crate with optional Cargo features, CLI startup wiring,
+tests, and distribution instructions, see [Writing built-in extensions](writing-extensions.md).
+
 Dependencies point from `scr-stdlib` to `scr-runtime`, then from `scr-runtime` to
 `scr-ast`/`scr-diagnostics`. The runtime does not depend on the standard library.
 A future module exports a registration function using only the public runtime API.

@@ -37,6 +37,8 @@ throw/catch. The typed native API exposes context, streams, environment snapshot
 permissions, named exceptions, and cancellation. Standard library registration
 includes `str`, `int`, `float`, `bool`, `type`, `len`, and `sleep`. See the
 [registration guide](standard-library.md#registering-rust-modules) for new Rust modules.
+For a complete crate, optional Cargo feature, CLI wiring, and testing walkthrough,
+see [Writing built-in extensions](writing-extensions.md).
 `File`, `Dir`, and `Path` provide filesystem operations and optional root policies;
 filesystem tests live in `crates/scr-stdlib/tests` and use temporary directories.
 Process/Env/Cli now support owned children, literal arguments, bounded output,
