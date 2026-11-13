@@ -100,3 +100,60 @@ repeatable native baselines before choosing platform-specific growth bounds.
 Compare multiple batch samples and repeated runs rather than a single delta.
 The recreate workload drops the previous runtime before constructing the next;
 its batch-boundary samples include one live runtime.
+
+## Tracing collector performance
+
+Run the deterministic collector checks in both debug and optimized builds:
+
+```sh
+cargo test -p scr-runtime --locked
+cargo test -p scr-runtime --profile dist --locked
+python3 -B -m unittest discover -s benchmarks -p test_collector.py
+```
+
+Test-only work counters check linear graph traversal, deduplication of 10,000
+aliases to shared captures, bounded arena/weak-registry storage over 20,000
+recursive-closure operations, and adaptive collection scheduling. Ordinary loops
+must not trigger a collection at every checkpoint. Counters are absent from
+production builds; these tests gate correctness and operation counts, not time.
+
+Build the optimized benchmark workers and run the complete matrix:
+
+```sh
+cargo build -p scr-runtime --examples --release --locked
+python3 benchmarks/collector.py --output benchmarks/results/collector-local.json
+```
+
+The matrix uses 1,000, 10,000, and 100,000 items, two warmup trials, and 11 measured
+trials per case. Cases cover discarded captures, fully live captures, 90% live
+captures, discarded recursive cycles, shared captures, nested collections,
+host-held callbacks, plain scalar collections, ordinary script execution, and
+closure churn. Each pause trial constructs a fresh graph outside its timed
+section. It times one explicit collection, checks the exact reclaimed scope
+count, checks surviving callback results, and confirms a second collection
+reclaims nothing. After live roots are removed, their captures must also become
+reclaimable. This avoids accidentally timing repeated collection of an empty
+fixture. The size counts factory calls (two captured scopes each), except for
+plain values and the two execution workloads, where it counts items/iterations.
+
+Reports include raw nanosecond observations, median, nearest-rank p95, maximum,
+per-item median, reclaimed scope counts, platform, and worker SHA-256. With fewer
+than 20 samples, nearest-rank p95 is the maximum; increase `--samples` when studying
+tail latency. Execution rows include automatic collection and execution-boundary
+collection; they measure total script cost, not isolated GC overhead.
+
+Use `--case` repeatedly to select cases, `--sizes`, `--samples`, and `--warmups`
+to change the matrix, and `--reference /path/to/preserved/collector_bench` to
+compare compatible worker builds. Reference/candidate ordering alternates across
+rows; ratios greater than one mean the candidate's median was slower. Workers
+with debug assertions enabled are rejected. The output file must be new.
+Run on an otherwise idle machine without concurrent builds or tests.
+
+After timing trials finish, the driver runs the existing four-process RSS soak
+separately and includes its samples in the JSON report. Increase
+`--memory-batches 100 --memory-iterations 2000` for a longer run, or use
+`--skip-memory` for timing only. `--soak-worker` accepts a target-specific memory
+worker path. RSS is not sampled during timing trials. No elapsed-time or RSS
+thresholds fail CI: establish repeated native baselines before selecting limits.
+The timings cannot establish a hard pause guarantee, and the ordinary workload
+cannot establish GC-on versus GC-off overhead without a suitable reference build.
