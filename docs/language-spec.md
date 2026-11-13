@@ -661,8 +661,12 @@ when registered, with the same documented concurrent-path-replacement limitation
 Embedders can call `Runtime::execute_source(source, output)` with
 `ContextOptions.script_path` to retain source text and entry identity, or continue
 using AST execution. `Runtime::set_module_policy` supplies an additional host path
-check. No package registry, dependency installer, remote fetching, or package
-manager is involved.
+check. Hosts may opt into package-name resolution with
+`Runtime::set_module_resolver`; the CLI configures this for installed direct
+dependencies. Existing local files take precedence over package names. Package
+entries still pass through the module policy and execute with the same include
+semantics. Resolution never fetches remote code during execution; see
+[packages](packages.md) for explicit installation, locking, and checksums.
 
 
 ## Developer checks and formatting

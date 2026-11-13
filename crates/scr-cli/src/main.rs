@@ -15,6 +15,24 @@ fn main() -> ExitCode {
         }
     };
     let (path, check_only, format_only, arguments) = match command {
+        Command::Package(arguments) => {
+            return match env::current_dir()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                .and_then(|cwd| scr_cli::packages::execute(&arguments, &cwd))
+            {
+                Ok(message) => {
+                    println!("{message}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!(
+                        "error[E0601]: {}",
+                        scr_diagnostics::redact_text(&error.to_string(), &[])
+                    );
+                    ExitCode::from(1)
+                }
+            };
+        }
         Command::Help => {
             println!("{}", args::HELP);
             return ExitCode::SUCCESS;

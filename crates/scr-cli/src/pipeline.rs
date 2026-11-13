@@ -27,6 +27,10 @@ pub fn run_with_options(
     options: scr_runtime::RuntimeOptions,
 ) -> Result<u8, scr_runtime::RuntimeError> {
     let mut runtime = scr_runtime::Runtime::with_options(options);
+    runtime.set_module_resolver(|base, name| {
+        crate::packages::resolve(base, name)
+            .map_err(|error| scr_runtime::NativeError::new("PackageError", error.to_string()))
+    });
     scr_stdlib::register(&mut runtime)
         .map_err(|error| Diagnostic::new(error.to_string(), Default::default()))?;
     runtime.execute_source(source, output)

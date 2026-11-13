@@ -7,8 +7,18 @@ use std::{
 };
 
 pub(crate) type ModulePolicy = dyn Fn(&Path) -> NativeResult<()>;
+pub(crate) type ModuleResolver = dyn Fn(&Path, &str) -> NativeResult<Option<PathBuf>>;
 
 impl Runtime {
+    /// Resolve package names relative to the including file. Local files win.
+    /// Called only after the filesystem.read permission check; the resolved path
+    /// still passes through the host's module policy.
+    pub fn set_module_resolver(
+        &mut self,
+        resolver: impl Fn(&Path, &str) -> NativeResult<Option<PathBuf>> + 'static,
+    ) {
+        self.module_resolver = Some(Rc::new(resolver));
+    }
     /// Additional host path restriction. filesystem.read is always required.
     pub fn set_module_policy(&mut self, policy: impl Fn(&Path) -> NativeResult<()> + 'static) {
         self.module_policy = Some(Rc::new(policy));
@@ -97,7 +107,14 @@ impl Runtime {
                     .and_then(Path::parent)
                     .filter(|p| !p.as_os_str().is_empty())
                     .unwrap_or(&self.options.context.working_directory);
-                base.join(path)
+                let local = base.join(path);
+                if local.is_file() {
+                    local
+                } else if let Some(resolver) = &self.module_resolver {
+                    resolver(base, value)?.unwrap_or(local)
+                } else {
+                    local
+                }
             };
             if let Some(policy) = &self.module_policy {
                 policy(&path)?;

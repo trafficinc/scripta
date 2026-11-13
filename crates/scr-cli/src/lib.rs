@@ -3,4 +3,5 @@ pub mod args;
 pub mod pipeline;
 
 pub mod formatter;
+pub mod packages;
 mod validation;

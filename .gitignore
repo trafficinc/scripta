@@ -2,6 +2,10 @@
 
 /dist/
 
+# Installed Scripta dependencies; commit scripta.toml and scripta.lock.
+.scripta/
+.scripta-install.lock
+
 # Local environment files; keep sanitized templates publishable.
 .env
 .env.*
