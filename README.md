@@ -38,7 +38,6 @@ passed; see the
 | Target | Current validation |
 | --- | --- |
 | macOS ARM64 | Verified locally on macOS 27.0.1; macOS 15 validation pending |
-| macOS x86-64 | Native validation pending |
 | Linux x86-64 | Verified natively on Ubuntu 22.04 |
 | Linux ARM64 | Verified natively on Ubuntu 22.04 |
 | Windows x86-64 | Verified natively on Windows Server 2022 |
@@ -184,9 +183,9 @@ cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked
 ./target/aarch64-apple-darwin/dist/scr run examples/hello.scr
 ```
 
-On an Intel Mac, replace **every** `aarch64-apple-darwin` above with
-`x86_64-apple-darwin`. This is a native build, not a universal binary. Older macOS
-versions and running Intel binaries through Rosetta have not been verified.
+macOS support is limited to Apple Silicon (M-series) Macs using
+`aarch64-apple-darwin`. Intel Macs are outside the supported target matrix.
+Older macOS versions have not been verified.
 
 ### Linux
 

@@ -207,7 +207,7 @@ noise and hash-index overhead.
 
 ## Distribution validation
 
-Release profiles, the five native build targets, reproducible archive metadata,
+Release profiles, the four native build targets, reproducible archive metadata,
 checksum verification, and the test-before-support policy are documented in
 [releases.md](releases.md). Windows builds must use an explicit target for static
 CRT configuration. Native dist tests exercise the optimized executable; test

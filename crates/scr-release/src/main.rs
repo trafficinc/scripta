@@ -10,11 +10,10 @@ use std::{
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const TARGETS: [&str; 5] = [
+const TARGETS: [&str; 4] = [
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
     "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
     "x86_64-pc-windows-msvc",
 ];
 const MAX_BYTES: u64 = 128 * 1024 * 1024;
@@ -683,7 +682,7 @@ mod tests {
     use super::*;
     #[test]
     fn archive_output_is_deterministic_and_inventory_detects_corruption() -> Result<()> {
-        for target in [TARGETS[0], TARGETS[4]] {
+        for target in TARGETS {
             let binary = if target.contains("windows") {
                 "scr.exe"
             } else {
