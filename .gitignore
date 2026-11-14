@@ -7,7 +7,6 @@ __pycache__/
 *.py[cod]
 
 # Local agent guidance.
-/[Aa]GENTS.md
 
 # Installed Scripta dependencies; commit scripta.toml and scripta.lock.
 .scripta/
