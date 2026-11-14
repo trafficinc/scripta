@@ -115,6 +115,12 @@ and values before it can be saved. The file writer atomically replaces the
 canonical target, preserving permissions and a symlink used to address that target.
 `--check` never writes; a difference produces E0502 and exit 1.
 
+Git attributes keep `.scripta`, `.scta`, and legacy `.scr` source files at LF
+on every platform, including Windows checkouts with `core.autocrlf=true`.
+Formatter snapshots and benchmark fixtures override text conversion to preserve
+their exact mixed newline bytes. The native validation-driver tests exercise
+these checkout rules in an isolated Git repository.
+
 `check` also rejects duplicate direct function declarations in one lexical body,
 including anonymous functions inside expressions/defaults, and repeated parameter
 names. Signature ordering is checked by the parser. Default expressions are not

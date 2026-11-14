@@ -1,10 +1,12 @@
 """Check evidence parsing and static-CRT rejection without native toolchains."""
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from validate_native import Validation, test_counts, windows_imports
+from validate_native import ROOT, Validation, test_counts, windows_imports
 
 
 class EvidenceTests(unittest.TestCase):
@@ -21,6 +23,34 @@ class EvidenceTests(unittest.TestCase):
                 windows_imports('    KERNEL32.dll\n    ' + name + '\n')
         with self.assertRaises(RuntimeError):
             windows_imports('no dependency evidence')
+
+    def test_windows_style_checkout_keeps_scripts_lf_and_snapshots_byte_exact(self):
+        fixtures = {
+            'examples/report.scripta': b'<?scripta\necho "ok";\n',
+            'playground/report.scta': b'<?scripta\necho "ok";\n',
+            'examples/legacy.scr': b'<?scr\necho "ok";\n',
+            'crates/scr-cli/tests/snapshots/formatter/newlines.input.scripta': b'<?scr\r\necho "first\r\nsecond";\n',
+            'crates/scr-cli/tests/snapshots/formatter/newlines.expected.scripta': b'<?scr\necho "first\r\nsecond";\n',
+            'benchmarks/fixtures/newlines.scripta': b'<?scripta\r\necho "ok";\n',
+        }
+        environment = {**os.environ, 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull}
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / 'source'
+            checkout.mkdir()
+            (checkout / '.gitattributes').write_bytes((ROOT / '.gitattributes').read_bytes())
+            for name, data in fixtures.items():
+                path = checkout / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            def git(*arguments):
+                subprocess.run(['git', '-C', str(checkout), '-c', 'core.autocrlf=true', *arguments],
+                               env=environment, check=True, capture_output=True)
+            git('init', '--quiet')
+            git('add', '.')
+            output = Path(directory) / 'export'
+            git('checkout-index', '--all', '--prefix=' + output.as_posix() + '/')
+            for name, expected in fixtures.items():
+                self.assertEqual((output / name).read_bytes(), expected, name)
 
     def test_host_mismatch_stops_before_tests_and_packaging(self):
         with tempfile.TemporaryDirectory() as directory:
