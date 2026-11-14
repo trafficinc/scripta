@@ -225,6 +225,59 @@ fn git_semver_pins_updates_reinstall_and_revision_sources() {
 }
 
 #[test]
+fn local_git_sources_support_cli_paths_and_canonical_manifest_paths() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo with spaces 世界");
+    fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q"]);
+    commit(&repo, "1.0.0", "local");
+
+    for handwritten in [false, true] {
+        let app = temp.path().join(if handwritten {
+            "manifest-app"
+        } else {
+            "cli-app"
+        });
+        fs::create_dir(&app).unwrap();
+        if handwritten {
+            // Windows canonical paths carry the \\?\ prefix that Git must not
+            // mistake for a remote host. Old manifests/locks can contain it.
+            let source = fs::canonicalize(&repo)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned();
+            fs::write(
+                app.join("scripta.toml"),
+                format!(
+                    "[dependencies.helpers]\ngit = {}\nrev = 'v1.0.0'\n",
+                    toml::Value::String(source),
+                ),
+            )
+            .unwrap();
+            ok(&app, &["install"]);
+        } else {
+            ok(&app, &["init"]);
+            ok(
+                &app,
+                &[
+                    "add",
+                    "helpers",
+                    "--git",
+                    "../repo with spaces 世界",
+                    "--rev",
+                    "v1.0.0",
+                ],
+            );
+        }
+        fs::write(app.join("main.scr"), "<?scr require 'helpers';").unwrap();
+        assert_eq!(ok(&app, &["main.scr"]), "local");
+        ok(&app, &["install", "--locked", "--offline"]);
+        assert_eq!(ok(&app, &["main.scr"]), "local");
+    }
+}
+
+#[test]
 fn missing_stale_locks_cycles_and_invalid_manifests() {
     let temp = tempfile::tempdir().unwrap();
     let app = temp.path().join("app");
