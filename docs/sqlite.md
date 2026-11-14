@@ -4,13 +4,13 @@ SQLite is an optional built-in extension. Enable it when building the CLI:
 
 ```sh
 cargo build -p scr-cli --locked --features sqlite
-cargo run -p scr-cli --locked --features sqlite -- examples/sqlite.scr
+cargo run -p scr-cli --locked --features sqlite -- examples/sqlite.scripta
 ```
 
-The extension is disabled in default builds. `scr version --verbose` reports
+The extension is disabled in default builds. `scripta version --verbose` reports
 `extensions: sqlite` or `extensions: none`. It registers four native functions;
 script packages and `require` do not enable it. The
-[runnable example](../examples/sqlite.scr) uses an in-memory database and prints:
+[runnable example](../examples/sqlite.scripta) uses an in-memory database and prints:
 
 ```text
 1: Ada
@@ -230,7 +230,7 @@ packager to use the same feature graph. For example, on macOS ARM64:
 
 ```sh
 cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked --features sqlite
-cargo run -p scr-release --locked -- package --binary target/aarch64-apple-darwin/dist/scr --target aarch64-apple-darwin --out-dir dist/sqlite --features sqlite
+cargo run -p scr-release --locked -- package --binary target/aarch64-apple-darwin/dist/scripta --target aarch64-apple-darwin --out-dir dist/sqlite --features sqlite
 cargo run -p scr-release --locked -- verify --archive dist/sqlite/scripta-0.1.0-aarch64-apple-darwin.tar.gz
 cargo run -p scr-release --locked -- smoke --archive dist/sqlite/scripta-0.1.0-aarch64-apple-darwin.tar.gz
 ```

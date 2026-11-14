@@ -144,14 +144,14 @@ fn diagnostics_redact_known_credentials_literal_excerpts_and_debug_source_text()
     for rendered in [
         error.to_string(),
         format!("{error:?}"),
-        error.render("test.scr", "<?scr throw 'sensitive-value-123';"),
+        error.render("test.scripta", "<?scr throw 'sensitive-value-123';"),
     ] {
         assert!(!rendered.contains("sensitive-value-123"), "{rendered}");
     }
     let error = run(&mut runtime, "$x='unmarked-sensitive-literal'; echo 1;").unwrap_err();
     assert!(
         !error
-            .render("test.scr", "unused")
+            .render("test.scripta", "unused")
             .contains("unmarked-sensitive-literal")
     );
 }

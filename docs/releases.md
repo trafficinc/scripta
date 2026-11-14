@@ -56,6 +56,21 @@ platforms, and repackage that final source. The reviewed local archives predate
 these final documentation-review updates; their hashes are retained separately
 and no current archive is presented as a clean tagged release.
 
+## Command and source filename migration
+
+New artifacts use `scripta`/`scripta.exe` as the primary executable and ship an
+identical `scr`/`scr.exe` compatibility copy. `.scripta` is the official source
+extension, `.scta` is accepted as shorthand, and legacy `.scr` scripts remain
+valid. The opening tag remains `<?scr`. Rust crate names, `SCR_*` environment
+variables, and the separate playground's `scr-playground` / `--scr` launch
+protocol are unchanged. The launcher passes the actual current interpreter path,
+so the companion can execute the renamed binary without a protocol change;
+its editor file-extension filters belong to the separate companion repository.
+
+Existing native receipts and immutable archives retain their original names and
+hashes. Run fresh native validation and package smoke for the migrated revision;
+the previous receipts do not establish validation of the new archives.
+
 ## Pinned inputs and profiles
 
 Rust 1.99.1 is pinned in rust-toolchain.toml; Cargo.lock is committed and every
@@ -70,7 +85,7 @@ Windows uses `+crt-static`; do not override RUSTFLAGS without retaining it.
 
 Builds embed the commit supplied explicitly by SCR_BUILD_COMMIT. A build without
 an explicit commit reports `unknown`, rather than implying a clean/reproducible source revision.
-`scr version` retains the simple version line; `scr version --verbose` adds target,
+`scripta version` retains the simple version line; `scripta version --verbose` adds target,
 Cargo's base profile, compiler, explicit commit metadata, and built-in extensions.
 
 Archives sort file entries, normalize permissions/ownership, and use a numeric
@@ -92,7 +107,7 @@ cargo test --workspace --locked --target aarch64-apple-darwin
 cargo test --workspace --all-features --locked --target aarch64-apple-darwin
 cargo test --workspace --profile dist --target aarch64-apple-darwin --locked
 cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- package --binary target/aarch64-apple-darwin/dist/scr --target aarch64-apple-darwin --out-dir dist/local-base
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- package --binary target/aarch64-apple-darwin/dist/scripta --target aarch64-apple-darwin --out-dir dist/local-base
 cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify --archive dist/local-base/scripta-0.1.0-aarch64-apple-darwin.tar.gz
 cargo run -p scr-release --locked --target aarch64-apple-darwin -- smoke --archive dist/local-base/scripta-0.1.0-aarch64-apple-darwin.tar.gz
 cargo run -p scr-release --locked --target aarch64-apple-darwin -- checksums --dir dist/local-base
@@ -109,7 +124,7 @@ fixtures. Offline smoke executes the collection playground as well as the
 basic examples, and records workspace tests as a separate native-evidence gate.
 `--epoch NUMBER` overrides the archive epoch for reproducibility testing. The
 maintainer-only scr-release tool requires Rust and cached/fetched crate metadata;
-it is not included in or required by the installed scr interpreter.
+it is not included in or required by the installed scripta interpreter.
 
 For a SQLite-enabled variant, build the CLI with `--features sqlite` and pass
 `--features sqlite` to the `scr-release package` subcommand as well. This selects
@@ -168,7 +183,7 @@ Checksums provide integrity, not publisher authentication.
 - Scripts that explicitly use Http need their endpoint; scripts using Process need
   the requested executable. Those optional actions do not create a runtime or
   network dependency for local scripts. Examples with file changes preview first
-  and require --apply; legacy organize.scr should be read before running.
+  and require --apply; legacy organize.scripta should be read before running.
 - Backups are non-overwriting file-tree copies, not atomic snapshots, archives,
   metadata/permission backups, or a disaster-recovery product. Concurrent source
   changes and partial output on failure are possible; symlinks are skipped.

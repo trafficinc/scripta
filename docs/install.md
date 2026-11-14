@@ -16,6 +16,10 @@ There is no curl-to-shell installer or automatic privileged installation.
 The extracted directory contains the standalone executable, LICENSE, dependency
 notices, examples, runnable playgrounds and their fixtures, reference
 documentation, and release.json with file hashes.
+The primary executable is `scripta` (`scripta.exe` on Windows). Archives also
+include an identical compatibility executable named `scr` (`scr.exe`). Put the
+primary executable on PATH; optionally copy the compatibility executable beside
+it if older commands or shebangs need `scr`. Both use the same implementation.
 Only the executable needs to be on PATH. Python, Node.js, PHP, Docker, Rust, Cargo,
 and a network connection are not needed to run local scripts after installation.
 Archive extraction/checksum utilities are installation tools, not interpreter
@@ -32,10 +36,10 @@ server are not included in Scripta source, builds, or normal interpreter archive
 The standalone playground download bundles its own interpreter and launcher.
 
 For an existing Scripta installation, put the separately downloaded
-`scr-playground` (`scr-playground.exe` on Windows) beside `scr` or on PATH, then
-run `scr playground`. This uses your installed interpreter. You may instead set
+`scr-playground` (`scr-playground.exe` on Windows) beside `scripta` or on PATH, then
+run `scripta playground`. This uses your installed interpreter. You may instead set
 `SCR_PLAYGROUND_BIN` to the companion executable's full path. The command never
-downloads or installs the app automatically. Use `scr playground --no-open` to
+downloads or installs the app automatically. Use `scripta playground --no-open` to
 print the local URL without opening a browser. Delete the companion and remove
 any PATH/environment entry to uninstall it.
 
@@ -49,10 +53,10 @@ archive=scripta-0.1.0-x86_64-unknown-linux-gnu.tar.gz
 sha256sum -c "$archive.sha256"
 tar -xzf "$archive"
 mkdir -p "$HOME/.local/bin"
-install -m 755 scripta-0.1.0-x86_64-unknown-linux-gnu/scr "$HOME/.local/bin/scr"
+install -m 755 scripta-0.1.0-x86_64-unknown-linux-gnu/scripta "$HOME/.local/bin/scripta"
 export PATH="$HOME/.local/bin:$PATH"
-scr version --verbose
-scr run scripta-0.1.0-x86_64-unknown-linux-gnu/examples/hello.scr
+scripta version --verbose
+scripta run scripta-0.1.0-x86_64-unknown-linux-gnu/examples/hello.scripta
 ```
 
 Add the PATH export to your shell startup file if needed. Check the glibc/platform
@@ -65,10 +69,10 @@ archive=scripta-0.1.0-aarch64-apple-darwin.tar.gz
 shasum -a 256 -c "$archive.sha256"
 tar -xzf "$archive"
 mkdir -p "$HOME/.local/bin"
-install -m 755 scripta-0.1.0-aarch64-apple-darwin/scr "$HOME/.local/bin/scr"
+install -m 755 scripta-0.1.0-aarch64-apple-darwin/scripta "$HOME/.local/bin/scripta"
 export PATH="$HOME/.local/bin:$PATH"
-scr version --verbose
-scr run scripta-0.1.0-aarch64-apple-darwin/examples/hello.scr
+scripta version --verbose
+scripta run scripta-0.1.0-aarch64-apple-darwin/examples/hello.scripta
 ```
 
 Candidates are not Developer-ID-signed or notarized. A downloaded executable may
@@ -88,14 +92,14 @@ if ($actual -ne $expected) { throw 'Archive checksum mismatch' }
 Expand-Archive -LiteralPath $archive -DestinationPath .
 $install = Join-Path $env:LOCALAPPDATA 'Scripta\bin'
 New-Item -ItemType Directory -Force $install | Out-Null
-Copy-Item '.\scripta-0.1.0-x86_64-pc-windows-msvc\scr.exe' $install
+Copy-Item '.\scripta-0.1.0-x86_64-pc-windows-msvc\scripta.exe' $install
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if (($userPath -split ';') -notcontains $install) {
     [Environment]::SetEnvironmentVariable('Path', "$install;$userPath", 'User')
 }
 $env:Path = "$install;$env:Path"
-scr version --verbose
-scr run .\scripta-0.1.0-x86_64-pc-windows-msvc\examples\hello.scr
+scripta version --verbose
+scripta run .\scripta-0.1.0-x86_64-pc-windows-msvc\examples\hello.scripta
 ```
 
 No administrator access or separate VC redistributable is expected: the release
@@ -117,7 +121,7 @@ installs the pinned release compiler/components.
 # Native Unix build; use the actual host target from rustc -vV.
 cargo test --workspace --locked
 cargo build -p scr-cli --profile dist --locked
-./target/dist/scr version --verbose
+./target/dist/scripta version --verbose
 ```
 
 For macOS distribution builds set `MACOSX_DEPLOYMENT_TARGET=15.0` as in the release
@@ -127,10 +131,10 @@ static CRT flag:
 ```powershell
 cargo test --workspace --target x86_64-pc-windows-msvc --locked
 cargo build -p scr-cli --profile dist --target x86_64-pc-windows-msvc --locked
-.\target\x86_64-pc-windows-msvc\dist\scr.exe version --verbose
+.\target\x86_64-pc-windows-msvc\dist\scripta.exe version --verbose
 ```
 
-Alternatively, `cargo install --path crates/scr-cli --locked` installs scr into
+Alternatively, `cargo install --path crates/scr-cli --locked` installs both `scripta` and `scr` into
 Cargo's bin directory on Unix. On Windows, add
 `--target x86_64-pc-windows-msvc` to that install command. This source-install
 route requires build tools; downloaded
@@ -138,10 +142,14 @@ binary users do not need them.
 
 ## Uninstall
 
+If you installed the optional compatibility command, remove its `scr`/`scr.exe`
+file from the same installation directory too. Existing `.scr` source files do
+not need renaming. The `.scta` shorthand is also accepted.
+
 For the per-user Unix installation above:
 
 ```sh
-rm "$HOME/.local/bin/scr"
+rm "$HOME/.local/bin/scripta"
 ```
 
 Remove only PATH entries you added if you no longer use that directory. Other
@@ -153,7 +161,7 @@ For the Windows per-user installation:
 
 ```powershell
 $install = Join-Path $env:LOCALAPPDATA 'Scripta\bin'
-Remove-Item -LiteralPath (Join-Path $install 'scr.exe')
+Remove-Item -LiteralPath (Join-Path $install 'scripta.exe')
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $remaining = ($userPath -split ';' | Where-Object { $_ -and $_.TrimEnd('\') -ne $install.TrimEnd('\') }) -join ';'
 [Environment]::SetEnvironmentVariable('Path', $remaining, 'User')

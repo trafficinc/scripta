@@ -3,7 +3,7 @@
 $source = Cli::arg(0);
 $destination = Cli::arg(1);
 if ($source === null || $destination === null) {
-    echo "Usage: scr file-organizer.scr SOURCE DESTINATION [--apply]\n";
+    echo "Usage: scripta file-organizer.scripta SOURCE DESTINATION [--apply]\n";
     exit(2);
 }
 $apply = Cli::has("apply");

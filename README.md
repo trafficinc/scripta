@@ -16,6 +16,11 @@
   <a href="examples/README.md">Examples</a>
 </p>
 
+Use `scripta backup.scripta`, `scripta deploy.scripta`, or
+`scripta monitor.scripta`. `.scripta` is the official source extension; `.scta`
+is a shorthand. The `scr` command and `.scr` files remain compatible, and script
+syntax still starts with `<?scr`.
+
 ## Try Scripta Playground
 
 Try Scripta in a local browser editor with syntax highlighting, example scripts,
@@ -34,6 +39,9 @@ for the tested source, feature variants, results, and limitations.
 Native Ubuntu 22.04 x86-64/ARM64 and Windows Server 2022 x86-64 validation also
 passed; see the
 [Actions validation record](docs/release-validation.md#native-github-actions-validation).
+
+The recorded platform evidence predates the command/extension migration. The
+renamed executables and archives need fresh native validation before publication.
 
 | Target | Current validation |
 | --- | --- |
@@ -74,7 +82,7 @@ unimplemented.
 
 ## Quick start
 
-Save this as `hello.scr`. Every script, including an included file, starts with
+Save this as `hello.scripta`. Every script, including an included file, starts with
 `<?scr`; a closing tag is optional.
 
 ```scr
@@ -86,13 +94,13 @@ echo "Hello, " . $name . "!\n";
 With the interpreter installed on PATH:
 
 ```sh
-scr run hello.scr
+scripta run hello.scripta
 # Hello, Scripta!
 ```
 
-`scr hello.scr` is equivalent. Arguments after the script path are available
-through `Cli::args()` and `Cli::arg()`. A `.scr` file remains source code: run it
-through `scr`; building the interpreter does not compile each script into an app.
+`scripta hello.scripta` is equivalent. Arguments after the script path are available
+through `Cli::args()` and `Cli::arg()`. A `.scripta` file remains source code: run it
+through `scripta`; building the interpreter does not compile each script into an app.
 
 ### Try the playground apps
 
@@ -101,37 +109,37 @@ run any of these small apps:
 
 ```sh
 cargo build -p scr-cli --locked
-./target/debug/scr run playground/expenses.scr
-./target/debug/scr run playground/table.scr
-./target/debug/scr run playground/scores.scr
-./target/debug/scr run playground/arrays.scr
-./target/debug/scr run playground/strings.scr
-./target/debug/scr run playground/collections.scr
-./target/debug/scr run playground/log-analyzer.scr playground/sample-events.txt
-./target/debug/scr run playground/errors.scr
-./target/debug/scr run playground/functions.scr
-./target/debug/scr run playground/reporting.scr
-./target/debug/scr run playground/streaming.scr playground/sample-events.txt
+./target/debug/scripta run playground/expenses.scripta
+./target/debug/scripta run playground/table.scripta
+./target/debug/scripta run playground/scores.scripta
+./target/debug/scripta run playground/arrays.scripta
+./target/debug/scripta run playground/strings.scripta
+./target/debug/scripta run playground/collections.scripta
+./target/debug/scripta run playground/log-analyzer.scripta playground/sample-events.txt
+./target/debug/scripta run playground/errors.scripta
+./target/debug/scripta run playground/functions.scripta
+./target/debug/scripta run playground/reporting.scripta
+./target/debug/scripta run playground/streaming.scripta playground/sample-events.txt
 ```
 
 | Script | What to try |
 | --- | --- |
-| [expenses.scr](playground/expenses.scr) | Edit the expense map; `foreach` prints each item and calculates the total. |
-| [table.scr](playground/table.scr) | Change `$number`; a `while` loop prints its multiplication table. |
-| [scores.scr](playground/scores.scr) | Change the scores; `if` / `elseif` / `else` assigns a result to each name. |
-| [arrays.scr](playground/arrays.scr) | Build a list with `[] =` and assignment at its length, replace an item, and append to a list inside a map. |
-| [strings.scr](playground/strings.scr) | Parse, normalize, search, and format a Unicode status record with the `String` helpers. |
-| [collections.scr](playground/collections.scr) | Transform lists, merge and compare maps, aggregate values, and extract record columns. |
-| [log-analyzer.scr](playground/log-analyzer.scr) | Analyze [sample events](playground/sample-events.txt), count log levels, list sorted services, and report malformed records. |
-| [errors.scr](playground/errors.scr) | Recover from indexing, arithmetic, and operand-type failures; add `--uncaught` to demonstrate a diagnostic and exit status 1. |
-| [streaming.scr](playground/streaming.scr) | Stream log records from a file or stdin (`-`) with a line-size limit; file cleanup uses `finally`. |
-| [reporting.scr](playground/reporting.scr) | Summarize durations with Math helpers and bounded string formatting. |
-| [functions.scr](playground/functions.scr) | Try defaults, typed variadics, anonymous callbacks, captured counters, and independent collection defaults. |
+| [expenses.scripta](playground/expenses.scripta) | Edit the expense map; `foreach` prints each item and calculates the total. |
+| [table.scripta](playground/table.scripta) | Change `$number`; a `while` loop prints its multiplication table. |
+| [scores.scripta](playground/scores.scripta) | Change the scores; `if` / `elseif` / `else` assigns a result to each name. |
+| [arrays.scripta](playground/arrays.scripta) | Build a list with `[] =` and assignment at its length, replace an item, and append to a list inside a map. |
+| [strings.scripta](playground/strings.scripta) | Parse, normalize, search, and format a Unicode status record with the `String` helpers. |
+| [collections.scripta](playground/collections.scripta) | Transform lists, merge and compare maps, aggregate values, and extract record columns. |
+| [log-analyzer.scripta](playground/log-analyzer.scripta) | Analyze [sample events](playground/sample-events.txt), count log levels, list sorted services, and report malformed records. |
+| [errors.scripta](playground/errors.scripta) | Recover from indexing, arithmetic, and operand-type failures; add `--uncaught` to demonstrate a diagnostic and exit status 1. |
+| [streaming.scripta](playground/streaming.scripta) | Stream log records from a file or stdin (`-`) with a line-size limit; file cleanup uses `finally`. |
+| [reporting.scripta](playground/reporting.scripta) | Summarize durations with Math helpers and bounded string formatting. |
+| [functions.scripta](playground/functions.scripta) | Try defaults, typed variadics, anonymous callbacks, captured counters, and independent collection defaults. |
 
 After editing, check a script with
-`./target/debug/scr check playground/expenses.scr`, then run it again. There is no
-separate compilation step for `.scr` files. With an installed interpreter, use
-`scr run playground/expenses.scr` instead.
+`./target/debug/scripta check playground/expenses.scripta`, then run it again. There is no
+separate compilation step for `.scripta` files. With an installed interpreter, use
+`scripta run playground/expenses.scripta` instead.
 
 ## Run a standalone executable
 
@@ -145,18 +153,18 @@ Run these from the extracted package directory. Each package includes `examples/
 
 | System | Inspect the executable | Run a script |
 | --- | --- | --- |
-| macOS | `./scr version --verbose` | `./scr run examples/hello.scr` |
-| Linux | `./scr version --verbose` | `./scr run examples/hello.scr` |
-| Windows (PowerShell) | `.\scr.exe version --verbose` | `.\scr.exe run .\examples\hello.scr` |
+| macOS | `./scripta version --verbose` | `./scripta run examples/hello.scripta` |
+| Linux | `./scripta version --verbose` | `./scripta run examples/hello.scripta` |
+| Windows (PowerShell) | `.\scripta.exe version --verbose` | `.\scripta.exe run .\examples\hello.scripta` |
 
 You can keep the interpreter anywhere and give it an absolute script path. In
 PowerShell, invoke a quoted executable path with `&`, for example:
 
 ```powershell
-& 'C:\Tools\Scripta\scr.exe' run 'C:\Scripts\hello.scr'
+& 'C:\Tools\Scripta\scripta.exe' run 'C:\Scripts\hello.scripta'
 ```
 
-After placing the executable on PATH, `scr run hello.scr` works on all three
+After placing the executable on PATH, `scripta run hello.scripta` works on all three
 systems. An explicit `Http` call needs the requested endpoint; `Process::run`
 needs the program the script chooses to launch.
 
@@ -179,8 +187,8 @@ install Rust through rustup. These commands build natively on Apple Silicon:
 export MACOSX_DEPLOYMENT_TARGET=15.0
 cargo test --workspace --target aarch64-apple-darwin --locked
 cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked
-./target/aarch64-apple-darwin/dist/scr version --verbose
-./target/aarch64-apple-darwin/dist/scr run examples/hello.scr
+./target/aarch64-apple-darwin/dist/scripta version --verbose
+./target/aarch64-apple-darwin/dist/scripta run examples/hello.scripta
 ```
 
 macOS support is limited to Apple Silicon (M-series) Macs using
@@ -196,8 +204,8 @@ is `build-essential` (`sudo apt-get install build-essential`).
 ```sh
 cargo test --workspace --locked
 cargo build -p scr-cli --profile dist --locked
-./target/dist/scr version --verbose
-./target/dist/scr run examples/hello.scr
+./target/dist/scripta version --verbose
+./target/dist/scripta run examples/hello.scripta
 ```
 
 Cargo selects the native host architecture: x86-64 on an x86-64 host, ARM64 on an
@@ -213,8 +221,8 @@ Open PowerShell in the repository root:
 ```powershell
 cargo test --workspace --target x86_64-pc-windows-msvc --locked
 cargo build -p scr-cli --profile dist --target x86_64-pc-windows-msvc --locked
-.\target\x86_64-pc-windows-msvc\dist\scr.exe version --verbose
-.\target\x86_64-pc-windows-msvc\dist\scr.exe run .\examples\hello.scr
+.\target\x86_64-pc-windows-msvc\dist\scripta.exe version --verbose
+.\target\x86_64-pc-windows-msvc\dist\scripta.exe run .\examples\hello.scripta
 ```
 
 Use the explicit `--target` on Windows Cargo build/test/install commands. The
@@ -230,7 +238,7 @@ Cargo's bin directory. On Windows use:
 cargo install --path crates/scr-cli --target x86_64-pc-windows-msvc --locked
 ```
 
-Restart the terminal if PATH was just updated, then run `scr version --verbose`.
+Restart the terminal if PATH was just updated, then run `scripta version --verbose`.
 For a downloaded binary, follow the [per-user installation steps](docs/install.md)
 instead. The `dist` profile optimizes and strips the executable while preserving
 panic unwinding and overflow checks; see [release procedures](docs/releases.md).
@@ -242,9 +250,9 @@ instructions above **on that server**. A macOS executable cannot run on Linux.
 After the build passes, install the interpreter system-wide:
 
 ```sh
-sudo install -m 755 target/dist/scr /usr/local/bin/scr
-/usr/local/bin/scr version --verbose
-/usr/local/bin/scr run examples/server-health.scr /
+sudo install -m 755 target/dist/scripta /usr/local/bin/scripta
+/usr/local/bin/scripta version --verbose
+/usr/local/bin/scripta run examples/server-health.scripta /
 ```
 
 The last command prints server metrics as JSON. Once built, the interpreter does
@@ -264,7 +272,7 @@ crontab -e
 Add this single line to collect server health every five minutes:
 
 ```cron
-*/5 * * * * cd /opt/scripta && /usr/local/bin/scr run /opt/scripta/examples/server-health.scr / >> "$HOME/scripta-logs/health.log" 2>&1
+*/5 * * * * cd /opt/scripta && /usr/local/bin/scripta run /opt/scripta/examples/server-health.scripta / >> "$HOME/scripta-logs/health.log" 2>&1
 ```
 
 Replace `/opt/scripta` with the actual checkout path. This appends a JSON report
@@ -278,19 +286,19 @@ an SSH terminal open. See the [crontab reference](https://man7.org/linux/man-pag
 
 | Command | Purpose |
 | --- | --- |
-| `scr run script.scr` | Execute a script; `scr script.scr` is shorthand. |
-| `scr run - [arguments...]` | Read script source from stdin through EOF and execute it. |
-| `scr check script.scr` | Validate tags, complete syntax, declarations, and control flow without execution. |
-| `scr fmt script.scr` | Format indentation and spacing while preserving comments and string literals. |
-| `scr fmt --check script.scr` | Check formatting without writing; useful in CI. |
-| `scr playground` | Launch the separately installed, optional local browser playground. |
-| `scr version` | Print the interpreter version. |
-| `scr version --verbose` | Show version, build target, compiler, profile, and supplied commit metadata. |
-| `scr help` | Show usage; `scr help run`, `check`, or `fmt` shows command help. |
+| `scripta run script.scripta` | Execute a script; `scripta script.scripta` is shorthand. |
+| `scripta run - [arguments...]` | Read script source from stdin through EOF and execute it. |
+| `scripta check script.scripta` | Validate tags, complete syntax, declarations, and control flow without execution. |
+| `scripta fmt script.scripta` | Format indentation and spacing while preserving comments and string literals. |
+| `scripta fmt --check script.scripta` | Check formatting without writing; useful in CI. |
+| `scripta playground` | Launch the separately installed, optional local browser playground. |
+| `scripta version` | Print the interpreter version. |
+| `scripta version --verbose` | Show version, build target, compiler, profile, and supplied commit metadata. |
+| `scripta help` | Show usage; `scripta help run`, `check`, or `fmt` shows command help. |
 
 `check` is a syntax/declaration check, not complete static type checking. It does
 not execute or load required files. `fmt` is idempotent and keeps an optional
-closing tag. Use `scr run -- help` for a script whose path matches a command name.
+closing tag. Use `scripta run -- help` for a script whose path matches a command name.
 
 Exit codes: **0** for success, **1** for script/file failures or formatting that
 needs changes, **2** for CLI usage errors, and **130** for interruption.
@@ -315,15 +323,15 @@ in that runtime registration. See the [input contract](docs/standard-library.md#
 On macOS/Linux, try the streaming example with piped data:
 
 ```sh
-cat playground/sample-events.txt | scr run playground/streaming.scr -
-printf '%s\n' '<?scr echo "Hello from stdin!\n";' | scr run -
+cat playground/sample-events.txt | scripta run playground/streaming.scripta -
+printf '%s\n' '<?scr echo "Hello from stdin!\n";' | scripta run -
 ```
 
-`scr run -` consumes stdin as UTF-8 source through EOF, subject to
+`scripta run -` consumes stdin as UTF-8 source through EOF, subject to
 `SCR_MAX_SOURCE_BYTES`. Relative includes and package lookup start from the working
 directory; diagnostics identify the source as `<stdin>`. Stdin is then at EOF for
 script input. Use a file-backed script when stdin should carry data. A literal
-file named `-` remains accessible with `scr run -- -` or `scr run ./-`.
+file named `-` remains accessible with `scripta run -- -` or `scripta run ./-`.
 `run`, `check`, and `fmt` also accept `--help` or `-h` before the source path.
 
 ## Web-server use
@@ -344,9 +352,9 @@ shows report generation on macOS, Linux, and Windows.
 
 For a dashboard that shows periodically refreshed data, have Scripta generate
 HTML and JSON, schedule that generation with cron, and let the web server serve
-the output. Start with `report.scr` in the
+the output. Start with `report.scripta` in the
 [static-output guide](docs/web-servers.md#generate-static-html-or-json-on-any-platform).
-For example, keep the script at `/opt/scripta/app/report.scr` and generate its
+For example, keep the script at `/opt/scripta/app/report.scripta` and generate its
 `public/` output under `/srv/scripta-dashboard`:
 
 ```sh
@@ -354,11 +362,11 @@ For example, keep the script at `/opt/scripta/app/report.scr` and generate its
 sudo mkdir -p /srv/scripta-dashboard/public
 sudo chown -R "$(id -un):$(id -gn)" /srv/scripta-dashboard
 cd /srv/scripta-dashboard
-/usr/local/bin/scr run /opt/scripta/app/report.scr
+/usr/local/bin/scripta run /opt/scripta/app/report.scripta
 ```
 
 Ensure the web-server account can traverse the directory and read the generated
-files. Schedule the same `cd` and `scr run` command in cron to refresh the data.
+files. Schedule the same `cd` and `scripta run` command in cron to refresh the data.
 Use `File::writeAtomic` in the report script so concurrent readers receive a
 complete old or new version of each file. New Unix files start private; after the
 first run, grant the web server read access to the public reports (for example,
@@ -425,18 +433,18 @@ return values, native objects, limits, and errors.
 | `List`, `Map` | Slice, remove, concatenate, sort, test membership, construct maps, and safely look up keys. |
 | Global functions | Explicit conversions, `type`, `len`, and cancellable `sleep`. |
 
-Local script reuse uses `require "lib/helpers.scr"` or
-`require_once "lib/config.scr"`. Relative paths resolve against the including file;
+Local script reuse uses `require "lib/helpers.scripta"` or
+`require_once "lib/config.scripta"`. Relative paths resolve against the including file;
 includes share their caller's current scope. See the [module contract](docs/language-spec.md#local-script-loading).
 
 Shared libraries can be installed with the built-in package manager:
 
 ```sh
-scr init
-scr add helpers --path ./lib/helpers
+scripta init
+scripta add helpers --path ./lib/helpers
 # Git sources can select version tags or a specific revision:
-scr add helpers --git https://example.com/team/helpers.git --version '^1.2'
-scr install --locked
+scripta add helpers --git https://example.com/team/helpers.git --version '^1.2'
+scripta install --locked
 ```
 
 Load an installed package with an alias to keep its names isolated:
@@ -459,12 +467,12 @@ offline installs, and update behavior.
 
 ## Examples
 
-Start with [hello.scr](examples/hello.scr), [variables.scr](examples/variables.scr),
-[loops.scr](examples/loops.scr), and [functions.scr](examples/functions.scr).
+Start with [hello.scripta](examples/hello.scripta), [variables.scripta](examples/variables.scripta),
+[loops.scripta](examples/loops.scripta), and [functions.scripta](examples/functions.scripta).
 The [example guide](examples/README.md) also covers file organizing, log cleanup,
 directory backups, server health, HTTP requests, and command execution.
 File-changing automation examples preview their work and require `--apply` to
-perform changes. The older `organize.scr` example moves files immediately.
+perform changes. The older `organize.scripta` example moves files immediately.
 
 ## Limits and diagnostics
 
@@ -473,10 +481,10 @@ mask literal/comment contents and redact known credentials. Execution limits can
 be configured for trusted automation; for example, on macOS/Linux:
 
 ```sh
-SCR_MAX_STEPS=1000000 SCR_MAX_VALUE_BYTES=8388608 SCR_MAX_SCOPES=1024 scr run automation.scr
+SCR_MAX_STEPS=1000000 SCR_MAX_VALUE_BYTES=8388608 SCR_MAX_SCOPES=1024 scripta run automation.scripta
 ```
 
-In PowerShell set `$env:SCR_MAX_STEPS = '1000000'` before invoking `scr`.
+In PowerShell set `$env:SCR_MAX_STEPS = '1000000'` before invoking `scripta`.
 Source files default to an 8 MiB ceiling and value nesting is bounded at 128.
 Optional value/scope budgets are logical limits, not a hard process RSS ceiling.
 See the [performance and safety report](docs/performance.md) and

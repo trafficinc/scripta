@@ -49,7 +49,7 @@ Seven package integration tests cover Git version selection/pins, transitive
 isolation, local snapshots, offline installs, integrity checks, cycles, failed
 installation preservation, path validation, and runtime permissions/policies.
 The `examples/packages` demonstration installs with `--locked --offline`, prints
-`Hello, packages!`, and both scripts pass `scr fmt --check`. Linux/Windows
+`Hello, packages!`, and both scripts pass `scripta fmt --check`. Linux/Windows
 execution remains unverified by these local results.
 
 ### Aliased requires (separate approved scope)
@@ -84,7 +84,7 @@ valid expressions/aliases and malformed bindings. The final self-entry once-stat
 fix also passed focused tests and the no-default-features workspace suite.
 
 All-feature Clippy with warnings denied, Rust formatting, `git diff --check`, and
-the package example's `scr fmt --check` passed. The local package example installed
+the package example's `scripta fmt --check` passed. The local package example installed
 with `--locked --offline` and printed `Hello, packages!`. No standard-library
 exports were added. These are local results, not Linux/Windows validation.
 
@@ -127,7 +127,7 @@ has not been executed on Windows here.
 The CLI report example passed preview/no-write, create/replace, parsed JSON,
 formatter equivalence, and no-staging-file checks. The export reference test now
 expects 106 functions. All-feature Clippy with warnings denied, Rust formatting,
-`git diff --check`, and `scr fmt --check examples/atomic-report.scr` passed.
+`git diff --check`, and `scripta fmt --check examples/atomic-report.scripta` passed.
 These are local macOS results, not Linux/Windows validation.
 
 ### SQLite built-in extension (separate approved scope)
@@ -143,7 +143,7 @@ approve proposed Phase 7.
 The CLI's disabled-by-default `sqlite` feature includes bundled SQLite and
 registers the functions per runtime. See [SQLite](sqlite.md) for types, error
 categories, read-only mode, root policies, bounded/cancellable statements, and
-unsupported SQL features. `examples/sqlite.scr` demonstrates parameters and a
+unsupported SQL features. `examples/sqlite.scripta` demonstrates parameters and a
 transaction. Verbose version output reports extensions; the release packager
 accepts `--features sqlite`, includes matching notices, records extensions, and
 checks the enabled SQL example during smoke validation.
@@ -161,7 +161,7 @@ configurations and repeat pipeline registration.
 `cargo +1.85.0 check -p scr-ext-sqlite --locked --offline`,
 `cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings`,
 `cargo fmt --all -- --check`, `git diff --check`, and the SQLite example's
-`scr fmt --check` passed. Targeted release/extension tests passed after adding
+`scripta fmt --check` passed. Targeted release/extension tests passed after adding
 extension-list archive validation and dangling-symlink coverage. A local archive
 made from the debug SQLite-enabled binary passed verify and offline smoke;
 its declared extensions and rusqlite/libsqlite3-sys license inventories were
@@ -172,7 +172,7 @@ Linux/Windows validation result.
 
 List growth supports `$items[] = value`, assignment at exactly the list's current
 length, and appending to existing nested lists. Sparse writes remain errors.
-An [arrays playground](../playground/arrays.scr) demonstrates the behavior.
+An [arrays playground](../playground/arrays.scripta) demonstrates the behavior.
 Workspace tests, Clippy, and formatting checks passed for this implementation.
 This work is the baseline for the phases below.
 
@@ -256,9 +256,9 @@ programs and verifies its output.
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed. |
 | `cargo fmt --all -- --check` | Passed. |
 | `git diff --check` | Passed. |
-| `cargo run -p scr-cli --locked -- run playground/strings.scr` | Passed; normalized a Unicode status record and printed successful search checks. |
+| `cargo run -p scr-cli --locked -- run playground/strings.scripta` | Passed; normalized a Unicode status record and printed successful search checks. |
 
-Review the [strings playground](../playground/strings.scr) with the command above.
+Review the [strings playground](../playground/strings.scripta) with the command above.
 Matching is literal and case-sensitive, substring positions count Unicode scalars
 rather than grapheme clusters, and configured byte limits are logical per-value
 limits. Regex, normalization, and string indexing are outside this phase.
@@ -338,11 +338,11 @@ and the log analyzer's usage exit code.
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed. |
 | `cargo fmt --all -- --check` | Passed. |
 | `git diff --check` | Passed. |
-| `./target/debug/scr run playground/collections.scr` | Passed; filtered, sorted, sliced, combined, and summarized sample records. |
-| `./target/debug/scr run playground/log-analyzer.scr playground/sample-events.txt` | Passed; reported three info, one warn, one error, three unique services, and one malformed record. |
+| `./target/debug/scripta run playground/collections.scripta` | Passed; filtered, sorted, sliced, combined, and summarized sample records. |
+| `./target/debug/scripta run playground/log-analyzer.scripta playground/sample-events.txt` | Passed; reported three info, one warn, one error, three unique services, and one malformed record. |
 
-Review the [collections playground](../playground/collections.scr) and
-[log analyzer](../playground/log-analyzer.scr). Rebuild the interpreter with
+Review the [collections playground](../playground/collections.scripta) and
+[log analyzer](../playground/log-analyzer.scripta). Rebuild the interpreter with
 `cargo build -p scr-cli --locked` before using the commands above on another
 checkout. Collection helpers return new values; sorting accepts homogeneous
 numeric or string lists. Byte budgets are logical per-value limits and do not
@@ -438,10 +438,10 @@ and CLI recovery versus uncaught-error diagnostics and status.
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed. |
 | `cargo fmt --all -- --check` | Passed. |
 | `git diff --check` | Passed. |
-| `./target/debug/scr run playground/errors.scr` | Passed; recovered from missing-key, arithmetic, and operand-type errors, preserving the failed compound assignment's destination. |
-| `./target/debug/scr run playground/errors.scr --uncaught` | Expected exit status 1 with E0401, IndexError, source location, and a main stack frame. |
+| `./target/debug/scripta run playground/errors.scripta` | Passed; recovered from missing-key, arithmetic, and operand-type errors, preserving the failed compound assignment's destination. |
+| `./target/debug/scripta run playground/errors.scripta --uncaught` | Expected exit status 1 with E0401, IndexError, source location, and a main stack frame. |
 
-Review [the errors playground](../playground/errors.scr) and the
+Review [the errors playground](../playground/errors.scripta) and the
 [exception contract](language-spec.md#statement-grammar). Previously fatal
 operator/index failures are now catchable, and their uncaught diagnostic
 messages gain an exception-name prefix. Core execution limits, cancellation,
@@ -534,9 +534,9 @@ checks the functions playground before and after formatting.
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed. |
 | `cargo fmt --all -- --check` | Passed. |
 | `git diff --check` | Passed. |
-| `cargo run -p scr-cli --locked -- run playground/functions.scr` | Passed; printed greetings, total 16, callback result 14, counter values 6 and 8, and two independent defaults. |
+| `cargo run -p scr-cli --locked -- run playground/functions.scripta` | Passed; printed greetings, total 16, callback result 14, counter values 6 and 8, and two independent defaults. |
 
-Review [the functions playground](../playground/functions.scr) and
+Review [the functions playground](../playground/functions.scripta) and
 [the language contract](language-spec.md#function-parameters-and-captures).
 Defaults are evaluated only when omitted; explicit null remains an argument.
 Variadic annotations check elements. Captures share enclosing function locals
@@ -623,9 +623,9 @@ and execution from an unrelated directory.
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed. |
 | `cargo fmt --all -- --check` | Passed. |
 | `git diff --check` | Passed. |
-| `cargo run -p scr-cli --locked -- run playground/reporting.scr` | Passed; reported four jobs, 8.6–19.5 ms duration, rounded average 13 ms, bounds 12–13 ms, and escaped literal braces. |
+| `cargo run -p scr-cli --locked -- run playground/reporting.scripta` | Passed; reported four jobs, 8.6–19.5 ms duration, rounded average 13 ms, bounds 12–13 ms, and escaped literal braces. |
 
-Review [the reporting playground](../playground/reporting.scr),
+Review [the reporting playground](../playground/reporting.scripta),
 [Math helpers](standard-library.md#math), and
 [formatting contract](standard-library.md#strings). Formatting uses scalar display
 without decimal precision, width, or indexed placeholders. Budgets are logical
@@ -744,9 +744,9 @@ invalid-encoding, and oversized-line inputs, and checks its usage exit status.
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Passed. |
 | `cargo fmt --all -- --check` | Passed. |
 | `git diff --check` | Passed. |
-| `cargo run -p scr-cli --locked -- run playground/streaming.scr playground/sample-events.txt` | Passed; reported five records (three info, one warn, one error), one malformed record, and a closed stream. |
+| `cargo run -p scr-cli --locked -- run playground/streaming.scripta playground/sample-events.txt` | Passed; reported five records (three info, one warn, one error), one malformed record, and a closed stream. |
 
-Review [the streaming playground](../playground/streaming.scr),
+Review [the streaming playground](../playground/streaming.scripta),
 [cleanup semantics](language-spec.md#exceptions-and-control-flow), and
 [stream contract](standard-library.md#bounded-file-streams). Cleanup receives no
 extra execution budget, and fatal failures/cancellation can bypass it. Native
@@ -770,16 +770,16 @@ still requires an explicit scope approval.
 
 | Workflow | Observed result |
 | --- | --- |
-| `scr help` | Exit 0 with global usage. |
-| `scr run --help`, `scr check --help`, `scr fmt --help` | Exit 2 with a filename/usage error instead of command-specific help. |
-| `scr help run` | Exit 2, unexpected extra arguments. |
-| `scr check playground/streaming.scr` | Exit 0 without executing the script. |
+| `scripta help` | Exit 0 with global usage. |
+| `scripta run --help`, `scripta check --help`, `scripta fmt --help` | Exit 2 with a filename/usage error instead of command-specific help. |
+| `scripta help run` | Exit 2, unexpected extra arguments. |
+| `scripta check playground/streaming.scripta` | Exit 0 without executing the script. |
 | Reporting and streaming sample runs | Expected summaries; the streaming example reports five valid records, one malformed record, and a closed stream. |
 | Piped data with `Cli::prompt("")` | Works, preserving Unicode and empty lines while stripping LF/CRLF; a 65537-byte payload raises `InputLimitError` at the prompt's fixed 64 KiB raw line limit. |
 | Piped data into the streaming playground without a filename | Exit 2 with the example's usage message; it currently requires a file argument. |
-| `scr run -` | Exit 2; source from stdin is not implemented. This is separate from a file-backed script consuming piped data. |
-| `SCR_MAX_STEPS=20 scr run playground/streaming.scr playground/sample-events.txt` | Exit 1 with the instruction-limit diagnostic and source/stack details. |
-| `scr fmt --check` on the new reporting/streaming playgrounds | Initially failed; both examples were formatted and now pass. Their execution tests still pass. |
+| `scripta run -` | Exit 2; source from stdin is not implemented. This is separate from a file-backed script consuming piped data. |
+| `SCR_MAX_STEPS=20 scripta run playground/streaming.scripta playground/sample-events.txt` | Exit 1 with the instruction-limit diagnostic and source/stack details. |
+| `scripta fmt --check` on the new reporting/streaming playgrounds | Initially failed; both examples were formatted and now pass. Their execution tests still pass. |
 
 The file-processing APIs cover the approved examples. The next practical
 improvements are help discovery and a dedicated bounded input API for shell
@@ -789,7 +789,7 @@ to a prompt capability, fixed prompt line limit, and output flushing.
 
 **Validation:** `cargo test -p scr-cli --locked --test release_examples playground`
 passes all six matching playground tests. Both new playgrounds pass
-`scr fmt --check`. `cargo fmt --all -- --check` and `git diff --check` pass.
+`scripta fmt --check`. `cargo fmt --all -- --check` and `git diff --check` pass.
 The CLI probes used temporary scripts/input and did not change public APIs.
 
 ## Phase 7 CLI pipelines and help
@@ -802,7 +802,7 @@ command-local help. This authorizes Phase 7 plus source-from-stdin execution.
 
 **Implemented API and behavior**
 
-- `scr help run|check|fmt` and command-local `--help`/`-h` print relevant help to
+- `scripta help run|check|fmt` and command-local `--help`/`-h` print relevant help to
   stdout with exit 0. Escaped paths and arguments after the source path stay literal.
 - `Cli::readLine(maxLineBytes: int optional): string or null` reads buffered UTF-8
   stdin without a prompt or output flush. It defaults to 1 MiB raw lines, including
@@ -813,10 +813,10 @@ command-local help. This authorizes Phase 7 plus source-from-stdin execution.
   logical result budgets and cancellation checks apply during bounded assembly.
 - The streaming playground accepts `-` for piped data and retains file mode,
   usage errors, and explicit file cleanup.
-- `scr run - [arguments...]` reads source through EOF with UTF-8 and source-budget
+- `scripta run - [arguments...]` reads source through EOF with UTF-8 and source-budget
   validation. Tags remain required. Includes and packages resolve from the working
   directory, diagnostics use `<stdin>`, and subsequent script input observes EOF.
-  `scr run -- -` continues to address a literal filename.
+  `scripta run -- -` continues to address a literal filename.
 
 See the [input contract](standard-library.md#script-arguments-and-prompts) and
 [README pipeline examples](../README.md#shell-pipelines). The default library now
@@ -834,7 +834,7 @@ paths, and streaming file/pipe parity.
 
 `cargo clippy --workspace --all-targets --all-features --locked --offline -- -D
 warnings`, `cargo fmt --all -- --check`, `git diff --check`, and the streaming
-playground's `scr fmt --check` passed. Direct CLI help and stdin-source smoke
+playground's `scripta fmt --check` passed. Direct CLI help and stdin-source smoke
 checks passed. These are local results, not Linux/Windows validation.
 
 Callback transforms, precision formatting, writable streams, and new language

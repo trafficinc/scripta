@@ -5,7 +5,7 @@ all-platform release.
 
 ## Source and version
 
-- [x] Standalone scr binary target; workspace version 0.1.0.
+- [x] Standalone scripta binary target; workspace version 0.1.0.
 - [x] Rust compiler pinned, Cargo.lock retained, unwind/overflow-safe profiles.
 - [x] Required examples and standard-library reference included in package inputs.
 - [x] Inspect release-tool diff, unchanged dependency inputs, packaged notice

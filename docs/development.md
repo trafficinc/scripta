@@ -7,10 +7,15 @@ edition 2024 and a minimum Rust version of 1.85. From the workspace root:
 cargo fmt --all
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-cargo run -p scr-cli -- run examples/variables.scr
-cargo run -p scr-cli -- check examples/hello.scr
-cargo run -p scr-cli -- fmt --check examples/hello.scr
+cargo run -p scr-cli -- run examples/variables.scripta
+cargo run -p scr-cli -- check examples/hello.scripta
+cargo run -p scr-cli -- fmt --check examples/hello.scripta
 ```
+
+The primary command is `scripta`; Cargo also builds `scr` for compatibility.
+Use `.scripta` for source files (`.scta` shorthand and legacy `.scr` also work).
+The opening tag stays `<?scr`. The benchmark driver accepts `--scripta` and
+legacy `--scr`; the separate playground launcher retains its `--scr` protocol.
 
 Run format, lint, and test checks on each platform being validated. CLI exit codes
 are 0 for success, 1 for I/O or language errors,
@@ -23,9 +28,9 @@ context. It does not resolve variables, enforce type annotations, or execute
 native functions. The runtime executes the implemented statement grammar;
 `check` validates it without running loops, functions, output, throws, or exits.
 `run`, `check`, and `fmt` accept command-local `--help`/`-h`, and
-`scr help run|check|fmt` prints the same command help with exit 0.
-Both `run` and `check` accept `--` before a path. `scr run -` consumes bounded
-UTF-8 script source from stdin through EOF; `scr run -- -` addresses a literal
+`scripta help run|check|fmt` prints the same command help with exit 0.
+Both `run` and `check` accept `--` before a path. `scripta run -` consumes bounded
+UTF-8 script source from stdin through EOF; `scripta run -- -` addresses a literal
 file named `-`. Stdin source uses `<stdin>` in diagnostics and the working
 directory for relative includes/packages. Subsequent script input is at EOF. No file-extension restriction
 is imposed. Non-Unicode paths retain the operating system's native encoding.
@@ -96,7 +101,7 @@ from merely creating or queuing a workflow.
 
 ## Formatter and diagnostic tooling
 
-`scr fmt [--check] <file>` and `scr fmt <file> --check` share the public
+`scripta fmt [--check] <file>` and `scripta fmt <file> --check` share the public
 `scr_cli::formatter::format(source)` implementation. Formatting uses four spaces
 per indentation level, puts each statement on its own line, normalizes operator/
 comma spacing, and indents unbraced bodies without adding braces. Original token
@@ -171,7 +176,7 @@ directory identity rather than spelling.
 See [the Phase 13 report](performance.md) for actual release benchmarks, per-child
 RSS, binary size, safety verification, and execution budget contracts. Run
 `cargo bench -p scr-cli --bench interpreter --locked` for phase timings, and
-`python3 benchmarks/run.py --scr target/release/scr --output benchmarks/results/local.json`
+`python3 benchmarks/run.py --scripta target/release/scripta --output benchmarks/results/local.json`
 for checked Scripta/Bash/Python CLI fixtures. Workspace Rust forbids unsafe code
 through inherited Cargo lints. Source excerpts now mask literal/comment contents;
 error codes and original Unicode column positions are preserved.

@@ -35,9 +35,9 @@ impl Drop for Temp {
 #[test]
 fn both_invocation_forms_expose_only_script_arguments() {
     let temp = Temp::new();
-    let file = temp.script("arguments.scr", r#"<?scr foreach (Cli::args() as $argument) { echo $argument . "|"; } echo str(Cli::has("flag")) . ":" . Cli::option("name");"#);
+    let file = temp.script("arguments.scripta", r#"<?scr foreach (Cli::args() as $argument) { echo $argument . "|"; } echo str(Cli::has("flag")) . ":" . Cli::option("name");"#);
     for named in [false, true] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_scr"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_scripta"));
         if named {
             command.arg("run");
         }
@@ -62,13 +62,13 @@ fn both_invocation_forms_expose_only_script_arguments() {
 fn process_default_arguments_and_inherited_streams_work_through_cli() {
     let temp = Temp::new();
     let child = temp.script(
-        "child.scr",
+        "child.scripta",
         "<?scr echo \"child-out\"; throw \"child-error\";",
     );
-    let parent = temp.script("parent.scr", r#"<?scr $program = Cli::arg(0); $child = Cli::arg(1); $default = Process::run($program); echo str($default->exitCode) . "|"; $result = Process::run($program, [$child], ["stdout" => "inherit", "stderr" => "inherit"]); echo "|" . str($result->exitCode) . ":" . $result->stdout . $result->stderr;"#);
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let parent = temp.script("parent.scripta", r#"<?scr $program = Cli::arg(0); $child = Cli::arg(1); $default = Process::run($program); echo str($default->exitCode) . "|"; $result = Process::run($program, [$child], ["stdout" => "inherit", "stderr" => "inherit"]); echo "|" . str($result->exitCode) . ":" . $result->stdout . $result->stderr;"#);
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(parent)
-        .arg(env!("CARGO_BIN_EXE_scr"))
+        .arg(env!("CARGO_BIN_EXE_scripta"))
         .arg(child)
         .output()
         .unwrap();
@@ -87,9 +87,9 @@ fn process_default_arguments_and_inherited_streams_work_through_cli() {
 #[test]
 fn prompt_reads_stdin_and_environment_changes_reach_children_only() {
     let temp = Temp::new();
-    let file = temp.script("prompt.scr", r#"<?scr $answer = Cli::prompt("Name: "); echo "Hello " . $answer; Env::set("SCR_LOCAL_ENV", "local"); echo ":" . Env::get("SCR_LOCAL_ENV");"#);
+    let file = temp.script("prompt.scripta", r#"<?scr $answer = Cli::prompt("Name: "); echo "Hello " . $answer; Env::set("SCR_LOCAL_ENV", "local"); echo ":" . Env::get("SCR_LOCAL_ENV");"#);
     let before = std::env::var_os("SCR_LOCAL_ENV");
-    let mut child = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(file)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -114,15 +114,15 @@ fn prompt_reads_stdin_and_environment_changes_reach_children_only() {
 fn child_environment_uses_runtime_changes_and_command_arguments_are_literal() {
     let temp = Temp::new();
     let child = temp.script(
-        "child.scr",
+        "child.scripta",
         r#"<?scr echo Env::get("SCR_RUNTIME_ENV") . ":" . Cli::arg(0);"#,
     );
-    let parent = temp.script("parent.scr", r#"<?scr Env::set("SCR_RUNTIME_ENV", "inherited"); $result = Process::run(Cli::arg(0), [Cli::arg(1), "literal ; & $(no-shell)"]); echo $result->stdout;"#);
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let parent = temp.script("parent.scripta", r#"<?scr Env::set("SCR_RUNTIME_ENV", "inherited"); $result = Process::run(Cli::arg(0), [Cli::arg(1), "literal ; & $(no-shell)"]); echo $result->stdout;"#);
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .args([
             "run",
             parent.to_str().unwrap(),
-            env!("CARGO_BIN_EXE_scr"),
+            env!("CARGO_BIN_EXE_scripta"),
             child.to_str().unwrap(),
         ])
         .output()
@@ -139,12 +139,12 @@ fn child_environment_uses_runtime_changes_and_command_arguments_are_literal() {
 #[test]
 fn cli_cancellation_exits_130_and_cleans_up_spawned_child() {
     let temp = Temp::new();
-    let child = temp.script("sleep.scr", "<?scr sleep(10000);");
-    let parent = temp.script("parent.scr", r#"<?scr $child = Process::spawn(Cli::arg(0), [Cli::arg(1)]); File::write(Cli::arg(2), str($child->pid)); while (true) { sleep(10); }"#);
+    let child = temp.script("sleep.scripta", "<?scr sleep(10000);");
+    let parent = temp.script("parent.scripta", r#"<?scr $child = Process::spawn(Cli::arg(0), [Cli::arg(1)]); File::write(Cli::arg(2), str($child->pid)); while (true) { sleep(10); }"#);
     let pid_file = temp.0.join("pid");
-    let mut process = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let mut process = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(parent)
-        .arg(env!("CARGO_BIN_EXE_scr"))
+        .arg(env!("CARGO_BIN_EXE_scripta"))
         .arg(child)
         .arg(&pid_file)
         .stdout(Stdio::piped())
@@ -209,11 +209,11 @@ fn phase11_reuses_modules_from_an_unrelated_working_directory() {
     let temp = Temp::new();
     fs::create_dir(temp.0.join("lib")).unwrap();
     temp.script(
-        "lib/helpers.scr",
+        "lib/helpers.scripta",
         r#"<?scr function status($body) { $data = Json::decode($body); return $data["status"]; }"#,
     );
-    let main = temp.script("reuse.scr", r#"<?scr require_once "lib/helpers.scr"; require_once "lib/../lib/helpers.scr"; echo status(Json::encode(["status" => "ready"]));"#);
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let main = temp.script("reuse.scripta", r#"<?scr require_once "lib/helpers.scripta"; require_once "lib/../lib/helpers.scripta"; echo status(Json::encode(["status" => "ready"]));"#);
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .current_dir(std::env::temp_dir())
         .arg(main)
         .output()
@@ -230,17 +230,20 @@ fn phase11_reuses_modules_from_an_unrelated_working_directory() {
 fn phase11_cli_errors_render_definition_and_call_files() {
     let temp = Temp::new();
     temp.script(
-        "helper.scr",
+        "helper.scripta",
         "<?scr\nfunction explode() {\n    Json::decode(\"invalid\");\n}\n",
     );
-    let main = temp.script("main.scr", "<?scr\nrequire \"helper.scr\";\nexplode();\n");
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let main = temp.script(
+        "main.scripta",
+        "<?scr\nrequire \"helper.scripta\";\nexplode();\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(main)
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("helper.scr:3:"), "{stderr}");
-    assert!(stderr.contains("main.scr:3:"), "{stderr}");
+    assert!(stderr.contains("helper.scripta:3:"), "{stderr}");
+    assert!(stderr.contains("main.scripta:3:"), "{stderr}");
     assert!(stderr.contains("JsonError"));
 }

@@ -25,21 +25,21 @@ fn bounded_file_reads_release_the_file_on_failure() {
 fn required_files_obey_the_configured_source_ceiling() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::write(
-        directory.path().join("large.scr"),
+        directory.path().join("large.scripta"),
         "<?scr echo 'a fairly large included script';",
     )
     .unwrap();
     let mut runtime = Runtime::with_options(RuntimeOptions {
         max_source_bytes: 32,
         context: ContextOptions {
-            script_path: Some(directory.path().join("main.scr")),
+            script_path: Some(directory.path().join("main.scripta")),
             ..Default::default()
         },
         ..Default::default()
     });
     scr_stdlib::register(&mut runtime).unwrap();
     let error = runtime
-        .execute_source("<?scr require 'large.scr';", &mut Vec::new())
+        .execute_source("<?scr require 'large.scripta';", &mut Vec::new())
         .unwrap_err();
     assert!(error.message.contains("source byte limit"));
 }

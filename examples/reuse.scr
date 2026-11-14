@@ -1,4 +1,0 @@
-<?scr
-require_once "lib/helpers.scr";
-require_once "lib/../lib/helpers.scr";
-echo statusLabel(Json::encode(["status" => "ready"])) . "\n";

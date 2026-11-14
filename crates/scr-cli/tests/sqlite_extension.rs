@@ -2,7 +2,7 @@ use std::process::Command;
 
 #[test]
 fn sqlite_feature_controls_cli_registration() {
-    let version = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let version = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .args(["version", "--verbose"])
         .output()
         .unwrap();
@@ -22,7 +22,7 @@ fn sqlite_feature_controls_cli_registration() {
         "<?scr $db = Sqlite::open(':memory:'); echo 'enabled'; Sqlite::close($db);",
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(script.path())
         .output()
         .unwrap();
@@ -44,10 +44,10 @@ fn sqlite_feature_controls_cli_registration() {
 #[test]
 #[cfg(feature = "sqlite")]
 fn sqlite_example_and_repeated_pipeline_runs() {
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../examples/sqlite.scr"
+            "/../../examples/sqlite.scripta"
         ))
         .output()
         .unwrap();

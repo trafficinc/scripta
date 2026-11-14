@@ -1,15 +1,21 @@
 # Scripta language specification
 
 Scripta is a PHP-inspired systems scripting language, not a PHP implementation.
-Its executable is `scr`, its source extension is `.scr`, and its implementation
+Its executable is `scripta`, its source extension is `.scripta`, and its implementation
 uses stable Rust, edition 2024. Linux is the primary target, followed by macOS
 and Windows.
+
+The official source extension is `.scripta`; `.scta` is an accepted shorthand.
+The `scr` command and `.scr` files remain compatible. Execution, syntax checking,
+formatting, and local includes accept explicit filenames without restricting
+extensions or guessing missing suffixes. Both command names use the same parser
+and runtime, and the required opening tag remains `<?scr`.
 
 ## Final language decisions
 
 | Feature | Decision |
 | --- | --- |
-| Language / executable / extension | Scripta / `scr` / `.scr` |
+| Language / executable / extension | Scripta / `scripta` / `.scripta` |
 | Opening tag | Required `<?scr` |
 | Closing tag | Optional `?>` |
 | Execution | Synchronous, sequential, top to bottom |
@@ -35,7 +41,7 @@ describes the implemented grammar and runtime semantics.
 ## Implemented subset
 
 Source is UTF-8. An optional BOM may appear at byte zero, followed by an optional
-first-line Unix shebang (`#!/usr/bin/env scr`). Whitespace may precede the required
+first-line Unix shebang (`#!/usr/bin/env scripta`). Whitespace may precede the required
 `<?scr` tag; executable content and comments may not precede it. An empty script
 containing only the opening tag is valid. The tag may be immediately followed by
 whitespace, comments, or punctuation, but not an identifier continuation
@@ -115,9 +121,9 @@ Only `===` and `!==` are allowed equality operators in Scripta. Legacy `==` and
 The expression parser implements both strict equality operators and rejects
 legacy equality with a diagnostic pointing to the offending operator.
 
-`scr check` validates both lexical structure and statement syntax, including the
+`scripta check` validates both lexical structure and statement syntax, including the
 equality policy. It reports parser diagnostics without executing the program.
-`scr run` parses the complete program before attempting execution.
+`scripta run` parses the complete program before attempting execution.
 
 ## Expression grammar and AST
 
@@ -199,7 +205,7 @@ $name = $file->name;
 These examples are accepted by the parser. Expressions execute as specified
 below. The standard library registers `Process::run` for literal argv execution,
 filesystem operations through `File`, `Dir`, and `Path`, and environment/CLI APIs. Properties
-require a native object, such as the entries returned by `Dir::files`. `scr check` validates
+require a native object, such as the entries returned by `Dir::files`. `scripta check` validates
 syntax without resolving functions or variables or running the program.
 
 ## Statement grammar
@@ -333,7 +339,7 @@ echo str($double(7)) . "\n"; // 14
 Named arguments, arrow syntax, and call-site unpacking (`f(...$items)`) remain
 unsupported. `...` is recognized for parameter declarations only. No classes or
 object declarations are introduced. See the
-[functions playground](../playground/functions.scr) for callbacks, counters,
+[functions playground](../playground/functions.scripta) for callbacks, counters,
 and independent mutable defaults.
 
 ### Exceptions and control flow
@@ -578,7 +584,7 @@ global stdout or terminates the process. Normal completion and `exit;`/`exit();`
 return code 0; an exit expression must be an int from 0 through 255. Exit unwinds
 all nested calls and loops immediately. The CLI returns the script code; file,
 syntax, and runtime failures return 1, and command-line usage errors return 2.
-`scr check` never executes script exits or output.
+`scripta check` never executes script exits or output.
 
 Runtime failures retain the failing source span and a structured stack trace.
 The CLI prints the diagnostic and call-site frames to stderr, innermost first.
@@ -625,8 +631,8 @@ List growth through `[] =` and assignment at the current length is implemented.
 
 ```scr
 <?scr
-require "lib/helpers.scr";
-require_once "lib/config.scr";
+require "lib/helpers.scripta";
+require_once "lib/config.scripta";
 ```
 
 `require expression;` and `require_once expression;` are statements. Both accept
@@ -711,7 +717,7 @@ semantics. Resolution never fetches remote code during execution; see
 
 ## Developer checks and formatting
 
-`scr check file.scr` parses supported syntax, checks declaration structure and
+`scripta check file.scripta` parses supported syntax, checks declaration structure and
 invalid control flow, and reports duplicate direct functions/parameters without
 executing code. It is not complete static type checking; unknown variables,
 function targets, custom annotations, and required-file dependencies may remain
@@ -722,8 +728,8 @@ coalescing, and other unsupported operators produce explicit diagnostics. Use
 `===`/`!==` and `&&`/`||` for supported comparisons and boolean operations.
 The PHP word operators are reserved and cannot be used as bare identifiers.
 
-`scr fmt file.scr` preserves lexical tokens, comments and string spelling while
-normalizing layout. `scr fmt --check file.scr` returns 1 when formatting would
+`scripta fmt file.scripta` preserves lexical tokens, comments and string spelling while
+normalizing layout. `scripta fmt --check file.scripta` returns 1 when formatting would
 change the file and never writes it. See [developer tooling](development.md#formatter-and-diagnostic-tooling)
 for diagnostic codes, exact formatter policy, exit codes, and parser resource limits.
 
@@ -736,10 +742,10 @@ configuration and current limitations.
 
 ## CLI source and pipeline input
 
-`scr run - [arguments...]` reads UTF-8 source from stdin through EOF under the
+`scripta run - [arguments...]` reads UTF-8 source from stdin through EOF under the
 same source-byte limit as disk files. Tags and language semantics are unchanged.
 Diagnostics use `<stdin>`, and relative includes/packages resolve from the working
-directory. Script input then observes EOF. `scr run -- -` selects a literal file.
+directory. Script input then observes EOF. `scripta run -- -` selects a literal file.
 File-backed scripts can consume piped records with bounded `Cli::readLine`,
 which returns a string or null at EOF. See the [input API](standard-library.md#script-arguments-and-prompts)
 for byte limits, permissions, cancellation, and failure recovery.

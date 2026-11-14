@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+default-run = "scripta"
 
 [dependencies]
 scr-ext-sqlite = { path = "../scr-ext-sqlite", optional = true }
@@ -25,8 +26,12 @@ default = []
 sqlite = ["dep:scr-ext-sqlite"]
 
 [[bin]]
-name = "scr"
+name = "scripta"
 path = "src/main.rs"
+
+[[bin]]
+name = "scr"
+path = "src/bin/scr.rs"
 
 [dev-dependencies]
 proptest = { version = "1.6", default-features = false, features = ["std"] }

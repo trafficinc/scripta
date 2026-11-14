@@ -1,17 +1,13 @@
 <?scr
-
 $items = [];
 $items[] = "apple";
 $items[] = "banana";
 $items[len($items)] = "orange";
 $items[1] = "pear";
-
 echo Json::encode($items) . "\n";
 echo "Count: " . str(len($items)) . "\n";
-
 $groups = ["fruit" => []];
 foreach ($items as $item) {
     $groups["fruit"][] = $item;
 }
-
 echo Json::encode($groups) . "\n";

@@ -1,4 +1,4 @@
-#!/usr/bin/env scr
+#!/usr/bin/env scripta
 <?scr
 // Syntax coverage; validation parses this without executing it.
 function sample($path: string): bool {

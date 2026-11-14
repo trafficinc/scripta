@@ -1,5 +1,5 @@
 <?scr
-// Build with: cargo run -p scr-cli --features sqlite -- examples/sqlite.scr
+// Build with: cargo run -p scr-cli --features sqlite -- examples/sqlite.scripta
 $db = Sqlite::open(":memory:");
 try {
     Sqlite::execute($db, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");

@@ -2,7 +2,7 @@
 // Network access happens only when an explicit URL is provided.
 $url = Cli::arg(0);
 if ($url === null) {
-    echo "Usage: scr http-client.scr URL\n";
+    echo "Usage: scripta http-client.scripta URL\n";
     exit(2);
 }
 $response = Http::get($url, ["timeoutMs" => 10000, "maxBodyBytes" => 1048576, "maxRedirects" => 3]);

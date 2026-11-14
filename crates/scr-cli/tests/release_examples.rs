@@ -12,7 +12,7 @@ fn example(name: &str) -> PathBuf {
         .join(name)
 }
 fn run(name: &str, args: &[&std::ffi::OsStr]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_scr"))
+    Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(example(name))
         .args(args)
         .output()
@@ -29,45 +29,45 @@ fn success(output: Output) -> String {
 #[test]
 fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
     let names = [
-        "hello.scr",
-        "variables.scr",
-        "loops.scr",
-        "functions.scr",
-        "file-organizer.scr",
-        "log-cleaner.scr",
-        "directory-backup.scr",
-        "server-health.scr",
-        "http-client.scr",
-        "command-runner.scr",
-        "atomic-report.scr",
-        "data-handling.scr",
-        "url-encoding.scr",
-        "csv-reader.scr",
-        "download.scr",
+        "hello.scripta",
+        "variables.scripta",
+        "loops.scripta",
+        "functions.scripta",
+        "file-organizer.scripta",
+        "log-cleaner.scripta",
+        "directory-backup.scripta",
+        "server-health.scripta",
+        "http-client.scripta",
+        "command-runner.scripta",
+        "atomic-report.scripta",
+        "data-handling.scripta",
+        "url-encoding.scripta",
+        "csv-reader.scripta",
+        "download.scripta",
     ];
     for name in names {
         scr_cli::pipeline::check(&fs::read_to_string(example(name)).unwrap()).unwrap();
     }
     let dir = tempfile::tempdir().unwrap();
     for (name, expected) in [
-        ("hello.scr", "Hello, Scripta!\n"),
-        ("loops.scr", "1\n2\n3\n"),
-        ("functions.scr", "Hello, Scripta!\n6\n"),
+        ("hello.scripta", "Hello, Scripta!\n"),
+        ("loops.scripta", "1\n2\n3\n"),
+        ("functions.scripta", "Hello, Scripta!\n6\n"),
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
             .arg(example(name))
             .env("PATH", dir.path())
             .output()
             .unwrap();
         assert_eq!(success(output), expected);
     }
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .args(["version", "--verbose"])
         .output()
         .unwrap();
     let text = success(output);
     assert!(
-        text.starts_with(&format!("scr {}\n", env!("CARGO_PKG_VERSION")))
+        text.starts_with(&format!("scripta {}\n", env!("CARGO_PKG_VERSION")))
             && text.contains("target: ")
             && text.contains("compiler: rustc ")
     );
@@ -80,13 +80,13 @@ fn organizer_and_cleaner_preview_before_changes() {
     fs::create_dir(&source).unwrap();
     fs::write(source.join("note.txt"), "contents").unwrap();
     success(run(
-        "file-organizer.scr",
+        "file-organizer.scripta",
         &[source.as_os_str(), destination.as_os_str()],
     ));
     assert!(source.join("note.txt").exists());
     assert!(!destination.exists());
     success(run(
-        "file-organizer.scr",
+        "file-organizer.scripta",
         &[
             source.as_os_str(),
             destination.as_os_str(),
@@ -103,10 +103,10 @@ fn organizer_and_cleaner_preview_before_changes() {
     file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000))
         .unwrap();
     drop(file);
-    success(run("log-cleaner.scr", &[source.as_os_str()]));
+    success(run("log-cleaner.scripta", &[source.as_os_str()]));
     assert!(old.exists());
     success(run(
-        "log-cleaner.scr",
+        "log-cleaner.scripta",
         &[source.as_os_str(), "--apply".as_ref()],
     ));
     assert!(!old.exists());
@@ -119,12 +119,12 @@ fn backup_copies_nested_binary_data_without_overwriting_or_recursing_into_destin
     fs::create_dir_all(source.join("nested")).unwrap();
     fs::write(source.join("nested/data.bin"), [0, 255, 7]).unwrap();
     success(run(
-        "directory-backup.scr",
+        "directory-backup.scripta",
         &[source.as_os_str(), destination.as_os_str()],
     ));
     assert!(!destination.exists());
     success(run(
-        "directory-backup.scr",
+        "directory-backup.scripta",
         &[
             source.as_os_str(),
             destination.as_os_str(),
@@ -137,7 +137,7 @@ fn backup_copies_nested_binary_data_without_overwriting_or_recursing_into_destin
     );
     assert_eq!(
         run(
-            "directory-backup.scr",
+            "directory-backup.scripta",
             &[
                 source.as_os_str(),
                 destination.as_os_str(),
@@ -150,7 +150,7 @@ fn backup_copies_nested_binary_data_without_overwriting_or_recursing_into_destin
     );
     assert_eq!(
         run(
-            "directory-backup.scr",
+            "directory-backup.scripta",
             &[
                 source.as_os_str(),
                 source.join("inside").as_os_str(),
@@ -166,7 +166,7 @@ fn backup_copies_nested_binary_data_without_overwriting_or_recursing_into_destin
 #[test]
 fn command_runner_preserves_literal_arguments_and_http_example_uses_loopback() {
     let dir = tempfile::tempdir().unwrap();
-    let child = dir.path().join("child.scr");
+    let child = dir.path().join("child.scripta");
     fs::write(&child, "<?scr echo Cli::arg(0);").unwrap();
     // Build JSON without introducing a JSON dependency just for the fixture path.
     let escaped = child
@@ -177,8 +177,8 @@ fn command_runner_preserves_literal_arguments_and_http_example_uses_loopback() {
     let args = format!("[\"{escaped}\",\"literal ; $(never-run)\"]");
     assert_eq!(
         success(run(
-            "command-runner.scr",
-            &[env!("CARGO_BIN_EXE_scr").as_ref(), args.as_ref()]
+            "command-runner.scripta",
+            &[env!("CARGO_BIN_EXE_scripta").as_ref(), args.as_ref()]
         )),
         "literal ; $(never-run)"
     );
@@ -208,7 +208,7 @@ fn command_runner_preserves_literal_arguments_and_http_example_uses_loopback() {
             std::thread::sleep(Duration::from_millis(2));
         }
     });
-    let output = success(run("http-client.scr", &[url.as_ref()]));
+    let output = success(run("http-client.scripta", &[url.as_ref()]));
     assert!(output.contains("\"status\": \"up\""));
     worker.join().unwrap();
 }
@@ -216,7 +216,7 @@ fn command_runner_preserves_literal_arguments_and_http_example_uses_loopback() {
 #[test]
 fn strings_playground_normalizes_a_unicode_record_without_external_programs() {
     let directory = tempfile::tempdir().unwrap();
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/strings.scr");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/strings.scripta");
     let source = fs::read_to_string(&path).unwrap();
     scr_cli::pipeline::check(&source).unwrap();
     let formatted = scr_cli::formatter::format(&source).unwrap();
@@ -224,7 +224,7 @@ fn strings_playground_normalizes_a_unicode_record_without_external_programs() {
     scr_cli::pipeline::run(&formatted, &mut output).unwrap();
     let expected = "info: café_api: READY\nService prefix: café\nContains api: true\nStarts with café: true\nEnds with _api: true\n";
     assert_eq!(String::from_utf8(output).unwrap(), expected);
-    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(path)
         .current_dir(directory.path())
         .env("PATH", directory.path())
@@ -239,7 +239,7 @@ fn collection_playground_and_log_analyzer_run_without_external_programs() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground");
     for (name, args, expected) in [
         (
-            "collections.scr",
+            "collections.scripta",
             vec![],
             r#"Active: auth, café-api
 First: auth
@@ -278,7 +278,7 @@ By job: {"api":15,"worker":8}
 "#,
         ),
         (
-            "log-analyzer.scr",
+            "log-analyzer.scripta",
             vec![root.join("sample-events.txt")],
             "Services: auth, café-api, worker\ninfo: 3\nwarn: 1\nerror: 1\nMalformed: 1\n",
         ),
@@ -288,7 +288,7 @@ By job: {"api":15,"worker":8}
         let formatted = scr_cli::formatter::format(&source).unwrap();
         scr_cli::pipeline::check(&formatted).unwrap();
         assert_eq!(scr_cli::formatter::format(&formatted).unwrap(), formatted);
-        let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
             .arg(root.join(name))
             .args(args)
             .current_dir(directory.path())
@@ -299,8 +299,8 @@ By job: {"api":15,"worker":8}
     }
     let input = directory.path().join("events.txt");
     fs::write(&input, "# comment\r\n\r\nINFO | api | ok\r\nDEBUG | api | ignored\nerror||missing service\nwarn|api|\na|b|c|d\n").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
-        .arg(root.join("log-analyzer.scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg(root.join("log-analyzer.scripta"))
         .arg(&input)
         .output()
         .unwrap();
@@ -309,8 +309,8 @@ By job: {"api":15,"worker":8}
         "Services: api\ninfo: 1\nwarn: 0\nerror: 0\nMalformed: 4\n"
     );
     fs::write(&input, "").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
-        .arg(root.join("log-analyzer.scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg(root.join("log-analyzer.scripta"))
         .arg(&input)
         .output()
         .unwrap();
@@ -318,8 +318,8 @@ By job: {"api":15,"worker":8}
         success(output),
         "Services: \ninfo: 0\nwarn: 0\nerror: 0\nMalformed: 0\n"
     );
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
-        .arg(root.join("log-analyzer.scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg(root.join("log-analyzer.scripta"))
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
@@ -332,7 +332,7 @@ By job: {"api":15,"worker":8}
 
 #[test]
 fn error_playground_recovers_and_uncaught_errors_exit_one_with_source_details() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/errors.scr");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/errors.scripta");
     let source = fs::read_to_string(&path).unwrap();
     scr_cli::pipeline::check(&source).unwrap();
     let formatted = scr_cli::formatter::format(&source).unwrap();
@@ -340,12 +340,12 @@ fn error_playground_recovers_and_uncaught_errors_exit_one_with_source_details() 
     scr_cli::pipeline::run(&formatted, &mut output).unwrap();
     let expected = "Missing key: recovered\nArithmetic: recovered\nPreserved value: 10\nType mismatch: recovered\nStill running\n";
     assert_eq!(String::from_utf8(output).unwrap(), expected);
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(&path)
         .output()
         .unwrap();
     assert_eq!(success(output), expected);
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(&path)
         .arg("--uncaught")
         .output()
@@ -354,13 +354,13 @@ fn error_playground_recovers_and_uncaught_errors_exit_one_with_source_details() 
     assert!(output.stdout.is_empty());
     let error = String::from_utf8(output.stderr).unwrap();
     assert!(error.contains("error[E0401]: IndexError: list index out of bounds"));
-    assert!(error.contains("errors.scr:6:"));
+    assert!(error.contains("errors.scripta:5:"));
     assert!(error.contains("at <main>"));
 }
 
 #[test]
 fn functions_playground_runs_with_defaults_variadics_and_captured_callbacks() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/functions.scr");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/functions.scripta");
     let source = fs::read_to_string(&path).unwrap();
     scr_cli::pipeline::check(&source).unwrap();
     let formatted = scr_cli::formatter::format(&source).unwrap();
@@ -369,7 +369,7 @@ fn functions_playground_runs_with_defaults_variadics_and_captured_callbacks() {
     scr_cli::pipeline::run(&formatted, &mut output).unwrap();
     let expected = "Hello, Scripta!\nWelcome, Scripta!\nTotal: 16\nCallback: 14\nCounter: 6, 8\nFresh defaults: [[\"new\"],[\"new\"]]\n";
     assert_eq!(String::from_utf8(output).unwrap(), expected);
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(path)
         .output()
         .unwrap();
@@ -378,7 +378,7 @@ fn functions_playground_runs_with_defaults_variadics_and_captured_callbacks() {
 
 #[test]
 fn reporting_playground_runs_before_and_after_formatting() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/reporting.scr");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/reporting.scripta");
     let source = fs::read_to_string(&path).unwrap();
     scr_cli::pipeline::check(&source).unwrap();
     let formatted = scr_cli::formatter::format(&source).unwrap();
@@ -388,7 +388,7 @@ fn reporting_playground_runs_before_and_after_formatting() {
     let expected = "Run summary: 4 jobs\nDuration: 8.6–19.5 ms; rounded average: 13 ms\nAverage bounds: 12–13 ms\nAbsolute adjustment: 2 ms\n{complete}: true\n";
     assert_eq!(String::from_utf8(output).unwrap(), expected);
     let dir = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg("run")
         .arg(path)
         .current_dir(dir.path())
@@ -399,7 +399,7 @@ fn reporting_playground_runs_before_and_after_formatting() {
 
 #[test]
 fn streaming_playground_handles_sample_crlf_empty_files_and_usage() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/streaming.scr");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/streaming.scripta");
     let source = fs::read_to_string(&path).unwrap();
     scr_cli::pipeline::check(&source).unwrap();
     let formatted = scr_cli::formatter::format(&source).unwrap();
@@ -423,13 +423,13 @@ fn streaming_playground_handles_sample_crlf_empty_files_and_usage() {
             "Records: 0\ninfo: 0\nwarn: 0\nerror: 0\nMalformed: 0\nStream closed: true\n",
         ),
     ];
-    let formatted_path = dir.path().join("formatted.scr");
+    let formatted_path = dir.path().join("formatted.scripta");
     fs::write(&formatted_path, formatted).unwrap();
     for (input, expected) in cases {
         let input_path = dir.path().join("events.txt");
         fs::write(&input_path, input).unwrap();
         for script in [&path, &formatted_path] {
-            let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+            let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
                 .arg("run")
                 .arg(script)
                 .arg(&input_path)
@@ -439,7 +439,7 @@ fn streaming_playground_handles_sample_crlf_empty_files_and_usage() {
             assert_eq!(success(output), expected);
         }
     }
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg("run")
         .arg(&path)
         .output()
@@ -456,7 +456,7 @@ fn streaming_playground_handles_sample_crlf_empty_files_and_usage() {
     ] {
         let input_path = dir.path().join("bad.txt");
         fs::write(&input_path, bytes).unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
             .arg("run")
             .arg(&path)
             .arg(input_path)
@@ -470,7 +470,7 @@ fn streaming_playground_handles_sample_crlf_empty_files_and_usage() {
 #[test]
 fn health_example_runs_locally_and_reference_lists_all_exports() {
     let dir = tempfile::tempdir().unwrap();
-    let output = success(run("server-health.scr", &[dir.path().as_os_str()]));
+    let output = success(run("server-health.scripta", &[dir.path().as_os_str()]));
     assert!(
         output.contains("\"cpuPercent\"")
             && output.contains("\"systemMemory\"")
@@ -529,16 +529,16 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
 
 #[test]
 fn atomic_report_previews_and_publishes_complete_json_before_and_after_formatting() {
-    let source = fs::read_to_string(example("atomic-report.scr")).unwrap();
+    let source = fs::read_to_string(example("atomic-report.scripta")).unwrap();
     let formatted = scr_cli::formatter::format(&source).unwrap();
     assert_eq!(source, formatted);
     for source in [source, formatted] {
         let dir = tempfile::tempdir().unwrap();
-        let script = dir.path().join("report.scr");
+        let script = dir.path().join("report.scripta");
         let destination = dir.path().join("report.json");
         fs::write(&script, source).unwrap();
         let invoke = |apply: bool| {
-            let mut command = Command::new(env!("CARGO_BIN_EXE_scr"));
+            let mut command = Command::new(env!("CARGO_BIN_EXE_scripta"));
             command
                 .current_dir(dir.path())
                 .arg(&script)
@@ -571,8 +571,8 @@ fn atomic_report_previews_and_publishes_complete_json_before_and_after_formattin
 #[test]
 fn data_and_csv_examples_run_without_external_programs() {
     let directory = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
-        .arg(example("data-handling.scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg(example("data-handling.scripta"))
         .current_dir(directory.path())
         .env("PATH", directory.path())
         .output()
@@ -583,10 +583,10 @@ fn data_and_csv_examples_run_without_external_programs() {
     let file = directory.path().join("records.csv");
     fs::write(&file, "name,note\r\nAda,\"first\nsecond\"\r\n").unwrap();
     assert_eq!(
-        success(run("csv-reader.scr", &[file.as_os_str()])),
+        success(run("csv-reader.scripta", &[file.as_os_str()])),
         "[\"name\",\"note\"]\n[\"Ada\",\"first\\nsecond\"]\n"
     );
-    for name in ["csv-reader.scr", "download.scr"] {
+    for name in ["csv-reader.scripta", "download.scripta"] {
         let output = run(name, &[]);
         assert_eq!(output.status.code(), Some(2));
         assert!(
@@ -623,7 +623,7 @@ fn download_example_saves_binary_bytes() {
     });
     assert_eq!(
         success(run(
-            "download.scr",
+            "download.scripta",
             &[url.as_ref(), destination.as_os_str()]
         )),
         "Downloaded 4 bytes\n"
@@ -635,7 +635,7 @@ fn download_example_saves_binary_bytes() {
 #[test]
 fn url_encoding_example_executes_with_expected_outputs() {
     assert_eq!(
-        success(run("url-encoding.scr", &[])),
+        success(run("url-encoding.scripta", &[])),
         "https://example.com/search?q=caf%C3%A9%20%26%20tea&page=2\n[[\"tag\",\"rust\"],[\"tag\",\"scripting\"]]\nname=Jane+Doe&message=A%2BB\ntrue\n"
     );
 }

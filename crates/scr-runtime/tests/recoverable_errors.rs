@@ -207,7 +207,7 @@ fn uncaught_failures_retain_inner_spans_frames_and_diagnostic_redaction() {
             vec!["<main>", "outer", "inner"]
         );
         assert_eq!(error.source.as_ref().unwrap().text, source);
-        let rendered = error.render("test.scr", &source);
+        let rendered = error.render("test.scripta", &source);
         assert!(rendered.contains("error[E0401]"));
         assert!(rendered.find("at inner").unwrap() < rendered.find("at outer").unwrap());
         run(&mut runtime, "$recovered = true;").unwrap();
@@ -229,7 +229,7 @@ fn uncaught_failures_retain_inner_spans_frames_and_diagnostic_redaction() {
     assert!(!format!("{error:?}").contains("division by zero"));
     assert!(
         !error
-            .render("test.scr", "<?scr 1 / 0;")
+            .render("test.scripta", "<?scr 1 / 0;")
             .contains("division by zero")
     );
 }

@@ -31,7 +31,7 @@ pub fn launch(arguments: Vec<OsString>) -> ExitCode {
         Err(error) => {
             eprintln!(
                 "Could not start the optional Scripta Playground: {error}\n\
-                Install the separate playground download and put scr-playground beside scr or on PATH.\n\
+                Install the separate playground download and put scr-playground beside scripta or on PATH.\n\
                 You can also set SCR_PLAYGROUND_BIN to its full executable path.\n\
                 The playground is not included in normal Scripta installations."
             );

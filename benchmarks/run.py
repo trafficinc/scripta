@@ -23,18 +23,18 @@ def measure(command):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scr",type=Path,required=True)
+    parser.add_argument("--scripta", "--scr", dest="scripta",type=Path,required=True)
     parser.add_argument("--output",type=Path,required=True)
     parser.add_argument("--reference",type=Path,help="optional pre-change binary measured in the same run")
     parser.add_argument("--samples",type=int,default=11)
     parser.add_argument("--warmups",type=int,default=2)
     args=parser.parse_args()
     if args.samples<1 or args.warmups<0: parser.error("samples must be positive and warmups nonnegative")
-    binary=args.scr.resolve(); bash=shutil.which("bash"); true=shutil.which("true")
+    binary=args.scripta.resolve(); bash=shutil.which("bash"); true=shutil.which("true")
     bash_version=subprocess.check_output([bash,"--version"],text=True).splitlines()[0] if bash else None
     bash_maps=bash_version is not None and int(bash_version.split("version ")[1].split(".")[0])>=4
     reference=args.reference.resolve() if args.reference else None
-    report={"platform":platform.platform(),"machine":platform.machine(),"logical_cpus":os.cpu_count(),"python":sys.version,"bash":bash_version,"scr":str(binary),"binary_bytes":binary.stat().st_size,"binary_sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),"samples":args.samples,"warmups":args.warmups,"rss_method":"wait4 ru_maxrss per child; includes descendants where OS accounts them" if hasattr(os,"wait4") else "unavailable", "results":[],"unavailable":[],"fixture_sha256":{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in (ROOT/"fixtures").iterdir() if p.is_file()}}
+    report={"platform":platform.platform(),"machine":platform.machine(),"logical_cpus":os.cpu_count(),"python":sys.version,"bash":bash_version,"scripta":str(binary),"binary_bytes":binary.stat().st_size,"binary_sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),"samples":args.samples,"warmups":args.warmups,"rss_method":"wait4 ru_maxrss per child; includes descendants where OS accounts them" if hasattr(os,"wait4") else "unavailable", "results":[],"unavailable":[],"fixture_sha256":{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in (ROOT/"fixtures").iterdir() if p.is_file()}}
     if reference: report["reference"]={"path":str(reference),"binary_bytes":reference.stat().st_size,"binary_sha256":hashlib.sha256(reference.read_bytes()).hexdigest()}
     with tempfile.TemporaryDirectory(prefix="scripta-benchmark-") as directory:
         directory=Path(directory); text=directory/"input.txt"; text.write_bytes(b"x"*(1024*1024)); data=directory/"values.json"; data.write_text(json.dumps(list(range(4096))))
@@ -42,7 +42,7 @@ def main():
             extra=[str(text)] if name=="files" else [str(data)] if name=="memory" else [true] if name=="processes" else []
             languages=([("scripta_baseline",[str(reference)])] if reference else [])+[("scripta",[str(binary)]),("bash",[bash] if bash else []),("python",[sys.executable])]
             for language,command in languages:
-                extension="scr" if language.startswith("scripta") else {"bash":"sh","python":"py"}[language]; fixture=ROOT/"fixtures"/f"{name}.{extension}"
+                extension="scripta" if language.startswith("scripta") else {"bash":"sh","python":"py"}[language]; fixture=ROOT/"fixtures"/f"{name}.{extension}"
                 if not command or not fixture.exists() or name=="maps" and language=="bash" and not bash_maps or name=="processes" and not true:
                     report["unavailable"].append({"workload":name,"language":language,"reason":"missing executable/fixture, or Bash <4 has no associative arrays"}); continue
                 invocation=command+[str(fixture)]+extra

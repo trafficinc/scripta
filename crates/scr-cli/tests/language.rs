@@ -9,11 +9,11 @@ fn run(source: &str) -> Result<String, Diagnostic> {
 #[test]
 fn examples_execute() {
     assert_eq!(
-        run(include_str!("../../../examples/hello.scr")).unwrap(),
+        run(include_str!("../../../examples/hello.scripta")).unwrap(),
         "Hello, Scripta!\n"
     );
     assert_eq!(
-        run(include_str!("../../../examples/variables.scr")).unwrap(),
+        run(include_str!("../../../examples/variables.scripta")).unwrap(),
         "Checking Production...\nDisk usage: 85%\n"
     );
 }
@@ -92,8 +92,8 @@ fn invalid_programs_report_errors() {
 fn diagnostics_count_unicode_columns() {
     let source = "<?scr\necho \"é\" . 1;";
     let error = run(source).unwrap_err();
-    let rendered = error.render("test.scr", source);
-    assert!(rendered.contains("test.scr:2:6"));
+    let rendered = error.render("test.scripta", source);
+    assert!(rendered.contains("test.scripta:2:6"));
     assert!(rendered.contains("error[E0401]: TypeError: concatenation requires two strings"));
     assert!(rendered.contains("2 | echo \"*\" . 1;"));
 }
@@ -143,7 +143,7 @@ fn echo_forms_have_identical_output_and_type_rules() {
 
 #[test]
 fn complete_statements_execute() {
-    let source = include_str!("../../../tests/fixtures/statements.scr");
+    let source = include_str!("../../../tests/fixtures/statements.scripta");
     scr_cli::pipeline::check(source).unwrap();
     assert_eq!(run(source).unwrap(), "Starting...\nSuccess\n1\n2\n3\n");
 }

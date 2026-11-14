@@ -5,22 +5,22 @@ use std::path::PathBuf;
 
 pub const HELP: &str = "Scripta systems scripting language
 
-Usage: scr version
-       scr version --verbose
-       scr help [run|check|fmt]
-       scr run <file|-> [arguments...]
-       scr <file> [arguments...]
-       scr check <file>
-       scr fmt [--check] <file>
-       scr playground [options]
-       scr init
-       scr add <name> --path <dir>
-       scr add <name> --git <url> (--version <constraint> | --rev <ref>)
-       scr install [--locked] [--offline]
-       scr update [--offline]
+Usage: scripta version
+       scripta version --verbose
+       scripta help [run|check|fmt]
+       scripta run <file|-> [arguments...]
+       scripta <file> [arguments...]
+       scripta check <file>
+       scripta fmt [--check] <file>
+       scripta playground [options]
+       scripta init
+       scripta add <name> --path <dir>
+       scripta add <name> --git <url> (--version <constraint> | --rev <ref>)
+       scripta install [--locked] [--offline]
+       scripta update [--offline]
 
 Options: --help, -h, --version
-Use scr run -- <file> for paths starting with a dash or matching command names.
+Use scripta run -- <file> for paths starting with a dash or matching command names.
 Arguments after the script path belong to the script; -- ends script option queries.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,13 +77,13 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
     if let Some(topic) = topic {
         let help = match topic {
             "run" => Some(
-                "Usage: scr run <file|-> [arguments...]\nExecute a file, or read UTF-8 source from stdin through EOF with -.\nSource from stdin uses the working directory for relative includes.\nArguments after the source path belong to the script.\nUse -- before a literal dash-prefixed filename.",
+                "Usage: scripta run <file|-> [arguments...]\nExecute a file, or read UTF-8 source from stdin through EOF with -.\nSource from stdin uses the working directory for relative includes.\nArguments after the source path belong to the script.\nUse -- before a literal dash-prefixed filename.",
             ),
             "check" => Some(
-                "Usage: scr check <file>\nCheck syntax and declarations without executing or loading includes.\nUse -- before a dash-prefixed filename.",
+                "Usage: scripta check <file>\nCheck syntax and declarations without executing or loading includes.\nUse -- before a dash-prefixed filename.",
             ),
             "fmt" => Some(
-                "Usage: scr fmt [--check] <file>\nFormat a source file, or report differences without writing with --check.\nUse -- before a dash-prefixed filename.",
+                "Usage: scripta fmt [--check] <file>\nFormat a source file, or report differences without writing with --check.\nUse -- before a dash-prefixed filename.",
             ),
             _ => None,
         };
@@ -197,18 +197,18 @@ mod tests {
         for arg in ["version", "--version"] {
             assert_eq!(parse_strings(&[arg]).unwrap(), Command::Version);
         }
-        for args in [vec!["hello.scr"], vec!["run", "hello.scr"]] {
+        for args in [vec!["hello.scripta"], vec!["run", "hello.scripta"]] {
             assert_eq!(
                 parse_strings(&args).unwrap(),
                 Command::Run {
-                    path: "hello.scr".into(),
+                    path: "hello.scripta".into(),
                     arguments: vec![]
                 }
             );
         }
         assert_eq!(
-            parse_strings(&["check", "hello.scr"]).unwrap(),
-            Command::Check("hello.scr".into())
+            parse_strings(&["check", "hello.scripta"]).unwrap(),
+            Command::Check("hello.scripta".into())
         );
     }
 
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn explicit_paths_and_spaces() {
-        for path in ["help", "version", "-script.scr", "my script.scr"] {
+        for path in ["help", "version", "-script.scripta", "my script.scripta"] {
             assert_eq!(
                 parse_strings(&["run", "--", path]).unwrap(),
                 Command::Run {
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn preserves_non_unicode_paths() {
         use std::os::unix::ffi::OsStringExt;
-        let path = OsString::from_vec(b"script-\xff.scr".to_vec());
+        let path = OsString::from_vec(b"script-\xff.scripta".to_vec());
         assert_eq!(
             parse([path.clone()]).unwrap(),
             Command::Run {
@@ -295,7 +295,7 @@ mod script_argument_tests {
     use super::*;
     #[test]
     fn both_invocations_expose_identical_script_arguments() {
-        let arguments = ["script.scr", "one", "--two=x", "--", "--literal"].map(OsString::from);
+        let arguments = ["script.scripta", "one", "--two=x", "--", "--literal"].map(OsString::from);
         let shorthand = parse(arguments.clone()).unwrap();
         assert_eq!(
             parse(std::iter::once(OsString::from("run")).chain(arguments)).unwrap(),

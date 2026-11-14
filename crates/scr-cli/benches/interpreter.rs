@@ -11,7 +11,7 @@ fn main() {
         "lists",
         "maps",
     ] {
-        let source = std::fs::read_to_string(fixtures.join(format!("{name}.scr"))).unwrap();
+        let source = std::fs::read_to_string(fixtures.join(format!("{name}.scripta"))).unwrap();
         let tokens = scr_lexer::lex(&source).unwrap();
         let program = scr_parser::parse(&tokens).unwrap();
         for phase in ["lex", "parse", "execute"] {

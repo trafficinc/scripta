@@ -13,8 +13,9 @@ fn formatter_snapshots_preserve_tokens_and_are_idempotent() {
         "branches",
         "functions",
     ] {
-        let source = std::fs::read_to_string(root.join(format!("{name}.input.scr"))).unwrap();
-        let expected = std::fs::read_to_string(root.join(format!("{name}.expected.scr"))).unwrap();
+        let source = std::fs::read_to_string(root.join(format!("{name}.input.scripta"))).unwrap();
+        let expected =
+            std::fs::read_to_string(root.join(format!("{name}.expected.scripta"))).unwrap();
         let formatted = formatter::format(&source).unwrap();
         assert_eq!(formatted, expected, "{name}");
         if name != "branches" {
@@ -130,16 +131,16 @@ fn check_validates_declarations_control_flow_and_legacy_syntax_without_execution
         );
     }
     // Unknown values, calls and annotations are dynamic, not a static type claim.
-    pipeline::check("<?scr function f($x: Custom): Custom { return unknown($x); } echo $unknown; require 'missing.scr'; exit(19);").unwrap();
+    pipeline::check("<?scr function f($x: Custom): Custom { return unknown($x); } echo $unknown; require 'missing.scripta'; exit(19);").unwrap();
     pipeline::check("<?scr { function f() {} } { function f() {} }").unwrap();
 }
 #[test]
 fn fmt_cli_check_does_not_write_and_invalid_sources_are_untouched() {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("test.scr");
+    let file = dir.path().join("test.scripta");
     let original = "<?scr echo   'hello';";
     std::fs::write(&file, original).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg("fmt")
         .arg("--check")
         .arg(&file)
@@ -148,7 +149,7 @@ fn fmt_cli_check_does_not_write_and_invalid_sources_are_untouched() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
     assert!(String::from_utf8(result.stderr).unwrap().contains("E0502"));
-    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg("fmt")
         .arg(&file)
         .output()
@@ -163,7 +164,7 @@ fn fmt_cli_check_does_not_write_and_invalid_sources_are_untouched() {
         "<?scr\necho 'hello';\n"
     );
     assert!(
-        Command::new(env!("CARGO_BIN_EXE_scr"))
+        Command::new(env!("CARGO_BIN_EXE_scripta"))
             .arg("fmt")
             .arg(&file)
             .arg("--check")
@@ -173,7 +174,7 @@ fn fmt_cli_check_does_not_write_and_invalid_sources_are_untouched() {
     );
     let malformed = "<?scr if (true { echo 'bad';";
     std::fs::write(&file, malformed).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg("fmt")
         .arg(&file)
         .output()
@@ -189,13 +190,13 @@ fn fmt_cli_check_does_not_write_and_invalid_sources_are_untouched() {
 #[test]
 fn check_cli_never_executes_and_errors_have_codes_excerpts_and_help() {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("test.scr");
+    let file = dir.path().join("test.scripta");
     std::fs::write(
         &file,
-        "<?scr File::writeText('should-not-exist', 'bad'); require 'missing.scr'; exit(19);",
+        "<?scr File::writeText('should-not-exist', 'bad'); require 'missing.scripta'; exit(19);",
     )
     .unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .current_dir(dir.path())
         .arg("check")
         .arg(&file)
@@ -204,7 +205,7 @@ fn check_cli_never_executes_and_errors_have_codes_excerpts_and_help() {
     assert!(result.status.success());
     assert!(!dir.path().join("should-not-exist").exists());
     std::fs::write(&file, "<?scr\nif ($disk > ) { echo 'bad'; }").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg("check")
         .arg(&file)
         .output()
@@ -212,7 +213,7 @@ fn check_cli_never_executes_and_errors_have_codes_excerpts_and_help() {
     assert_eq!(result.status.code(), Some(1));
     let stderr = String::from_utf8(result.stderr).unwrap();
     assert!(stderr.contains("error[E0201]"));
-    assert!(stderr.contains("test.scr:2:13"));
+    assert!(stderr.contains("test.scripta:2:13"));
     assert!(stderr.contains("2 | if ($disk > )"));
     assert!(stderr.contains('^') && stderr.contains("help: provide a value after '>'"));
     for args in [
@@ -221,7 +222,7 @@ fn check_cli_never_executes_and_errors_have_codes_excerpts_and_help() {
         vec!["fmt", "x", "y"],
     ] {
         assert_eq!(
-            Command::new(env!("CARGO_BIN_EXE_scr"))
+            Command::new(env!("CARGO_BIN_EXE_scripta"))
                 .args(args)
                 .output()
                 .unwrap()
@@ -274,8 +275,8 @@ proptest! {
 fn formatter_saves_through_symlinks_and_retains_permissions() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
-    let target = dir.path().join("target.scr");
-    let link = dir.path().join("link.scr");
+    let target = dir.path().join("target.scripta");
+    let link = dir.path().join("link.scripta");
     std::fs::write(&target, "<?scr echo 'x';").unwrap();
     std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
     std::os::unix::fs::symlink(&target, &link).unwrap();
@@ -299,9 +300,9 @@ fn formatter_saves_through_symlinks_and_retains_permissions() {
 #[test]
 fn cli_resource_budgets_stop_execution_and_redact_credentials() {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("budget.scr");
+    let file = dir.path().join("budget.scripta");
     std::fs::write(&file, "<?scr while (true) {}").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(&file)
         .env("SCR_MAX_STEPS", "20")
         .output()
@@ -312,20 +313,20 @@ fn cli_resource_budgets_stop_execution_and_redact_credentials() {
             .unwrap()
             .contains("instruction limit")
     );
-    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(&file)
         .env("SCR_MAX_SOURCE_BYTES", "8")
         .output()
         .unwrap();
     assert_eq!(result.status.code(), Some(1));
-    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(&file)
         .env("SCR_MAX_STEPS", "invalid")
         .output()
         .unwrap();
     assert_eq!(result.status.code(), Some(2));
     std::fs::write(&file, "<?scr throw Env::get(\"TEST_PASSWORD\");").unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(&file)
         .env("TEST_PASSWORD", "sensitive-value-123")
         .output()

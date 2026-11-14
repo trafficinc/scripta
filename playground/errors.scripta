@@ -1,18 +1,15 @@
 <?scr
-
 // Add --uncaught to demonstrate an error diagnostic and exit status 1.
 if (Cli::has("uncaught")) {
     $items = [1];
     echo str($items[5]);
 }
-
 $record = ["name" => "worker"];
 try {
     $record["missing"];
 } catch (IndexError $e) {
     echo "Missing key: recovered\n";
 }
-
 $number = 10;
 try {
     $number /= 0;
@@ -20,7 +17,6 @@ try {
     echo "Arithmetic: recovered\n";
 }
 echo "Preserved value: " . str($number) . "\n";
-
 try {
     $number + "1";
 } catch (TypeError $e) {

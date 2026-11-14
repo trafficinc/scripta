@@ -2,7 +2,7 @@
 
 Scripta 0.1.0 is a CLI interpreter. It can generate content or be launched by an
 existing server, but has no built-in listener, HTTP request/response framework,
-FastCGI service, sessions, or automatic PHP-style `.scr` execution. `Http::get`
+FastCGI service, sessions, or automatic PHP-style `.scripta` execution. `Http::get`
 and related APIs are HTTP clients. Putting a script in a web root does not make
 it execute and can expose its source if the server serves the file directly.
 
@@ -13,7 +13,7 @@ Nginx, IIS, or other static-file server. This works without adding a Scripta
 request handler. The commands below generate local files; they do not install or
 start a web server. A public server still needs its normal configuration.
 
-Save `report.scr` outside the directory you will publish:
+Save `report.scripta` outside the directory you will publish:
 
 ```scr
 <?scr
@@ -22,12 +22,12 @@ File::writeAtomic("public/status.json", Json::pretty($report) . "\n");
 File::writeAtomic("public/index.html", "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Scripta report</title><h1>Scripta report</h1><p>Status: OK</p></html>\n");
 ```
 
-From the directory containing `report.scr`, create the output directory and run
+From the directory containing `report.scripta`, create the output directory and run
 it with an installed executable. On macOS/Linux:
 
 ```sh
 mkdir -p public
-scr run report.scr
+scripta run report.scripta
 # Public reports only: allow the web-server account to read these new files.
 chmod 644 public/status.json public/index.html
 ```
@@ -36,10 +36,10 @@ On Windows in PowerShell:
 
 ```powershell
 New-Item -ItemType Directory -Force public | Out-Null
-scr run .\report.scr
+scripta run .\report.scripta
 ```
 
-If scr is not on PATH, substitute its absolute path; PowerShell needs `&` before
+If scripta is not on PATH, substitute its absolute path; PowerShell needs `&` before
 a quoted executable path. Configure your existing server's document root or
 static-site directory to the absolute path of `public/`:
 
@@ -50,7 +50,7 @@ static-site directory to the absolute path of `public/`:
 
 Visit `/` and `/status.json` on that configured site. The files remain unchanged
 until the script runs again. For recurring generation, invoke the same fixed
-command from your existing scheduler; scr does not create a background daemon.
+command from your existing scheduler; scripta does not create a background daemon.
 Keep scripts, logs, credentials, and the source checkout outside the document
 root. Only publish fields intended for visitors. `File::writeAtomic` publishes a
 complete replacement of each file, so a concurrent reader sees old or new contents.
@@ -66,21 +66,21 @@ publication mechanism; the two writes are independent. See the
 
 This is a **manual, local-only integration example**, not a tested Scripta web
 hosting feature. It requires an independently installed/configured Apache with
-CGI enabled and a Unix shell for the launcher. The scr executable itself still
+CGI enabled and a Unix shell for the launcher. The scripta executable itself still
 has no shell or web-server dependency. A new interpreter process starts for each
 request. See Apache's [CGI guide](https://httpd.apache.org/docs/2.4/howto/cgi.html)
 for enabling `mod_cgid` with threaded Unix MPMs or `mod_cgi` with non-threaded MPMs.
 
 Use a dedicated layout outside the document root; substitute your actual absolute
-paths. The Apache worker must be able to read the script and execute scr:
+paths. The Apache worker must be able to read the script and execute scripta:
 
 ```text
-/opt/scripta/bin/scr
-/opt/scripta/app/status.scr
+/opt/scripta/bin/scripta
+/opt/scripta/app/status.scripta
 /opt/scripta/cgi-bin/status.cgi
 ```
 
-Save this as `/opt/scripta/app/status.scr`. Here the script explicitly emits the
+Save this as `/opt/scripta/app/status.scripta`. Here the script explicitly emits the
 CGI headers, a blank line, and a JSON body:
 
 ```scr
@@ -99,7 +99,7 @@ cd /opt/scripta/app || exit 1
 export SCR_MAX_STEPS=100000
 export SCR_MAX_VALUE_BYTES=1048576
 export SCR_MAX_SCOPES=128
-exec /opt/scripta/bin/scr run /opt/scripta/app/status.scr
+exec /opt/scripta/bin/scripta run /opt/scripta/app/status.scripta
 ```
 
 Make the launcher and interpreter executable (`chmod 755` on those two files).
@@ -136,7 +136,7 @@ No Apache deployment was validated during this documentation change.
 
 ## Existing application servers and Windows
 
-An existing backend can launch scr or scr.exe with an argument array, a fixed
+An existing backend can launch scripta or scripta.exe with an argument array, a fixed
 trusted script path, a fixed working directory, and a restricted environment.
 The backend should capture stdout/stderr separately, enforce elapsed-time/output
 limits, and choose the HTTP status after the child finishes. Keep diagnostics
@@ -147,4 +147,4 @@ That adapter is application code and is not supplied with Scripta. There is no
 validated IIS handler or Windows CGI configuration in this release. On Windows,
 use the static-output procedure above, or integrate with your existing backend
 and test that adapter independently. No new HTTP daemon is needed for local CLI
-scripts, and no `scr serve`, `scr -S`, or PHP-FPM configuration is available.
+scripts, and no `scripta serve`, `scripta -S`, or PHP-FPM configuration is available.

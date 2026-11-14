@@ -1,8 +1,8 @@
 <?scr
-// Usage: scr examples/atomic-report.scr report.json [--apply]
+// Usage: scripta examples/atomic-report.scripta report.json [--apply]
 $path = Cli::arg(0);
 if ($path === null) {
-    echo "Usage: scr examples/atomic-report.scr <output-file> [--apply]\n";
+    echo "Usage: scripta examples/atomic-report.scripta <output-file> [--apply]\n";
     exit 2;
 }
 $report = ["status" => "ok", "generatedAt" => Date::now()];

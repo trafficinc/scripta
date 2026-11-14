@@ -161,7 +161,7 @@ added later; these historical measurements do not measure its overhead.
 
 ```sh
 SCR_MAX_STEPS=1000000 SCR_MAX_VALUE_BYTES=8388608 SCR_MAX_SCOPES=1024 \
-SCR_MAX_SOURCE_BYTES=1048576 scr run automation.scr
+SCR_MAX_SOURCE_BYTES=1048576 scripta run automation.scripta
 ```
 
 `RuntimeOptions` exposes the same `instruction_limit`, `max_value_bytes`,

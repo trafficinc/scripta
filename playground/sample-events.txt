@@ -1,4 +1,4 @@
-# Sample data for log-analyzer.scr
+# Sample data for log-analyzer.scripta
 INFO | café-api | started
 warn | worker | retry scheduled
 ERROR | café-api | upstream unavailable

@@ -4,7 +4,7 @@ Build and run from the repository root:
 
 ```sh
 cargo build --release --locked -p scr-cli
-python3 benchmarks/run.py --scr target/release/scr --output benchmarks/results/local.json
+python3 benchmarks/run.py --scripta target/release/scripta --output benchmarks/results/local.json
 cargo bench -p scr-cli --bench interpreter --locked
 ```
 
@@ -18,7 +18,7 @@ run with Bash because Bash is the subject of that comparison.
 To compare two locally preserved release builds in one measurement run:
 
 ```sh
-python3 benchmarks/run.py --scr target/release/scr --reference /path/to/before-scr --output benchmarks/results/paired.json
+python3 benchmarks/run.py --scripta target/release/scripta --reference /path/to/before-scr --output benchmarks/results/paired.json
 ```
 
 The runner records executable sizes/hashes and fixture hashes. Output filenames
