@@ -3,6 +3,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -48,11 +49,26 @@ class ReleaseTests(unittest.TestCase):
             self.assertFalse(manifest['prerelease'])
             self.assertEqual(len(manifest['packages']), 8)
             self.assertEqual(len({p['asset'] for p in manifest['packages']}), 8)
-            for package in manifest['packages']:
-                self.assertEqual(digest(output / package['asset']), package['archive_sha256'])
-                self.assertEqual((output / (package['asset'] + '.sha256')).read_text(),
-                                 package['archive_sha256'] + '  ' + package['asset'] + '\n')
-            self.assertEqual(len((output / 'SHA256SUMS').read_text().splitlines()), 8)
+            self.assertEqual(len(list(output.iterdir())), 10)
+            expected_assets = {p['asset'] for p in manifest['packages']} | {'SHA256SUMS', 'validation-evidence.zip'}
+            self.assertEqual({p.name for p in output.iterdir()}, expected_assets)
+            with zipfile.ZipFile(output / 'validation-evidence.zip') as evidence:
+                bundled_manifest = json.loads(evidence.read('release-manifest.json'))
+                self.assertEqual(bundled_manifest, manifest)
+                for package in manifest['packages']:
+                    self.assertEqual(digest(output / package['asset']), package['archive_sha256'])
+                    self.assertEqual(evidence.read(package['asset'] + '.sha256').decode(),
+                                     package['archive_sha256'] + '  ' + package['asset'] + '\n')
+                    smoke = json.loads(evidence.read(package['asset'] + '.validation.json'))
+                    self.assertEqual(smoke['archive_sha256'], package['archive_sha256'])
+                for target in TARGETS:
+                    self.assertEqual(json.loads(evidence.read(f'validation-{target}.json'))['target'], target)
+                    self.assertEqual(evidence.read(f'logs/{target}/check.log'), b'passed\n')
+            checksums = (output / 'SHA256SUMS').read_text().splitlines()
+            self.assertEqual(len(checksums), 9)
+            for line in checksums:
+                checksum, name = line.split('  ', 1)
+                self.assertEqual(digest(output / name), checksum)
             self.assertIn('no Rust installation', notes.read_text())
             self.assertTrue((output / 'scripta-0.1.0-x86_64-pc-windows-msvc-sqlite.zip').is_file())
 

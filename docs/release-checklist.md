@@ -45,7 +45,10 @@ replace a fresh run against the intended release source.
 
 ## Candidate review before tagging and automatic publication
 
-- [ ] Verify aggregate SHA256SUMS and all eight base/SQLite archives.
+- [ ] Verify aggregate SHA256SUMS, all eight base/SQLite archives, and the evidence ZIP.
+- [ ] Keep exactly ten uploaded assets: eight packages, SHA256SUMS, and one
+  validation-evidence.zip containing all supporting checksums, records, logs,
+  and the release manifest.
 - [ ] Inspect documentation/examples and installation/uninstallation for every
   target selected for publication; local macOS artifact review is recorded above.
 - [x] Describe observed local ad hoc signatures and absent publisher

@@ -88,9 +88,12 @@ branch pushes do not publish anything.
 The [publisher](../scripts/publish_release.py) validates the downloaded native
 records and hashes before staging assets. Base archive names are unchanged;
 SQLite downloads add `-sqlite` before `.zip`/`.tar.gz` so all eight archives have
-unique release asset names. Matching `.sha256` files and aggregate `SHA256SUMS`
-refer to these published names. Smoke/native records, zipped logs, and a release
-manifest record which exact source and artifacts were tested.
+unique release asset names. Publish only those eight packages, `SHA256SUMS`,
+and one `validation-evidence.zip`: ten uploaded assets. `SHA256SUMS` verifies the
+eight packages and the evidence ZIP. Matching individual `.sha256` files,
+smoke/native records, per-target logs, and `release-manifest.json` live inside
+the evidence ZIP and identify the tested source and artifacts. Do not upload
+these supporting files as separate release assets.
 
 Uploads remain in a draft until every asset succeeds. A failed upload can be
 retried while the release is still a draft; a published release is not replaced.
