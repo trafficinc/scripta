@@ -1,5 +1,13 @@
 
+# Source scripts use the formatter's LF output on every checkout platform.
+*.scripta text eol=lf
+*.scta text eol=lf
+*.scr text eol=lf
+
 # Formatter snapshots intentionally contain exact and mixed newline bytes.
+# These overrides must follow the general source rules.
+crates/scr-cli/tests/snapshots/formatter/*.scripta -text
+crates/scr-cli/tests/snapshots/formatter/*.scta -text
 crates/scr-cli/tests/snapshots/formatter/*.scr -text
 
 # Benchmark fixture hashes and source bytes are part of the measurement record.
@@ -11,8 +19,6 @@ benchmarks/fixtures/* -text
 *.md text eol=lf
 *.svg text eol=lf
 *.yml text eol=lf
-examples/*.scr text eol=lf
-examples/lib/*.scr text eol=lf
 examples/packages/** text eol=lf
 LICENSE text eol=lf
 
