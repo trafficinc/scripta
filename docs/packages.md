@@ -36,7 +36,7 @@ not mistaken for SSH hostnames. Existing manifests containing canonical
 Windows paths are normalized when fetched as well.
 
 ```scr
-<?scr
+<?scripta
 require_once "helpers" as Helpers;
 echo Helpers::greeting();
 ```
@@ -46,14 +46,15 @@ file with that name takes precedence. Other local paths retain their existing
 behavior. Packages must be declared as direct dependencies of the closest
 `scripta.toml` to the including source file. Functions retain their definition
 file, so later calls resolve dependencies relative to their defining package.
-All script files still start with `<?scr`.
+New scripts start with `<?scripta`. Legacy `<?scr` remains accepted, including
+in installed packages and mixed modern/legacy includes.
 
 ## Package aliases and isolation
 
 Add `as Alias` to load a package into an isolated module scope:
 
 ```scr
-<?scr
+<?scripta
 require_once "helpers" as Helpers;
 require_once "other-tools" as Tools;
 echo Helpers::greeting();

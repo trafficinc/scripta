@@ -28,7 +28,7 @@ Float string display need not retain a decimal point (`str(1.0)` is `"1"`), whil
 the original numeric types remain distinct for strict equality.
 
 ```scr
-<?scr
+<?scripta
 $usage = int("85");
 echo "Usage: " . str($usage) . "%\n";
 $ratio = float($usage) / 100.0;
@@ -138,7 +138,7 @@ separately. Trimming and case conversion use Rust's Unicode tables, independentl
 of the operating system locale.
 
 ```scr
-<?scr
+<?scripta
 $parts = String::split(String::trim("  café,tea,,  "), ",");
 echo Json::encode($parts) . "\n"; // ["café","tea","",""]
 echo String::join(["café", "tea"], " / ") . "\n"; // café / tea
@@ -244,7 +244,7 @@ registration. Use `try`/`finally` to close them promptly. `Csv::parse` bounds th
 entire output value; streaming bounds one raw record and returned row at a time.
 
 ```scr
-<?scr
+<?scripta
 $reader = Csv::open("records.csv");
 try {
     while (($row = Csv::readRow($reader)) !== null) {
@@ -334,7 +334,7 @@ float sorting preserves the order of equal values, including positive and
 negative zero.
 
 ```scr
-<?scr
+<?scripta
 $items = [3, 1, 2];
 echo Json::encode(List::sort($items)) . "\n"; // [1,2,3]
 echo Json::encode(List::remove($items, 1)) . "\n"; // [3,2]
@@ -692,7 +692,7 @@ chunks and before returning a line; an interrupted active read closes the stream
 OS reads remain synchronous, so cancellation cannot interrupt a blocked OS call.
 
 ```scr
-<?scr
+<?scripta
 $stream = File::openLines("events.txt", 65536);
 try {
     while (($line = File::readLine($stream)) !== null) {
@@ -750,7 +750,7 @@ an existence check. A missing parent or file/directory collision never causes
 implicit deletion or replacement of a different kind of object.
 
 ```scr
-<?scr
+<?scripta
 $source = "downloads";
 $destination = "documents";
 Dir::createAll($destination);
@@ -774,7 +774,7 @@ program uses native executable/PATH lookup. Relative executable paths containing
 components such as `./tool` resolve against the requested child working directory.
 
 ```scr
-<?scr
+<?scripta
 $result = Process::run("git", ["status", "--short"]);
 if ($result->success) {
     echo $result->stdout;
@@ -986,7 +986,7 @@ Terminal detection does not guarantee ANSI color or cursor-control support and
 does not interpret `NO_COLOR` or CLI options. Scripts decide those policies:
 
 ```scr
-<?scr
+<?scripta
 $useColor = Cli::isTerminal("stdout")
     && !Env::has("NO_COLOR")
     && Cli::option("color") !== "never";
@@ -1020,7 +1020,7 @@ blocked waiting for input must return before cancellation can be observed.
 `Cli::readLine` and `Cli::prompt` share the same buffered cursor. For example:
 
 ```scr
-<?scr
+<?scripta
 while (($line = Cli::readLine(65536)) !== null) {
     echo $line . "\n";
 }
@@ -1089,7 +1089,7 @@ metric is synthesized. Home/temp lookups use the host environment, not the mutab
 `Env` snapshot. Non-UTF-8 directory paths raise `EncodingError`.
 
 ```scr
-<?scr
+<?scripta
  echo "Host: " . System::hostname() . "\n";
  echo "Platform: " . System::platform() . "\n";
  $disk = System::diskUsage(System::tempDirectory());
@@ -1329,7 +1329,7 @@ Per-call timeout overrides must remain positive; body/redirect limits cannot
 exceed host ceilings. HTTP responses never automatically enter logs.
 
 ```scr
-<?scr
+<?scripta
 $response = Http::get("https://example.com/api/status");
 if (!$response->ok()) throw "API request failed";
 $data = $response->json();

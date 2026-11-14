@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 $durations = [12.4, 8.6, 19.5, 10.0];
 $total = 0.0;
 $fastest = $durations[0];

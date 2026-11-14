@@ -16,7 +16,7 @@ start a web server. A public server still needs its normal configuration.
 Save `report.scripta` outside the directory you will publish:
 
 ```scr
-<?scr
+<?scripta
 $report = ["status" => "ok", "generatedAt" => Date::now()];
 File::writeAtomic("public/status.json", Json::pretty($report) . "\n");
 File::writeAtomic("public/index.html", "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Scripta report</title><h1>Scripta report</h1><p>Status: OK</p></html>\n");
@@ -84,14 +84,14 @@ Save this as `/opt/scripta/app/status.scripta`. Here the script explicitly emits
 CGI headers, a blank line, and a JSON body:
 
 ```scr
-<?scr
+<?scripta
 echo "Content-Type: application/json; charset=utf-8\r\n";
 echo "Cache-Control: no-store\r\n\r\n";
 echo Json::encode(["status" => "ok"]) . "\n";
 ```
 
 Save the following fixed launcher as `/opt/scripta/cgi-bin/status.cgi`. The shebang
-belongs to this shell wrapper; the Scripta file still begins with `<?scr`.
+belongs to this shell wrapper; the Scripta file still begins with `<?scripta`.
 
 ```sh
 #!/bin/sh

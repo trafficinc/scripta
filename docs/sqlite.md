@@ -40,7 +40,7 @@ transactions roll back. Host-held references keep a connection alive after the
 runtime is dropped.
 
 ```scr
-<?scr
+<?scripta
 $db = Sqlite::open("app.db");
 try {
     Sqlite::execute($db, "CREATE TABLE IF NOT EXISTS users (name TEXT NOT NULL)");
@@ -94,7 +94,7 @@ preserve column order and use case-sensitive string keys.
 Use SQL transaction statements through `execute`:
 
 ```scr
-<?scr
+<?scripta
 $db = Sqlite::open(":memory:");
 try {
     Sqlite::execute($db, "CREATE TABLE t (id INTEGER PRIMARY KEY)");

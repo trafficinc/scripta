@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // Run from a directory with a downloads folder. Existing destinations are kept:
 // a duplicate name raises AlreadyExistsError rather than overwriting a file.
 $source = "downloads";

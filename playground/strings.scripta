@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // Parse a small status record and normalize it for a CLI report.
 $raw = "  INFO | café-api | ready  ";
 $fields = String::split(String::trim($raw), " | ");

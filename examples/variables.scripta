@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 $name = "Production";
 $usage = 85;
 echo "Checking " . $name . "...\n";

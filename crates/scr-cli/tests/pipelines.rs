@@ -59,7 +59,7 @@ fn stdin_source_supports_arguments_includes_eof_and_exit_codes() {
         "<?scr function hello() { return \"hello\"; }",
     )
     .unwrap();
-    let source = b"<?scr require_once \"helper.scripta\"; echo hello() . Cli::arg(0); if (Cli::readLine() !== null) exit 9; exit 7;";
+    let source = b"<?scripta require_once \"helper.scripta\"; echo hello() . Cli::arg(0); if (Cli::readLine() !== null) exit 9; exit 7;";
     let output = piped(&["run", "-", "--help"], source, dir.path(), None);
     assert_eq!(output.status.code(), Some(7), "{:?}", output);
     assert_eq!(output.stdout, b"hello--help");
@@ -77,12 +77,19 @@ fn stdin_source_enforces_tags_utf8_and_source_budget() {
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
     }
-    let source = b"<?scr echo \"ok\";";
-    for (limit, expected) in [(source.len(), 0), (source.len() - 1, 1)] {
-        let output = piped(&["run", "-"], source, dir.path(), Some(&limit.to_string()));
-        assert_eq!(output.status.code(), Some(expected));
-        if expected == 1 {
-            assert!(String::from_utf8_lossy(&output.stderr).contains("source byte limit"));
+    for tag in ["<?scripta", "<?scr"] {
+        let source = format!("{tag} echo \"ok\";");
+        for (limit, expected) in [(source.len(), 0), (source.len() - 1, 1)] {
+            let output = piped(
+                &["run", "-"],
+                source.as_bytes(),
+                dir.path(),
+                Some(&limit.to_string()),
+            );
+            assert_eq!(output.status.code(), Some(expected));
+            if expected == 1 {
+                assert!(String::from_utf8_lossy(&output.stderr).contains("source byte limit"));
+            }
         }
     }
 }

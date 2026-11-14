@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // Local-only URL and form construction; no HTTP requests are made.
 $query = Url::buildQuery(["q" => "café & tea", "page" => str(2)]);
 echo "https://example.com/search?" . $query . "\n";

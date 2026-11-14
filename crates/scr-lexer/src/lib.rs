@@ -6,6 +6,10 @@ use std::fmt;
 use scr_diagnostics::Diagnostic;
 pub use scr_diagnostics::{SourcePosition, Span};
 
+/// Supported opening spellings, longest first so the canonical tag is not
+/// consumed as the legacy prefix. Shared with token-preserving tooling.
+pub const OPENING_TAGS: [&str; 2] = ["<?scripta", "<?scr"];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenKind {
     Variable(String),
@@ -117,7 +121,9 @@ impl std::error::Error for LexerError {}
 impl From<LexerError> for Diagnostic {
     fn from(error: LexerError) -> Self {
         let help = match error.kind {
-            LexerErrorKind::MissingOpeningTag => "start every script with <?scr",
+            LexerErrorKind::MissingOpeningTag => {
+                "start every script with <?scripta (legacy <?scr is also accepted)"
+            }
             LexerErrorKind::ContentAfterClosingTag => {
                 "move script content before ?> or omit the closing tag"
             }
@@ -222,19 +228,22 @@ impl<'a> Lexer<'a> {
         }
         self.whitespace();
         let start = self.position;
-        if !self.rest().starts_with("<?scr") {
+        let Some(tag) = OPENING_TAGS
+            .into_iter()
+            .find(|tag| self.rest().starts_with(tag))
+        else {
             return Err(self.error(
                 LexerErrorKind::MissingOpeningTag,
                 start,
-                "expected opening tag <?scr",
+                "expected opening tag <?scripta (legacy <?scr is also accepted)",
             ));
-        }
-        self.consume("<?scr");
+        };
+        self.consume(tag);
         if self.peek().is_some_and(identifier_continue) {
             return Err(self.error(
                 LexerErrorKind::MissingOpeningTag,
                 start,
-                "expected opening tag <?scr",
+                "expected opening tag <?scripta (legacy <?scr is also accepted)",
             ));
         }
         Ok(())

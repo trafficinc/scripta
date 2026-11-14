@@ -2,7 +2,7 @@ format = 1
 
 [packages.helpers]
 version = "1.0.0"
-checksum = "89c110fdb9d20e3476d532fab9cfd1288adcbbdde98b8edad28a58736dda10af"
+checksum = "1b9916459277243402f85ad9ec963a6ed7e6159079d0192980c73ca316323887"
 
 [packages.helpers.source]
 path = "lib/helpers"

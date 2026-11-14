@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // Network access happens only when an explicit URL is provided.
 $url = Cli::arg(0);
 if ($url === null) {

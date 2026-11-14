@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // A non-overwriting directory copy, not an archive or metadata-preserving backup.
 function canonicalDirectory($path: string): string {
     $previous = Dir::current();

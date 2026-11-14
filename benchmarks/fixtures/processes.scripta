@@ -1,1 +1,1 @@
-<?scr for ($i=0;$i<20;$i+=1) { $result=Process::run(Cli::arg(0)); if (!$result->success) exit(1); } echo "20\n";
+<?scripta for ($i=0;$i<20;$i+=1) { $result=Process::run(Cli::arg(0)); if (!$result->success) exit(1); } echo "20\n";

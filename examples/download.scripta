@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // Network and file writes happen only when both arguments are provided.
 $url = Cli::arg(0);
 $destination = Cli::arg(1);

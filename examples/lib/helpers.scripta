@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 function statusLabel($json: string): string {
     $data = Json::decode($json);
     return "Status: " . $data["status"];

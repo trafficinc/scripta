@@ -374,3 +374,68 @@ fn source_positions_remain_valid_over_a_small_adversarial_corpus() {
         }
     }
 }
+
+#[test]
+fn canonical_and_legacy_opening_tags_have_identical_tokens_and_correct_spans() {
+    let mut expected = None;
+    for tag in ["<?scripta", "<?scr"] {
+        for preamble in [
+            "",
+            "\u{feff}",
+            "#!/usr/bin/env scripta\r\n",
+            "\u{feff}#!/usr/bin/env scripta\r\n",
+            " \n\t",
+        ] {
+            let source = format!(
+                "{preamble}{tag}/* <?scr and <?scripta are inert here */echo \"é🦀\"; ?>\r\n"
+            );
+            let tokens = lex(&source).unwrap();
+            let kinds: Vec<_> = tokens.iter().map(|token| token.kind.clone()).collect();
+            if let Some(expected) = &expected {
+                assert_eq!(&kinds, expected);
+            } else {
+                expected = Some(kinds);
+            }
+            assert_eq!(tokens[0].span.start, source.find("echo").unwrap());
+            for token in &tokens {
+                assert_eq!(token.start, SourcePosition::at(&source, token.span.start));
+                assert_eq!(token.end, SourcePosition::at(&source, token.span.end));
+            }
+        }
+        for suffix in ["", "?>", " // eof", "/* empty */"] {
+            assert_eq!(lex(&format!("{tag}{suffix}")).unwrap().len(), 1);
+        }
+        let source = format!("{tag}\r\né");
+        let error = lex(&source).unwrap_err();
+        assert_eq!(error.span, Span::new(tag.len() + 2, source.len()));
+        assert_eq!((error.start.line, error.start.column), (2, 1));
+    }
+}
+
+#[test]
+fn opening_tag_boundaries_reject_typos_and_diagnostics_recommend_canonical_tag() {
+    for source in [
+        "<?src",
+        "<?scta",
+        "<?Scripta",
+        "<?script",
+        "<?scriptaExtra",
+        "<?scripta_",
+        "<?scripta9",
+        "<?scrExtra",
+        "<?scr_",
+        "<?scr9",
+    ] {
+        let error = fails(source, LexerErrorKind::MissingOpeningTag);
+        let diagnostic: Diagnostic = error.into();
+        let rendered = diagnostic.render("test.scripta", source);
+        assert!(
+            rendered.contains("expected opening tag <?scripta"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("legacy <?scr is also accepted"),
+            "{rendered}"
+        );
+    }
+}

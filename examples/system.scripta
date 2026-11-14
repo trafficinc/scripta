@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 echo "Host: " . System::hostname() . "\n";
 echo "Platform: " . System::platform() . "\n";
 echo "Architecture: " . System::architecture() . "\n";
