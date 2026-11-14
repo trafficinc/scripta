@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 $items = [];
 $items[] = "apple";
 $items[] = "banana";

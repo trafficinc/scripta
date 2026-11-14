@@ -3,7 +3,7 @@ use scr_runtime::{NativeFunction, NativeSignature, NativeType, Runtime, Value};
 use std::io::{self, Write};
 
 fn parse(body: &str) -> scr_ast::Program {
-    scr_parser::parse(&scr_lexer::lex(&format!("<?scr {body}")).unwrap()).unwrap()
+    scr_parser::parse(&scr_lexer::lex(&format!("<?scripta {body}")).unwrap()).unwrap()
 }
 
 fn runtime(setup: &scr_ast::Program) -> Runtime {

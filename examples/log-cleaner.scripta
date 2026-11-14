@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // Preview by default. Selects only shallow regular .log files older than --days.
 $directory = Cli::arg(0);
 if ($directory === null) {

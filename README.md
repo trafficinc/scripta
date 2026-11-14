@@ -18,8 +18,8 @@
 
 Use `scripta backup.scripta`, `scripta deploy.scripta`, or
 `scripta monitor.scripta`. `.scripta` is the official source extension; `.scta`
-is a shorthand. The `scr` command and `.scr` files remain compatible, and script
-syntax still starts with `<?scr`.
+is a shorthand. The `scr` command and `.scr` files remain compatible.
+New scripts start with `<?scripta`. Legacy `<?scr` remains accepted.
 
 ## Try Scripta Playground
 
@@ -82,11 +82,11 @@ unimplemented.
 
 ## Quick start
 
-Save this as `hello.scripta`. Every script, including an included file, starts with
-`<?scr`; a closing tag is optional.
+Save this as `hello.scripta`. Start new scripts, including included files, with
+`<?scripta`; legacy `<?scr` is also accepted. A closing tag is optional.
 
 ```scr
-<?scr
+<?scripta
 $name = "Scripta";
 echo "Hello, " . $name . "!\n";
 ```
@@ -309,7 +309,7 @@ A script can explicitly return a code from 0 through 255 with `exit(code)`.
 A file-backed script can consume piped data without printing a prompt:
 
 ```scr
-<?scr
+<?scripta
 while (($line = Cli::readLine()) !== null) {
     echo String::upper($line) . "\n";
 }
@@ -324,7 +324,7 @@ On macOS/Linux, try the streaming example with piped data:
 
 ```sh
 cat playground/sample-events.txt | scripta run playground/streaming.scripta -
-printf '%s\n' '<?scr echo "Hello from stdin!\n";' | scripta run -
+printf '%s\n' '<?scripta echo "Hello from stdin!\n";' | scripta run -
 ```
 
 `scripta run -` consumes stdin as UTF-8 source through EOF, subject to
@@ -450,7 +450,7 @@ scripta install --locked
 Load an installed package with an alias to keep its names isolated:
 
 ```scr
-<?scr
+<?scripta
 require_once "helpers" as Helpers;
 echo Helpers::greeting();
 ```

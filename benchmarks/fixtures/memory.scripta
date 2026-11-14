@@ -1,1 +1,1 @@
-<?scr $values=Json::decode(File::read(Cli::arg(0))); $copies=["seed"=>$values]; for ($i=0;$i<48;$i+=1) { $copies[str($i)]=$values; } echo str(len($copies)) . "\n";
+<?scripta $values=Json::decode(File::read(Cli::arg(0))); $copies=["seed"=>$values]; for ($i=0;$i<48;$i+=1) { $copies[str($i)]=$values; } echo str(len($copies)) . "\n";

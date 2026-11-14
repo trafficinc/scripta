@@ -14,7 +14,8 @@ cargo run -p scr-cli -- fmt --check examples/hello.scripta
 
 The primary command is `scripta`; Cargo also builds `scr` for compatibility.
 Use `.scripta` for source files (`.scta` shorthand and legacy `.scr` also work).
-The opening tag stays `<?scr`. The benchmark driver accepts `--scripta` and
+Use `<?scripta` for new scripts; legacy `<?scr` remains accepted. The formatter
+preserves the existing tag. The benchmark driver accepts `--scripta` and
 legacy `--scr`; the separate playground launcher retains its `--scr` protocol.
 
 Run format, lint, and test checks on each platform being validated. CLI exit codes
@@ -105,7 +106,7 @@ from merely creating or queuing a workflow.
 `scr_cli::formatter::format(source)` implementation. Formatting uses four spaces
 per indentation level, puts each statement on its own line, normalizes operator/
 comma spacing, and indents unbraced bodies without adding braces. Original token
-spellings (including every string literal), comments, BOM/shebang, `<?scr`, and
+spellings (including every string literal), comments, BOM/shebang, `<?scripta`, and
 optional `?>` are preserved. Whitespace outside literals/comments uses LF and one
 final newline; existing blank-line runs are normalized. Interior multiline comment
 and string bytes are retained exactly. Unsupported/malformed scripts are rejected

@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // Filter records with a loop, then sort and summarize the retained names.
 $records = [["name" => "café-api", "active" => true], ["name" => "worker", "active" => false], ["name" => "auth", "active" => true], ["name" => "cache"]];
 $names = [];

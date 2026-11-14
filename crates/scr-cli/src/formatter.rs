@@ -131,10 +131,13 @@ impl Writer {
                 position += first.len_utf8();
                 continue;
             }
-            if rest.starts_with("<?scr") {
-                self.raw("<?scr", 0);
+            if let Some(tag) = scr_lexer::OPENING_TAGS
+                .into_iter()
+                .find(|tag| rest.starts_with(tag))
+            {
+                self.raw(tag, 0);
                 self.newline();
-                position += 5;
+                position += tag.len();
                 newline = false;
                 continue;
             }

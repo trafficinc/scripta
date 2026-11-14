@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 $result = Process::run("git", ["status", "--short"], ["timeoutMs" => 5000]);
 if ($result->success) {
     echo $result->stdout;

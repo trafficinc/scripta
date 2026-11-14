@@ -272,11 +272,6 @@ fn run_reports_nested_stack_traces_on_stderr() {
 #[test]
 fn primary_and_compatibility_commands_accept_all_source_extensions() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("helper.scripta"),
-        "<?scr function greeting(): string { return 'Hello from '; }",
-    )
-    .unwrap();
     for binary in [env!("CARGO_BIN_EXE_scripta"), env!("CARGO_BIN_EXE_scr")] {
         let version = Command::new(binary).arg("version").output().unwrap();
         assert!(version.status.success());
@@ -284,37 +279,44 @@ fn primary_and_compatibility_commands_accept_all_source_extensions() {
             String::from_utf8(version.stdout).unwrap(),
             format!("scripta {}\n", env!("CARGO_PKG_VERSION"))
         );
-        for extension in ["scripta", "scta", "scr"] {
-            let path = dir.path().join(format!("backup script.{extension}"));
-            std::fs::write(&path,"<?scr require_once 'helper.scripta';$name=Cli::arg(0);echo greeting().$name;exit 7;").unwrap();
-            let format = Command::new(binary).arg("fmt").arg(&path).output().unwrap();
-            assert!(
-                format.status.success(),
-                "{}",
-                String::from_utf8_lossy(&format.stderr)
-            );
-            for args in [vec!["check"], vec!["fmt", "--check"]] {
-                let output = Command::new(binary).args(args).arg(&path).output().unwrap();
+        for (tag, helper_tag) in [("<?scripta", "<?scr"), ("<?scr", "<?scripta")] {
+            std::fs::write(
+                dir.path().join("helper.scripta"),
+                format!("{helper_tag} function greeting(): string {{ return 'Hello from '; }}"),
+            )
+            .unwrap();
+            for extension in ["scripta", "scta", "scr"] {
+                let path = dir.path().join(format!("backup script.{extension}"));
+                std::fs::write(&path,format!("{tag} require_once 'helper.scripta';$name=Cli::arg(0);echo greeting().$name;exit 7;")).unwrap();
+                let format = Command::new(binary).arg("fmt").arg(&path).output().unwrap();
                 assert!(
-                    output.status.success(),
+                    format.status.success(),
                     "{}",
-                    String::from_utf8_lossy(&output.stderr)
+                    String::from_utf8_lossy(&format.stderr)
                 );
-            }
-            for prefix in [vec![], vec!["run"]] {
-                let output = Command::new(binary)
-                    .args(prefix)
-                    .arg(&path)
-                    .arg("Scripta")
-                    .output()
-                    .unwrap();
-                assert_eq!(
-                    output.status.code(),
-                    Some(7),
-                    "{}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                assert_eq!(output.stdout, b"Hello from Scripta");
+                for args in [vec!["check"], vec!["fmt", "--check"]] {
+                    let output = Command::new(binary).args(args).arg(&path).output().unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                for prefix in [vec![], vec!["run"]] {
+                    let output = Command::new(binary)
+                        .args(prefix)
+                        .arg(&path)
+                        .arg("Scripta")
+                        .output()
+                        .unwrap();
+                    assert_eq!(
+                        output.status.code(),
+                        Some(7),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert_eq!(output.stdout, b"Hello from Scripta");
+                }
             }
         }
     }

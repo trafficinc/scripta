@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 for ($number = 1; $number <= 3; $number += 1) {
     echo str($number) . "\n";
 }

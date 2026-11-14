@@ -338,3 +338,25 @@ fn cli_resource_budgets_stop_execution_and_redact_credentials() {
             .contains("sensitive-value-123")
     );
 }
+
+#[test]
+fn formatter_preserves_each_opening_spelling_and_preamble_without_changing_execution() {
+    for tag in ["<?scripta", "<?scr"] {
+        let source = format!(
+            "\u{feff}#!/usr/bin/env scripta\r\n{tag}/* <?scr and <?scripta stay literal */$name=\"Scripta\";echo \"Hello from \".$name;?>"
+        );
+        let formatted = formatter::format(&source).unwrap();
+        assert!(
+            formatted.starts_with(&format!("\u{feff}#!/usr/bin/env scripta\n{tag}\n")),
+            "{formatted}"
+        );
+        assert!(formatted.contains("/* <?scr and <?scripta stay literal */"));
+        assert_eq!(formatter::format(&formatted).unwrap(), formatted);
+        let mut original_output = Vec::new();
+        let mut formatted_output = Vec::new();
+        pipeline::run(&source, &mut original_output).unwrap();
+        pipeline::run(&formatted, &mut formatted_output).unwrap();
+        assert_eq!(original_output, b"Hello from Scripta");
+        assert_eq!(formatted_output, original_output);
+    }
+}

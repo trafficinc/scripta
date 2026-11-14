@@ -719,9 +719,11 @@ fn smoke(path: &Path) -> Result<()> {
     // Exercise the shipped collection APIs from the extracted package, with
     // the same cleared environment and package-only PATH as the other smoke checks.
     execute(&["run", "playground/collections.scripta"])?;
-    let offline = r#"<?scr require_once "examples/lib/helpers.scripta"; $data=Json::decode("{\"status\":\"offline\"}"); File::write("offline.json",Json::encode($data)); echo statusLabel(File::read("offline.json")) . "\n"; echo Date::format(Date::parse("2026-01-01T00:00:00Z"),"%Y") . "\n"; Log::info("local smoke complete");"#;
+    let offline = r#"<?scripta require_once "examples/lib/helpers.scripta"; $data=Json::decode("{\"status\":\"offline\"}"); File::write("offline.json",Json::encode($data)); echo statusLabel(File::read("offline.json")) . "\n"; echo Date::format(Date::parse("2026-01-01T00:00:00Z"),"%Y") . "\n"; Log::info("local smoke complete");"#;
     let offline = if legacy {
-        offline.replace(".scripta", ".scr")
+        offline
+            .replace(".scripta", ".scr")
+            .replace("<?scripta", "<?scr")
     } else {
         offline.to_owned()
     };

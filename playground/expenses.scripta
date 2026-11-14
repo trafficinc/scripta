@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 $expenses = ["Lunch" => 15, "Coffee" => 5, "Transport" => 12];
 $total = 0;
 foreach ($expenses as $name => $amount) {

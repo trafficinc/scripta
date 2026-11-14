@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 $scores = ["Alice" => 92, "Bob" => 68, "Charlie" => 45];
 foreach ($scores as $name => $score) {
     $grade = "";

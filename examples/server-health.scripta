@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // One local observation. CPU measurement blocks for its observation interval.
 $path = Cli::arg(0);
 if ($path === null) {

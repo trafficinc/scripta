@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // Build with: cargo run -p scr-cli --features sqlite -- examples/sqlite.scripta
 $db = Sqlite::open(":memory:");
 try {

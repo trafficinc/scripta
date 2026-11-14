@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // Local-only examples: Unicode text, explicit bytes, CSV, and simple patterns.
 $text = "👍🏽 café";
 $data = Bytes::encodeUtf8($text);

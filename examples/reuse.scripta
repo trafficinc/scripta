@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 require_once "lib/helpers.scripta";
 require_once "lib/../lib/helpers.scripta";
 echo statusLabel(Json::encode(["status" => "ready"])) . "\n";

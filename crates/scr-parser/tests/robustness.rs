@@ -4,7 +4,7 @@ proptest! {
     #[test]
     fn arbitrary_unicode_never_panics(chars in proptest::collection::vec(any::<char>(), 0..256)) {
         let body: String = chars.into_iter().collect();
-        for source in [body.clone(), format!("<?scr {body}")] {
+        for source in [body.clone(), format!("<?scr {body}"), format!("<?scripta {body}")] {
             if let Ok(tokens) = scr_lexer::lex(&source) {
                 let _ = scr_parser::parse_with_diagnostics(&tokens);
                 let _ = scr_parser::parse_expression(&tokens);

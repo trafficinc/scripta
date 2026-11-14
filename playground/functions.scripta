@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 function greet($name: string, $prefix: string = "Hello"): string {
     return $prefix . ", " . $name . "!";
 }

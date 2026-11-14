@@ -1,4 +1,4 @@
-<?scr
+<?scripta
 // Add --uncaught to demonstrate an error diagnostic and exit status 1.
 if (Cli::has("uncaught")) {
     $items = [1];

@@ -3,7 +3,7 @@ use scr_runtime::{Runtime, Value};
 use std::{hint::black_box, io, time::Instant};
 
 fn parse(body: &str) -> scr_ast::Program {
-    scr_parser::parse(&scr_lexer::lex(&format!("<?scr {body}")).unwrap()).unwrap()
+    scr_parser::parse(&scr_lexer::lex(&format!("<?scripta {body}")).unwrap()).unwrap()
 }
 
 fn execute(runtime: &mut Runtime, program: &scr_ast::Program) {

@@ -97,7 +97,7 @@ sequential, so discard a partially initialized runtime if startup fails.
 In `examples/greeting.scripta`:
 
 ```scr
-<?scr
+<?scripta
 echo Greeting::hello("Scripta") . "\n";
 try {
     Greeting::hello("");
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn returns_a_greeting_and_preserves_unicode() {
         assert_eq!(
-            run("<?scr echo Greeting::hello('世界');").unwrap(),
+            run("<?scripta echo Greeting::hello('世界');").unwrap(),
             "Hello, 世界!"
         );
     }
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn rejects_invalid_argument_types_and_counts() {
         for call in ["Greeting::hello(42)", "Greeting::hello()", "Greeting::hello('a', 'b')"] {
-            let error = run(&format!("<?scr {call};")).unwrap_err();
+            let error = run(&format!("<?scripta {call};")).unwrap_err();
             assert!(error.message.starts_with("TypeError:"), "{error}");
         }
     }
@@ -215,11 +215,11 @@ mod tests {
     #[test]
     fn bounds_names_and_exposes_catchable_errors() {
         for name in [" ".to_owned(), "a".repeat(257)] {
-            let error = run(&format!("<?scr Greeting::hello('{name}');")).unwrap_err();
+            let error = run(&format!("<?scripta Greeting::hello('{name}');")).unwrap_err();
             assert!(error.message.starts_with("GreetingError:"));
         }
         assert_eq!(
-            run("<?scr try { Greeting::hello(''); } catch (GreetingError $e) { echo 'caught'; }")
+            run("<?scripta try { Greeting::hello(''); } catch (GreetingError $e) { echo 'caught'; }")
                 .unwrap(),
             "caught"
         );
@@ -242,7 +242,7 @@ path with the feature enabled and disabled:
 #[test]
 fn greeting_feature_controls_cli_registration() {
     let script = tempfile::NamedTempFile::new().unwrap();
-    std::fs::write(script.path(), "<?scr echo Greeting::hello('Scripta');").unwrap();
+    std::fs::write(script.path(), "<?scripta echo Greeting::hello('Scripta');").unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(script.path())
         .output()

@@ -1,6 +1,6 @@
 # Example scripts
 
-All scripts start with <?scr and run with the standalone scripta interpreter. No
+All scripts start with <?scripta and run with the standalone scripta interpreter. No
 Python, Node.js, PHP, or Docker is required. Paths below assume an extracted
 package or source checkout; sample input directories must already exist.
 
@@ -37,7 +37,7 @@ JSON arguments are passed directly to Process::run.
 Additional existing examples include reuse.scripta with lib/helpers.scripta, system.scripta,
 process.scripta, and organize.scripta. The latter legacy organizer moves PDFs when run,
 so prefer file-organizer.scripta for a preview-first workflow. process.scripta explicitly
-requires Git. Library helpers require <?scr even when loaded with require_once.
+requires Git. Library helpers require <?scripta even when loaded with require_once.
 
 The `packages/` example installs a local versioned library and loads it by name:
 
