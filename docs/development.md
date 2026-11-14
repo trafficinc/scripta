@@ -106,9 +106,11 @@ use a new tag. Failed uploads leave a draft that a rerun can resume. Rerunning a
 replaces only its temporary Actions artifact, so rerunning a failed publisher
 can reuse the completed build artifacts from the same run.
 
-The release contains four base and four distinct `-sqlite` archives, per-archive
-checksums, aggregate `SHA256SUMS`, native validation records, package smoke
-records, zipped logs, and `release-manifest.json`. These release assets are
+The release has exactly ten uploaded assets: four base and four distinct
+`-sqlite` archives, `SHA256SUMS`, and `validation-evidence.zip`. The checksum file
+covers all eight packages and the evidence ZIP. Individual checksums, native
+validation records, package smoke records, logs, and `release-manifest.json` are
+bundled inside that one evidence ZIP. These release assets are
 independent of the seven-day Actions artifact expiration. Windows downloads
 contain `scripta.exe` and legacy `scr.exe`; no Rust installation is required.
 

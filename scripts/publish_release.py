@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -80,31 +81,39 @@ def prepare(inputs, output, revision, tag, version):
     output.mkdir(parents=True)
     manifest = {'tag': tag, 'source_revision': revision, 'version': version,
                 'prerelease': prerelease, 'packages': []}
-    checksums = []
-    for archive, smoke, name, target, variant in packages:
-        shutil.copyfile(archive, output / name)
-        checksum = digest(output / name)
-        checksums.append(f'{checksum}  {name}\n')
-        (output / (name + '.sha256')).write_text(checksums[-1], encoding='utf-8')
-        shutil.copyfile(smoke, output / (name + '.validation.json'))
-        manifest['packages'].append({'asset': name, 'target': target, 'variant': variant,
-                                     'archive_sha256': checksum})
-    for target, (path, _) in sorted(records.items()):
-        shutil.copyfile(path, output / f'validation-{target}.json')
-        logs = path.parent / 'logs'
-        with zipfile.ZipFile(output / f'logs-{target}.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
-            for log in sorted(logs.glob('*.log')):
-                archive.write(log, 'logs/' + log.name)
-    (output / 'SHA256SUMS').write_text(''.join(sorted(checksums, key=lambda line: line.split('  ', 1)[1])), encoding='utf-8')
-    manifest['files'] = {p.name: digest(p) for p in sorted(output.iterdir())}
-    (output / 'release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    with tempfile.TemporaryDirectory(prefix='scripta-evidence-', dir=output.parent) as directory:
+        evidence = Path(directory)
+        for archive, smoke, name, target, variant in packages:
+            shutil.copyfile(archive, output / name)
+            checksum = digest(output / name)
+            (evidence / (name + '.sha256')).write_text(f'{checksum}  {name}\n', encoding='utf-8')
+            shutil.copyfile(smoke, evidence / (name + '.validation.json'))
+            manifest['packages'].append({'asset': name, 'target': target, 'variant': variant,
+                                         'archive_sha256': checksum})
+        for target, (path, _) in sorted(records.items()):
+            shutil.copyfile(path, evidence / f'validation-{target}.json')
+            logs = evidence / 'logs' / target
+            logs.mkdir(parents=True)
+            for log in sorted((path.parent / 'logs').glob('*.log')):
+                shutil.copyfile(log, logs / log.name)
+        manifest['files'] = {p.name: digest(p) for p in sorted(output.iterdir())}
+        manifest['files'].update({p.relative_to(evidence).as_posix(): digest(p)
+                                  for p in sorted(evidence.rglob('*')) if p.is_file()})
+        (evidence / 'release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+        with zipfile.ZipFile(output / 'validation-evidence.zip', 'w', zipfile.ZIP_DEFLATED) as bundle:
+            for path in sorted(evidence.rglob('*')):
+                if path.is_file():
+                    bundle.write(path, path.relative_to(evidence).as_posix())
+    checksums = [f'{digest(path)}  {path.name}\n' for path in sorted(output.iterdir())]
+    (output / 'SHA256SUMS').write_text(''.join(checksums), encoding='utf-8')
     notes = [f'Scripta {version}', '', f'Tag: `{tag}`', f'Source: `{revision}`', '',
              'Native validation passed on Linux x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon.',
              'Both default/all-feature debug/dist suites, Clippy, dependency inspection, archive verification,',
              'offline extracted-package smoke, and identical-input repacking passed.', '',
              'Download the archive for your platform. `-sqlite` archives include the SQLite extension.',
              'Archives contain `scripta` and legacy `scr` commands; no Rust installation is required.',
-             'Checksums, native records, package smoke records, and logs are attached.',
+             'SHA256SUMS verifies the eight packages and validation-evidence.zip.',
+             'The evidence ZIP contains individual checksums, native/smoke records, logs, and release-manifest.json.',
              'Candidates have no publisher signatures or macOS notarization.']
     notes_path = output.parent / (output.name + '-notes.md')
     notes_path.write_text('\n'.join(notes) + '\n', encoding='utf-8')
