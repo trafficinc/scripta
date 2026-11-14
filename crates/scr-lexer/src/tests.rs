@@ -126,8 +126,8 @@ fn bom_shebang_and_opening_tag() {
     for preamble in [
         "",
         "\u{feff}",
-        "#!/usr/bin/env scr\n",
-        "\u{feff}#!/usr/bin/env scr\r\n",
+        "#!/usr/bin/env scripta\n",
+        "\u{feff}#!/usr/bin/env scripta\r\n",
         " \n\t",
     ] {
         let source = format!("{preamble}<?scr/* comment */echo 'ok';");
@@ -139,9 +139,9 @@ fn bom_shebang_and_opening_tag() {
             SourcePosition::at(&source, tokens[0].span.start)
         );
     }
-    fails("#!/usr/bin/env scr", LexerErrorKind::MissingOpeningTag);
+    fails("#!/usr/bin/env scripta", LexerErrorKind::MissingOpeningTag);
     fails(
-        " \n#!/usr/bin/env scr\n<?scr",
+        " \n#!/usr/bin/env scripta\n<?scr",
         LexerErrorKind::MissingOpeningTag,
     );
     fails("\u{feff}\u{feff}<?scr", LexerErrorKind::MissingOpeningTag);
@@ -327,7 +327,7 @@ fn invalid_operators_and_characters() {
 
 #[test]
 fn positions_across_bom_shebang_unicode_crlf_cr_and_tabs() {
-    let source = "\u{feff}#!/usr/bin/env scr\r\n<?scr\r\necho \"é🦀\";\r\t$x = 2;\n";
+    let source = "\u{feff}#!/usr/bin/env scripta\r\n<?scr\r\necho \"é🦀\";\r\t$x = 2;\n";
     let tokens = lex(source).unwrap();
     for token in &tokens {
         assert_eq!(token.start, SourcePosition::at(source, token.span.start));
@@ -342,8 +342,8 @@ fn positions_across_bom_shebang_unicode_crlf_cr_and_tabs() {
     assert_eq!((error.start.line, error.start.column), (2, 5));
     assert_eq!(error.span, Span::new(12, 13));
     let diagnostic: Diagnostic = error.into();
-    let rendered = diagnostic.render("test.scr", "<?scr\r\n\"é\" @");
-    assert!(rendered.contains("test.scr:2:5"));
+    let rendered = diagnostic.render("test.scripta", "<?scr\r\n\"é\" @");
+    assert!(rendered.contains("test.scripta:2:5"));
     assert!(rendered.contains("error[E0101]: unexpected character"));
     assert!(rendered.contains("2 | \"*\" @"));
 }
@@ -351,7 +351,7 @@ fn positions_across_bom_shebang_unicode_crlf_cr_and_tabs() {
 #[test]
 fn source_positions_remain_valid_over_a_small_adversarial_corpus() {
     // Exercises arbitrary UTF-8 transitions and EOF after every common prefix.
-    for prefix in ["", "<?scr", "\u{feff}<?scr", "#!scr\n<?scr"] {
+    for prefix in ["", "<?scr", "\u{feff}<?scr", "#!scripta\n<?scr"] {
         for fragment in [
             "", "$", "/*", "\"", "'", "\\", "é", "\r\n", "?>", "1e+", "!==", "\"🦀\"",
         ] {

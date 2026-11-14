@@ -163,9 +163,9 @@ mod tests {
         let source = "<?scr\n\"é\" $name";
         let start = source.find('$').unwrap();
         let error = Diagnostic::new("test error", Span::new(start, source.len()));
-        let rendered = error.render("example.scr", source);
+        let rendered = error.render("example.scripta", source);
         assert!(rendered.contains("error[E0201]: test error"));
-        assert!(rendered.contains("example.scr:2:5"));
+        assert!(rendered.contains("example.scripta:2:5"));
         assert!(rendered.contains("2 | \"*\" $name"));
         assert_eq!(error.to_string(), "test error");
     }
@@ -173,9 +173,17 @@ mod tests {
     #[test]
     fn rendering_handles_external_invalid_offsets() {
         let error = Diagnostic::new("test", Span::new(1, usize::MAX));
-        assert!(error.render("test.scr", "é").contains("test.scr:1:1"));
+        assert!(
+            error
+                .render("test.scripta", "é")
+                .contains("test.scripta:1:1")
+        );
         let error = Diagnostic::new("test", Span::new(usize::MAX, usize::MAX));
-        assert!(error.render("test.scr", "é").contains("test.scr:1:2"));
+        assert!(
+            error
+                .render("test.scripta", "é")
+                .contains("test.scripta:1:2")
+        );
     }
 }
 
@@ -189,15 +197,15 @@ mod rich_tests {
             let text = Diagnostic::new("unexpected token", Span::new(offset, offset + 1))
                 .with_code("E0101")
                 .with_help("remove @")
-                .render("unicode.scr", source);
-            assert!(text.contains("unicode.scr:2:3"));
+                .render("unicode.scripta", source);
+            assert!(text.contains("unicode.scripta:2:3"));
             assert!(text.contains("2 | é @"));
             assert!(text.ends_with("help: remove @"));
         }
         assert!(
             Diagnostic::new("bad", Span::new(99, 0))
-                .render("empty.scr", "")
-                .contains("empty.scr:1:1")
+                .render("empty.scripta", "")
+                .contains("empty.scripta:1:1")
         );
     }
 }

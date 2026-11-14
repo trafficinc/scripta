@@ -38,10 +38,10 @@ fn anonymous_callbacks_keep_definition_paths_for_relative_requires() {
     let directory = tempfile::tempdir().unwrap();
     let lib = directory.path().join("lib");
     std::fs::create_dir(&lib).unwrap();
-    std::fs::write(lib.join("callback.scr"), "<?scr $callback = function ($number: int = 2): int { require 'increment.scr'; return $number + $increment; };").unwrap();
-    std::fs::write(lib.join("increment.scr"), "<?scr $increment = 5;").unwrap();
-    let mut runtime = runtime(Some(&directory.path().join("main.scr")));
-    run(&mut runtime, "require 'lib/callback.scr';").unwrap();
+    std::fs::write(lib.join("callback.scripta"), "<?scr $callback = function ($number: int = 2): int { require 'increment.scripta'; return $number + $increment; };").unwrap();
+    std::fs::write(lib.join("increment.scripta"), "<?scr $increment = 5;").unwrap();
+    let mut runtime = runtime(Some(&directory.path().join("main.scripta")));
+    run(&mut runtime, "require 'lib/callback.scripta';").unwrap();
     run(
         &mut runtime,
         "$answer = $callback(); $explicit = $callback(10);",
@@ -49,12 +49,12 @@ fn anonymous_callbacks_keep_definition_paths_for_relative_requires() {
     .unwrap();
     assert_eq!(runtime.get_global("answer"), Some(&Value::Int(7)));
     assert_eq!(runtime.get_global("explicit"), Some(&Value::Int(15)));
-    std::fs::write(lib.join("increment.scr"), "<?scr $increment = 1 / 0;").unwrap();
+    std::fs::write(lib.join("increment.scripta"), "<?scr $increment = 1 / 0;").unwrap();
     let error = run(&mut runtime, "$callback();").unwrap_err();
     assert!(error.message.starts_with("ArithmeticError:"));
     assert_eq!(
         error.source.as_ref().unwrap().path,
-        std::fs::canonicalize(lib.join("increment.scr")).unwrap()
+        std::fs::canonicalize(lib.join("increment.scripta")).unwrap()
     );
     assert!(
         error
@@ -106,41 +106,45 @@ fn modules_execute_in_order_share_caller_scope_and_once_uses_canonical_identity(
     let dir = tempfile::tempdir().unwrap();
     let lib = dir.path().join("lib");
     std::fs::create_dir(&lib).unwrap();
-    std::fs::write(lib.join("helper.scr"), r#"<?scr echo "helper;"; $count += 1; function greet($name) { return "hello " . $name; } require_once "config.scr";"#).unwrap();
+    std::fs::write(lib.join("helper.scripta"), r#"<?scr echo "helper;"; $count += 1; function greet($name) { return "hello " . $name; } require_once "config.scripta";"#).unwrap();
     std::fs::write(
-        lib.join("config.scr"),
+        lib.join("config.scripta"),
         r#"<?scr echo "config;"; $configured = true;"#,
     )
     .unwrap();
-    std::fs::write(lib.join("repeat.scr"), "<?scr $count += 1;").unwrap();
-    let mut runtime = runtime(Some(&dir.path().join("main.scr")));
-    let output = run(&mut runtime, r#"$count = 0; echo "start;"; require "lib/helper.scr"; require_once "lib/../lib/helper.scr"; require_once "lib/config.scr"; require "lib/repeat.scr"; require "lib/repeat.scr"; echo greet("world");"#).unwrap();
+    std::fs::write(lib.join("repeat.scripta"), "<?scr $count += 1;").unwrap();
+    let mut runtime = runtime(Some(&dir.path().join("main.scripta")));
+    let output = run(&mut runtime, r#"$count = 0; echo "start;"; require "lib/helper.scripta"; require_once "lib/../lib/helper.scripta"; require_once "lib/config.scripta"; require "lib/repeat.scripta"; require "lib/repeat.scripta"; echo greet("world");"#).unwrap();
     assert_eq!(output, "start;helper;config;hello world");
     assert_eq!(runtime.get_global("count"), Some(&Value::Int(3)));
     assert_eq!(runtime.get_global("configured"), Some(&Value::Bool(true)));
     // Loaded-set state is retained across execute calls on the same runtime.
     assert_eq!(
-        run(&mut runtime, r#"require_once "lib/helper.scr";"#).unwrap(),
+        run(&mut runtime, r#"require_once "lib/helper.scripta";"#).unwrap(),
         ""
     );
-    std::fs::write(lib.join("local.scr"), "<?scr $local += 2;").unwrap();
+    std::fs::write(lib.join("local.scripta"), "<?scr $local += 2;").unwrap();
     std::fs::write(
-        lib.join("function.scr"),
-        r#"<?scr function helper() { $local = 3; require "local.scr"; return $local; }"#,
+        lib.join("function.scripta"),
+        r#"<?scr function helper() { $local = 3; require "local.scripta"; return $local; }"#,
     )
     .unwrap();
     assert_eq!(
         run(
             &mut runtime,
-            r#"require "lib/function.scr"; echo str(helper());"#
+            r#"require "lib/function.scripta"; echo str(helper());"#
         )
         .unwrap(),
         "5"
     );
     // Included declarations become available only when encountered.
-    std::fs::write(lib.join("order.scr"), "<?scr later(); function later() {}").unwrap();
+    std::fs::write(
+        lib.join("order.scripta"),
+        "<?scr later(); function later() {}",
+    )
+    .unwrap();
     assert!(
-        run(&mut runtime, r#"require "lib/order.scr";"#)
+        run(&mut runtime, r#"require "lib/order.scripta";"#)
             .unwrap_err()
             .message
             .contains("undefined function later")
@@ -150,24 +154,24 @@ fn modules_execute_in_order_share_caller_scope_and_once_uses_canonical_identity(
 #[test]
 fn include_failures_cycles_retry_and_traces_retain_original_files() {
     let dir = tempfile::tempdir().unwrap();
-    let main = dir.path().join("main.scr");
+    let main = dir.path().join("main.scripta");
     let mut runtime = runtime(Some(&main));
     error(
         &mut runtime,
-        r#"require "missing.scr";"#,
+        r#"require "missing.scripta";"#,
         "ModuleNotFoundError",
     );
     error(&mut runtime, "require 1;", "TypeError");
     error(
         &mut runtime,
-        r#"require "https://example.com/mod.scr";"#,
+        r#"require "https://example.com/mod.scripta";"#,
         "ModuleError",
     );
-    let bad = dir.path().join("bad.scr");
+    let bad = dir.path().join("bad.scripta");
     std::fs::write(&bad, "echo 'missing tag';").unwrap();
     let failure = error(
         &mut runtime,
-        r#"require_once "bad.scr";"#,
+        r#"require_once "bad.scripta";"#,
         "ModuleSyntaxError",
     );
     assert_eq!(
@@ -176,19 +180,31 @@ fn include_failures_cycles_retry_and_traces_retain_original_files() {
     );
     std::fs::write(&bad, "<?scr echo \"retry\";").unwrap();
     assert_eq!(
-        run(&mut runtime, r#"require_once "bad.scr";"#).unwrap(),
+        run(&mut runtime, r#"require_once "bad.scripta";"#).unwrap(),
         "retry"
     );
-    std::fs::write(dir.path().join("a.scr"), r#"<?scr require "b.scr";"#).unwrap();
-    std::fs::write(dir.path().join("b.scr"), r#"<?scr require_once "a.scr";"#).unwrap();
-    let failure = error(&mut runtime, r#"require "a.scr";"#, "CircularIncludeError");
-    let rendered = failure.render("main.scr", "<?scr require \"a.scr\";");
-    assert!(
-        rendered.contains("a.scr:1:")
-            && rendered.contains("b.scr:1:")
-            && rendered.contains("main.scr:1:")
+    std::fs::write(
+        dir.path().join("a.scripta"),
+        r#"<?scr require "b.scripta";"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.scripta"),
+        r#"<?scr require_once "a.scripta";"#,
+    )
+    .unwrap();
+    let failure = error(
+        &mut runtime,
+        r#"require "a.scripta";"#,
+        "CircularIncludeError",
     );
-    let helper = dir.path().join("trace.scr");
+    let rendered = failure.render("main.scripta", "<?scr require \"a.scripta\";");
+    assert!(
+        rendered.contains("a.scripta:1:")
+            && rendered.contains("b.scripta:1:")
+            && rendered.contains("main.scripta:1:")
+    );
+    let helper = dir.path().join("trace.scripta");
     std::fs::write(
         &helper,
         "<?scr\nfunction explode() {\n    Json::decode(\"invalid\");\n}\n",
@@ -196,17 +212,17 @@ fn include_failures_cycles_retry_and_traces_retain_original_files() {
     .unwrap();
     let failure = error(
         &mut runtime,
-        "require \"trace.scr\";\nexplode();",
+        "require \"trace.scripta\";\nexplode();",
         "JsonError",
     );
-    let rendered = failure.render("wrong.scr", "wrong");
-    assert!(rendered.contains("trace.scr:3:"), "{rendered}");
-    assert!(rendered.contains("main.scr:2:"), "{rendered}");
+    let rendered = failure.render("wrong.scripta", "wrong");
+    assert!(rendered.contains("trace.scripta:3:"), "{rendered}");
+    assert!(rendered.contains("main.scripta:2:"), "{rendered}");
     // The entry file participates in cycle detection before it can execute twice.
-    std::fs::write(&main, "<?scr require \"main.scr\";").unwrap();
+    std::fs::write(&main, "<?scr require \"main.scripta\";").unwrap();
     error(
         &mut runtime,
-        r#"require "main.scr";"#,
+        r#"require "main.scripta";"#,
         "CircularIncludeError",
     );
 }
@@ -215,13 +231,13 @@ fn include_failures_cycles_retry_and_traces_retain_original_files() {
 #[test]
 fn require_once_resolves_symlink_aliases() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("original.scr"), "<?scr echo \"once\";").unwrap();
-    std::os::unix::fs::symlink("original.scr", dir.path().join("alias.scr")).unwrap();
-    let mut runtime = runtime(Some(&dir.path().join("main.scr")));
+    std::fs::write(dir.path().join("original.scripta"), "<?scr echo \"once\";").unwrap();
+    std::os::unix::fs::symlink("original.scripta", dir.path().join("alias.scripta")).unwrap();
+    let mut runtime = runtime(Some(&dir.path().join("main.scripta")));
     assert_eq!(
         run(
             &mut runtime,
-            r#"require_once "original.scr"; require_once "alias.scr";"#
+            r#"require_once "original.scripta"; require_once "alias.scripta";"#
         )
         .unwrap(),
         "once"
@@ -231,9 +247,13 @@ fn require_once_resolves_symlink_aliases() {
 #[test]
 fn includes_respect_read_permission_and_filesystem_roots() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("helper.scr"), "<?scr echo \"forbidden\";").unwrap();
+    std::fs::write(
+        dir.path().join("helper.scripta"),
+        "<?scr echo \"forbidden\";",
+    )
+    .unwrap();
     let mut options = RuntimeOptions::default();
-    options.context.script_path = Some(dir.path().join("main.scr"));
+    options.context.script_path = Some(dir.path().join("main.scripta"));
     options
         .context
         .permissions
@@ -241,7 +261,11 @@ fn includes_respect_read_permission_and_filesystem_roots() {
         .remove("filesystem.read");
     let mut denied = Runtime::with_options(options);
     scr_stdlib::register(&mut denied).unwrap();
-    error(&mut denied, r#"require "helper.scr";"#, "PermissionError");
+    error(
+        &mut denied,
+        r#"require "helper.scripta";"#,
+        "PermissionError",
+    );
     let mut restricted = Runtime::new();
     scr_stdlib::register_with_options(
         &mut restricted,
@@ -256,7 +280,7 @@ fn includes_respect_read_permission_and_filesystem_roots() {
     .unwrap();
     error(
         &mut restricted,
-        r#"require "helper.scr";"#,
+        r#"require "helper.scripta";"#,
         "PermissionError",
     );
 }
@@ -502,13 +526,13 @@ fn deep_include_chains_are_bounded_and_runtime_state_recovers() {
     let dir = tempfile::tempdir().unwrap();
     for index in 0..70 {
         std::fs::write(
-            dir.path().join(format!("part{index}.scr")),
-            format!("<?scr require \"part{}.scr\";", index + 1),
+            dir.path().join(format!("part{index}.scripta")),
+            format!("<?scr require \"part{}.scripta\";", index + 1),
         )
         .unwrap();
     }
-    let mut runtime = runtime(Some(&dir.path().join("main.scr")));
-    error(&mut runtime, r#"require "part0.scr";"#, "ModuleError");
+    let mut runtime = runtime(Some(&dir.path().join("main.scripta")));
+    error(&mut runtime, r#"require "part0.scripta";"#, "ModuleError");
     assert_eq!(
         run(&mut runtime, r#"echo "recovered";"#).unwrap(),
         "recovered"

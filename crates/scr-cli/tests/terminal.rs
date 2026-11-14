@@ -13,10 +13,10 @@ echo str(Cli::isTerminal("stderr")) . "\n";
 #[test]
 fn terminal_detection_distinguishes_inherited_and_redirected_handles() {
     let directory = tempfile::tempdir().unwrap();
-    let script = directory.path().join("terminal.scr");
+    let script = directory.path().join("terminal.scripta");
     fs::write(&script, QUERY).unwrap();
     for inherit in [false, true] {
-        let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+        let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
             .arg(&script)
             .stdin(if inherit {
                 Stdio::inherit()
@@ -49,13 +49,13 @@ fn terminal_detection_distinguishes_inherited_and_redirected_handles() {
 #[test]
 fn terminal_detection_returns_false_for_redirected_files() {
     let directory = tempfile::tempdir().unwrap();
-    let script = directory.path().join("terminal.scr");
+    let script = directory.path().join("terminal.scripta");
     let input = directory.path().join("input.txt");
     let output = directory.path().join("output.txt");
     let error = directory.path().join("error.txt");
     fs::write(&script, QUERY).unwrap();
     fs::write(&input, "input remains unread\n").unwrap();
-    let status = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let status = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(script)
         .stdin(fs::File::open(input).unwrap())
         .stdout(fs::File::create(&output).unwrap())

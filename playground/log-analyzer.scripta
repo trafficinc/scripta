@@ -1,12 +1,10 @@
 <?scr
-
-// Usage: scr run playground/log-analyzer.scr playground/sample-events.txt
+// Usage: scripta run playground/log-analyzer.scripta playground/sample-events.txt
 $path = Cli::arg(0);
 if ($path === null) {
-    echo "Usage: scr run playground/log-analyzer.scr <events-file>\n";
+    echo "Usage: scripta run playground/log-analyzer.scripta <events-file>\n";
     exit(2);
 }
-
 $counts = Map::create();
 $services = [];
 $malformed = 0;
@@ -33,7 +31,6 @@ foreach ($lines as $line) {
         $services[] = $service;
     }
 }
-
 echo "Services: " . String::join(List::sort($services), ", ") . "\n";
 foreach (["info", "warn", "error"] as $level) {
     echo $level . ": " . str(Map::get($counts, $level, 0)) . "\n";

@@ -12,8 +12,13 @@ sources, native environments, and retained local and Actions evidence.
 | macOS ARM64 | `aarch64-apple-darwin.tar.gz` | Local macOS 27.0.1 arm64 debug/dist suites, dependency inspection and extracted-package smoke passed | Verified locally on macOS 27.0.1; macOS 15 validation pending |
 | Windows x86-64 | `x86_64-pc-windows-msvc.zip` | [Native debug/dist tests, static-CRT inspection and base/SQLite package checks](release-validation.md#native-github-actions-validation) | Verified on Windows Server 2022 |
 
+The native receipts above describe the historical `scr`/`.scr` revision. The
+`scripta`/`.scripta` migration preserves source syntax but requires fresh native
+executable and archive validation before publishing the renamed artifacts.
+
 Every archive is named `scripta-0.1.0-TARGET.tar.gz` or `.zip`. Windows contains
-`scr.exe`; other platforms contain `scr`. Assets are architecture-specific, not
+`scripta.exe` and compatibility `scr.exe`; other platforms contain `scripta` and
+compatibility `scr`. Assets are architecture-specific, not
 universal binaries. ARM32/ARMv7, musl/Alpine, Windows ARM64, and other targets are
 not part of this release matrix. macOS support is limited to Apple Silicon
 (M-series) Macs; Intel Macs are not supported. Raspberry Pi hardware has not
@@ -32,7 +37,7 @@ validation before a specific-version support claim.
 Native dependency inspection checks Linux/macOS dynamic libraries and Windows
 DLL imports. No OpenSSL, Python, Node.js, PHP, JVM, Docker container, or separately
 installed language
-runtime is required by scr. These statements apply to the interpreter; a script
+runtime is required by scripta. These statements apply to the interpreter; a script
 explicitly calling Process::run still needs its chosen executable, and HTTP calls
 need a connection to the requested endpoint. Local scripts need no network.
 

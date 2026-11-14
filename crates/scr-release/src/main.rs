@@ -1,4 +1,4 @@
-//! Maintainer-only packaging. None of these dependencies are linked into scr.
+//! Maintainer-only packaging. None of these dependencies are linked into scripta.
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -117,6 +117,10 @@ fn collect(directory: &Path, prefix: &str, files: &mut BTreeMap<String, Vec<u8>>
             .file_name()
             .into_string()
             .map_err(|_| "release filename must be UTF-8")?;
+        // Local package installations are generated caches, not release inputs.
+        if matches!(name.as_str(), ".scripta" | ".scripta-install.lock" | ".git") {
+            continue;
+        }
         let path = entry.path();
         let key = format!("{prefix}/{name}");
         let kind = entry.file_type()?;
@@ -228,7 +232,7 @@ fn notices(
         }
     }
     let mut index = String::from(
-        "Dependency notices for the scr dependency graph (including build tools).\nWorkspace crates use the root MIT license.\n\n",
+        "Dependency notices for the scripta dependency graph (including build tools).\nWorkspace crates use the root MIT license.\n\n",
     );
     let mut selected: Vec<_> = packages
         .iter()
@@ -324,11 +328,18 @@ fn package(
     }
     let mut files = BTreeMap::new();
     let name = if target.contains("windows") {
+        "scripta.exe"
+    } else {
+        "scripta"
+    };
+    let alias = if target.contains("windows") {
         "scr.exe"
     } else {
         "scr"
     };
-    files.insert(name.into(), fs::read(binary)?);
+    let binary_bytes = fs::read(binary)?;
+    files.insert(alias.into(), binary_bytes.clone());
+    files.insert(name.into(), binary_bytes);
     for name in ["LICENSE", "README.md"] {
         files.insert(name.into(), fs::read(root().join(name))?);
     }
@@ -345,7 +356,7 @@ fn package(
     } else {
         vec![]
     };
-    let manifest = json!({"version":VERSION,"target":target,"binary":name,"binary_sha256":digest(&files[name]),"source_date_epoch":epoch,"extensions":extensions,"files":inventory,"validation":"see the per-target validation record; archive creation alone is not platform support"});
+    let manifest = json!({"version":VERSION,"target":target,"binary":name,"compatibility_binary":alias,"binary_sha256":digest(&files[name]),"source_date_epoch":epoch,"extensions":extensions,"files":inventory,"validation":"see the per-target validation record; archive creation alone is not platform support"});
     files.insert(
         "release.json".into(),
         [serde_json::to_vec_pretty(&manifest)?, vec![b'\n']].concat(),
@@ -397,7 +408,11 @@ fn archive(
         let timestamp = zip::DateTime::from_date_and_time(1980, 1, 1, 0, 0, 0)
             .map_err(|_| "invalid fixed ZIP date")?;
         for (name, bytes) in files {
-            let mode = if name == "scr.exe" { 0o755 } else { 0o644 };
+            let mode = if matches!(name.as_str(), "scripta.exe" | "scr.exe") {
+                0o755
+            } else {
+                0o644
+            };
             let options = zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored)
                 .last_modified_time(timestamp)
@@ -415,7 +430,11 @@ fn archive(
         for (name, bytes) in files {
             let mut header = tar::Header::new_gnu();
             header.set_size(bytes.len() as u64);
-            header.set_mode(if name == "scr" { 0o755 } else { 0o644 });
+            header.set_mode(if matches!(name.as_str(), "scripta" | "scr") {
+                0o755
+            } else {
+                0o644
+            });
             header.set_uid(0);
             header.set_gid(0);
             header.set_mtime(u64::from(epoch));
@@ -480,8 +499,10 @@ fn read_archive(path: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
             if !entry.header().entry_type().is_file() {
                 return Err(fail("non-regular archive entry"));
             }
-            if entry.path()?.to_string_lossy().ends_with("/scr")
-                && entry.header().mode()? & 0o111 == 0
+            if matches!(
+                entry.path()?.file_name().and_then(|n| n.to_str()),
+                Some("scripta" | "scr")
+            ) && entry.header().mode()? & 0o111 == 0
             {
                 return Err(fail("Unix interpreter archive entry is not executable"));
             }
@@ -530,18 +551,28 @@ fn read_verified(path: &Path) -> Result<(String, Value, BTreeMap<String, Vec<u8>
         }
     }
     let binary = manifest["binary"].as_str().ok_or("binary missing")?;
-    if binary
-        != if target.contains("windows") {
-            "scr.exe"
-        } else {
-            "scr"
-        }
+    let (primary, alias) = if target.contains("windows") {
+        ("scripta.exe", "scr.exe")
+    } else {
+        ("scripta", "scr")
+    };
+    if ![primary, alias].contains(&binary)
         || manifest["binary_sha256"]
             != *inventory
                 .get(binary)
                 .ok_or("binary missing from inventory")?
     {
         return Err(fail("binary identity differs"));
+    }
+    // Historical archives with the original binary name remain verifiable.
+    if binary == primary
+        && (manifest["compatibility_binary"] != alias
+            || inventory.get(alias) != inventory.get(primary))
+    {
+        return Err(fail("compatibility executable differs"));
+    }
+    if binary == alias && manifest.get("compatibility_binary").is_some() {
+        return Err(fail("invalid legacy compatibility metadata"));
     }
     Ok((prefix, manifest, files))
 }
@@ -587,18 +618,20 @@ fn smoke(path: &Path) -> Result<()> {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(
                 &output,
-                fs::Permissions::from_mode(if name == &format!("{prefix}scr") {
-                    0o755
-                } else {
-                    0o644
-                }),
+                fs::Permissions::from_mode(
+                    if [format!("{prefix}scripta"), format!("{prefix}scr")].contains(name) {
+                        0o755
+                    } else {
+                        0o644
+                    },
+                ),
             )?;
         }
     }
     let directory = temporary.path().join(prefix.trim_end_matches('/'));
     let executable = directory.join(manifest["binary"].as_str().ok_or("missing binary")?);
-    let execute = |arguments: &[&str]| -> Result<std::process::Output> {
-        let mut command = Command::new(&executable);
+    let execute_with = |executable: &Path, arguments: &[&str]| -> Result<std::process::Output> {
+        let mut command = Command::new(executable);
         command
             .args(arguments)
             .current_dir(&directory)
@@ -621,9 +654,31 @@ fn smoke(path: &Path) -> Result<()> {
         }
         Ok(output)
     };
+    let legacy = manifest["binary"]
+        .as_str()
+        .is_some_and(|name| matches!(name, "scr" | "scr.exe"));
+    let execute = |arguments: &[&str]| {
+        if legacy {
+            let arguments: Vec<_> = arguments
+                .iter()
+                .map(|arg| arg.replace(".scripta", ".scr"))
+                .collect();
+            let borrowed: Vec<_> = arguments.iter().map(String::as_str).collect();
+            execute_with(&executable, &borrowed)
+        } else {
+            execute_with(&executable, arguments)
+        }
+    };
     let output = execute(&["version", "--verbose"])?;
+    if let Some(alias) = manifest["compatibility_binary"].as_str() {
+        let legacy = execute_with(&directory.join(alias), &["version", "--verbose"])?;
+        if legacy.stdout != output.stdout {
+            return Err(fail("compatibility command output differs"));
+        }
+    }
     let text = String::from_utf8(output.stdout)?;
-    if !text.starts_with(&format!("scr {version}\n"))
+    let command_name = if legacy { "scr" } else { "scripta" };
+    if !text.starts_with(&format!("{command_name} {version}\n"))
         || !text.lines().any(|l| l == format!("target: {target}"))
     {
         return Err(fail("executable target/version differs from manifest"));
@@ -640,16 +695,20 @@ fn smoke(path: &Path) -> Result<()> {
             ));
         }
         if !extensions.is_empty()
-            && execute(&["run", "examples/sqlite.scr"])?.stdout != "1: Ada\n2: 世界\n".as_bytes()
+            && execute(&["run", "examples/sqlite.scripta"])?.stdout
+                != "1: Ada\n2: 世界\n".as_bytes()
         {
             return Err(fail("packaged SQLite example output differs"));
         }
     }
     for (name, expected) in [
-        ("hello.scr", "Hello, Scripta!\n"),
-        ("variables.scr", "Checking Production...\nDisk usage: 85%\n"),
-        ("loops.scr", "1\n2\n3\n"),
-        ("functions.scr", "Hello, Scripta!\n6\n"),
+        ("hello.scripta", "Hello, Scripta!\n"),
+        (
+            "variables.scripta",
+            "Checking Production...\nDisk usage: 85%\n",
+        ),
+        ("loops.scripta", "1\n2\n3\n"),
+        ("functions.scripta", "Hello, Scripta!\n6\n"),
     ] {
         let name = format!("examples/{name}");
         let output = execute(&["run", &name])?;
@@ -659,10 +718,22 @@ fn smoke(path: &Path) -> Result<()> {
     }
     // Exercise the shipped collection APIs from the extracted package, with
     // the same cleared environment and package-only PATH as the other smoke checks.
-    execute(&["run", "playground/collections.scr"])?;
-    let offline = r#"<?scr require_once "examples/lib/helpers.scr"; $data=Json::decode("{\"status\":\"offline\"}"); File::write("offline.json",Json::encode($data)); echo statusLabel(File::read("offline.json")) . "\n"; echo Date::format(Date::parse("2026-01-01T00:00:00Z"),"%Y") . "\n"; Log::info("local smoke complete");"#;
-    fs::write(directory.join("offline.scr"), offline)?;
-    let output = execute(&["run", "offline.scr"])?;
+    execute(&["run", "playground/collections.scripta"])?;
+    let offline = r#"<?scr require_once "examples/lib/helpers.scripta"; $data=Json::decode("{\"status\":\"offline\"}"); File::write("offline.json",Json::encode($data)); echo statusLabel(File::read("offline.json")) . "\n"; echo Date::format(Date::parse("2026-01-01T00:00:00Z"),"%Y") . "\n"; Log::info("local smoke complete");"#;
+    let offline = if legacy {
+        offline.replace(".scripta", ".scr")
+    } else {
+        offline.to_owned()
+    };
+    fs::write(
+        directory.join(if legacy {
+            "offline.scr"
+        } else {
+            "offline.scripta"
+        }),
+        offline,
+    )?;
+    let output = execute(&["run", "offline.scripta"])?;
     if output.stdout != b"Status: offline\n2026\n" {
         return Err(fail("offline smoke output differs"));
     }
@@ -684,13 +755,21 @@ mod tests {
     fn archive_output_is_deterministic_and_inventory_detects_corruption() -> Result<()> {
         for target in TARGETS {
             let binary = if target.contains("windows") {
+                "scripta.exe"
+            } else {
+                "scripta"
+            };
+            let base = format!("scripta-{VERSION}-{target}");
+            let alias = if target.contains("windows") {
                 "scr.exe"
             } else {
                 "scr"
             };
-            let base = format!("scripta-{VERSION}-{target}");
-            let mut files = BTreeMap::from([(binary.to_owned(), b"fixture".to_vec())]);
-            let manifest = json!({"version":VERSION,"target":target,"binary":binary,"binary_sha256":digest(b"fixture"),"files":{binary:digest(b"fixture")}});
+            let mut files = BTreeMap::from([
+                (binary.to_owned(), b"fixture".to_vec()),
+                (alias.to_owned(), b"fixture".to_vec()),
+            ]);
+            let manifest = json!({"version":VERSION,"target":target,"binary":binary,"compatibility_binary":alias,"binary_sha256":digest(b"fixture"),"files":{binary:digest(b"fixture"),alias:digest(b"fixture")}});
             files.insert("release.json".into(), serde_json::to_vec(&manifest)?);
             let first = archive(&files, &base, target.contains("windows"), 1234)?;
             assert_eq!(
@@ -731,8 +810,46 @@ mod tests {
         Ok(())
     }
     #[test]
+    fn historical_archives_verify_and_compatibility_metadata_cannot_redirect_execution()
+    -> Result<()> {
+        let target = TARGETS[0];
+        let base = format!("scripta-{VERSION}-{target}");
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("legacy.tar.gz");
+        let mut manifest = json!({"version":VERSION,"target":target,"binary":"scr","binary_sha256":digest(b"fixture"),"files":{"scr":digest(b"fixture")}});
+        let mut files = BTreeMap::from([("scr".to_owned(), b"fixture".to_vec())]);
+        for (metadata, valid) in [
+            (None, true),
+            (Some("../outside"), false),
+            (Some("scr"), false),
+        ] {
+            if let Some(name) = metadata {
+                manifest["compatibility_binary"] = json!(name);
+            }
+            files.insert("release.json".into(), serde_json::to_vec(&manifest)?);
+            fs::write(&path, archive(&files, &base, false, 0)?)?;
+            assert_eq!(read_verified(&path).is_ok(), valid);
+        }
+        Ok(())
+    }
+    #[test]
+    fn release_collection_excludes_local_package_state() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        fs::write(dir.path().join("main.scripta"), "<?scr")?;
+        fs::create_dir(dir.path().join(".scripta"))?;
+        fs::write(dir.path().join(".scripta/cache"), "generated")?;
+        fs::write(dir.path().join(".scripta-install.lock"), "generated")?;
+        let mut files = BTreeMap::new();
+        collect(dir.path(), "examples", &mut files)?;
+        assert_eq!(
+            files.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["examples/main.scripta"]
+        );
+        Ok(())
+    }
+    #[test]
     fn rejects_unsafe_paths() {
-        for name in ["../scr", "/scr", "C:/scr", "foo\\scr"] {
+        for name in ["../scripta", "/scripta", "C:/scripta", "foo\\scripta"] {
             assert!(safe_path(name).is_err());
         }
     }

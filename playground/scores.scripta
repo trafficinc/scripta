@@ -1,14 +1,7 @@
 <?scr
-
-$scores = [
-    "Alice" => 92,
-    "Bob" => 68,
-    "Charlie" => 45
-];
-
+$scores = ["Alice" => 92, "Bob" => 68, "Charlie" => 45];
 foreach ($scores as $name => $score) {
     $grade = "";
-
     if ($score >= 90) {
         $grade = "Excellent";
     } elseif ($score >= 60) {
@@ -16,6 +9,5 @@ foreach ($scores as $name => $score) {
     } else {
         $grade = "Try again";
     }
-
     echo $name . ": " . $grade . "\n";
 }

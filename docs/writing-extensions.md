@@ -1,6 +1,6 @@
 # Writing built-in extensions
 
-A built-in extension is Rust code compiled into the `scr` executable. It uses
+A built-in extension is Rust code compiled into the `scripta` executable. It uses
 Scripta's existing native registration API to expose functions and host objects.
 There is no additional extension framework to implement or runtime loader to
 configure. The standard library uses this same API.
@@ -21,7 +21,7 @@ Create this directory structure:
 crates/scr-ext-greeting/
     Cargo.toml
     src/lib.rs
-examples/greeting.scr
+examples/greeting.scripta
 ```
 
 The root workspace already includes `crates/*`, so the new crate becomes a member
@@ -94,7 +94,7 @@ namespace. Duplicate names raise `RegistryError`; propagate registration errors
 rather than silently replacing functions. Multi-function registration is
 sequential, so discard a partially initialized runtime if startup fails.
 
-In `examples/greeting.scr`:
+In `examples/greeting.scripta`:
 
 ```scr
 <?scr
@@ -139,7 +139,7 @@ immediately after `scr_stdlib::register(...)` succeeds and before
 
 `Runtime::with_options` creates a fresh runtime for each pipeline invocation;
 register the extension once for each new runtime. This location covers execution
-through both the CLI and `scr_cli::pipeline`. Syntax-only `scr check` does not
+through both the CLI and `scr_cli::pipeline`. Syntax-only `scripta check` does not
 execute startup registration or resolve whether a native function exists.
 
 The feature is optional and disabled by default. To build this extension into
@@ -157,7 +157,7 @@ First let Cargo update the workspace lockfile for the new crate:
 
 ```sh
 cargo check -p scr-cli --features greeting
-cargo run -p scr-cli --locked --features greeting -- examples/greeting.scr
+cargo run -p scr-cli --locked --features greeting -- examples/greeting.scripta
 ```
 
 Expected output:
@@ -171,7 +171,7 @@ Build explicitly with the feature disabled:
 
 ```sh
 cargo build -p scr-cli --locked --no-default-features
-cargo run -p scr-cli --locked --no-default-features -- examples/greeting.scr
+cargo run -p scr-cli --locked --no-default-features -- examples/greeting.scripta
 ```
 
 The build succeeds. The script exits with code 1 and reports
@@ -243,7 +243,7 @@ path with the feature enabled and disabled:
 fn greeting_feature_controls_cli_registration() {
     let script = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(script.path(), "<?scr echo Greeting::hello('Scripta');").unwrap();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_scripta"))
         .arg(script.path())
         .output()
         .unwrap();
@@ -330,15 +330,15 @@ Build and package the selected CLI variant:
 cargo build -p scr-cli --release --locked --features greeting
 ```
 
-Users need that rebuilt `scr` executable. Installing a script library with
-`scr add` cannot enable a Cargo feature, compile a native extension, or replace
+Users need that rebuilt `scripta` executable. Installing a script library with
+`scripta add` cannot enable a Cargo feature, compile a native extension, or replace
 the interpreter. Document which extensions each binary includes; the current CLI
-reports built-in extensions in `scr version --verbose`. Scripts using an unavailable
+reports built-in extensions in `scripta version --verbose`. Scripts using an unavailable
 extension fail when they call its native functions.
 
 Built-in extension crates can live in this repository or in separate repositories
 referenced through Cargo. Pin external sources in Cargo.lock and build against a
 compatible public runtime API. There is no stable shared-library ABI involved.
 Check each extension's platform support, native library/linking requirements,
-licenses, and release packaging inputs. Static inclusion in `scr` does not
+licenses, and release packaging inputs. Static inclusion in `scripta` does not
 necessarily mean every external system library is statically linked.

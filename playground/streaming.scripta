@@ -1,8 +1,8 @@
 <?scr
-// Usage: scr run playground/streaming.scr <events-file|->
+// Usage: scripta run playground/streaming.scripta <events-file|->
 $path = Cli::arg(0);
 if ($path === null) {
-    echo "Usage: scr run playground/streaming.scr <events-file|->\n";
+    echo "Usage: scripta run playground/streaming.scripta <events-file|->\n";
     exit 2;
 }
 $counts = Map::create();

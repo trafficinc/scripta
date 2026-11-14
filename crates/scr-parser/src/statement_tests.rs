@@ -10,7 +10,7 @@ fn errors(source: &str) -> Vec<Diagnostic> {
 
 #[test]
 fn complete_example_and_optional_closing_tag() {
-    let source = include_str!("../../../tests/fixtures/statements.scr");
+    let source = include_str!("../../../tests/fixtures/statements.scripta");
     let parsed = parse_with_diagnostics(&scr_lexer::lex(source).unwrap()).unwrap();
     assert_eq!(parsed.statements.len(), 5);
     assert!(matches!(parsed.statements[0].kind, StatementKind::Echo(_)));
@@ -472,7 +472,7 @@ fn invalid_tokens_are_never_accepted_and_truncated_input_never_panics() {
             Err(_) => assert!(source.contains("?>")),
         }
     }
-    let source = include_str!("../../../tests/fixtures/statements.scr");
+    let source = include_str!("../../../tests/fixtures/statements.scripta");
     let tokens = scr_lexer::lex(source).unwrap();
     // Exercise every truncation boundary in a real nested program.
     for length in 0..tokens.len() {
@@ -492,7 +492,7 @@ fn invalid_tokens_are_never_accepted_and_truncated_input_never_panics() {
 #[test]
 fn require_statements_parse_expressions_once_flags_and_semicolons() {
     let tokens =
-        scr_lexer::lex(r#"<?scr require "lib/" . $file; require_once("config.scr");"#).unwrap();
+        scr_lexer::lex(r#"<?scr require "lib/" . $file; require_once("config.scripta");"#).unwrap();
     let program = crate::parse(&tokens).unwrap();
     assert!(matches!(
         program.statements[0].kind,
@@ -505,7 +505,7 @@ fn require_statements_parse_expressions_once_flags_and_semicolons() {
     for source in [
         "<?scr require;",
         "<?scr require_once",
-        "<?scr require \"x.scr\"",
+        "<?scr require \"x.scripta\"",
     ] {
         let tokens = scr_lexer::lex(source).unwrap();
         assert!(crate::parse(&tokens).is_err());

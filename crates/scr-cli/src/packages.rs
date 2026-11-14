@@ -30,6 +30,7 @@ struct Package {
     entry: String,
 }
 fn default_entry() -> String {
+    // Preserve the historical default for manifests that omit entry.
     "main.scr".into()
 }
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -130,7 +131,7 @@ fn project(start: &Path) -> Result<PathBuf> {
         .ancestors()
         .find(|p| p.join(MANIFEST).is_file())
         .map(Path::to_owned)
-        .ok_or_else(|| fail("no scripta.toml found; run 'scr init' first"))
+        .ok_or_else(|| fail("no scripta.toml found; run 'scripta init' first"))
 }
 fn read_lock(root: &Path) -> Result<Option<Lockfile>> {
     let text = match fs::read_to_string(root.join(LOCK)) {
@@ -199,7 +200,19 @@ pub fn execute(args: &[std::ffi::OsString], cwd: &Path) -> Result<String> {
         .collect::<Result<_>>()?;
     match args.as_slice() {
         ["init"] => {
-            let manifest = Manifest::default();
+            let name = cwd
+                .file_name()
+                .and_then(|n| n.to_str())
+                .filter(|n| valid_name(n))
+                .unwrap_or("app");
+            let manifest = Manifest {
+                package: Some(Package {
+                    name: name.into(),
+                    version: "0.1.0".into(),
+                    entry: "main.scripta".into(),
+                }),
+                ..Default::default()
+            };
             let mut file = fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -213,7 +226,7 @@ pub fn execute(args: &[std::ffi::OsString], cwd: &Path) -> Result<String> {
                 || update && rest.contains(&"--locked")
             {
                 return Err(fail(
-                    "usage: scr install [--locked] [--offline] | scr update [--offline]",
+                    "usage: scripta install [--locked] [--offline] | scripta update [--offline]",
                 ));
             }
             let root = project(cwd)?;
@@ -280,7 +293,7 @@ pub fn execute(args: &[std::ffi::OsString], cwd: &Path) -> Result<String> {
             Ok(format!("Added {name} and installed dependencies"))
         }
         _ => Err(fail(
-            "usage: scr init | scr add <name> (--path <dir> | --git <url> (--version <constraint> | --rev <ref>)) | scr install [--locked] [--offline] | scr update [--offline]",
+            "usage: scripta init | scripta add <name> (--path <dir> | --git <url> (--version <constraint> | --rev <ref>)) | scripta install [--locked] [--offline] | scripta update [--offline]",
         )),
     }
 }
@@ -323,7 +336,7 @@ fn install(
             .is_some_and(|l| lock_matches(manifest, &l.packages))
     {
         return Err(fail(
-            "scripta.lock is missing or out of date; run 'scr install' without --locked",
+            "scripta.lock is missing or out of date; run 'scripta install' without --locked",
         ));
     }
     let store_parent = root.join(".scripta");
@@ -530,7 +543,7 @@ impl Installer {
                 if digest != pin.checksum || package.version != pin.version || commit != pin.commit
                 {
                     return Err(fail(format!(
-                        "{name}: locked package content changed; use 'scr update' to accept new content"
+                        "{name}: locked package content changed; use 'scripta update' to accept new content"
                     )));
                 }
                 if !lock_matches(&package_manifest, &pin.dependencies) {
@@ -697,11 +710,11 @@ pub fn resolve(base: &Path, name: &str) -> Result<Option<PathBuf>> {
     let pin = &packages[name];
     let package_root = root.join(STORE).join(name);
     if checksum(&package_root)
-        .map_err(|_| fail(format!("{name} is not installed; run 'scr install'")))?
+        .map_err(|_| fail(format!("{name} is not installed; run 'scripta install'")))?
         != pin.checksum
     {
         return Err(fail(format!(
-            "{name}: installed checksum mismatch; run 'scr install'"
+            "{name}: installed checksum mismatch; run 'scripta install'"
         )));
     }
     let package_manifest = read_manifest(&package_root)?;
@@ -744,11 +757,11 @@ fn installed_dependencies(root: &Path, depth: usize) -> Result<BTreeMap<String, 
         pin.dependencies.clone()
     } else {
         read_lock(root)?
-            .ok_or_else(|| fail("scripta.lock is missing; run 'scr install'"))?
+            .ok_or_else(|| fail("scripta.lock is missing; run 'scripta install'"))?
             .packages
     };
     if !lock_matches(&read_manifest(root)?, &packages) {
-        return Err(fail("dependencies changed; run 'scr install'"));
+        return Err(fail("dependencies changed; run 'scripta install'"));
     }
     Ok(packages)
 }

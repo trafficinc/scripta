@@ -1,4 +1,4 @@
 [package]
 name = "helpers"
 version = "1.0.0"
-entry = "main.scr"
+entry = "main.scripta"

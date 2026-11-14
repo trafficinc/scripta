@@ -2,7 +2,7 @@ use std::process::Command;
 
 #[test]
 fn missing_companion_has_actionable_error() {
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .args(["playground", "--no-open"])
         .env(
             "SCR_PLAYGROUND_BIN",
@@ -22,7 +22,7 @@ fn launches_external_companion_with_current_interpreter_and_preserves_exit_statu
     let companion = directory.path().join("companion with spaces");
     fs::write(&companion, "#!/bin/sh\nprintf '%s\\n' \"$@\"\nexit 7\n").unwrap();
     fs::set_permissions(&companion, fs::Permissions::from_mode(0o755)).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .args(["playground", "--no-open"])
         .env("SCR_PLAYGROUND_BIN", companion)
         .output()
@@ -33,6 +33,6 @@ fn launches_external_companion_with_current_interpreter_and_preserves_exit_statu
     assert_eq!(&lines[..2], &["--no-open", "--scr"]);
     assert_eq!(
         std::path::Path::new(lines[2]),
-        std::path::Path::new(env!("CARGO_BIN_EXE_scr"))
+        std::path::Path::new(env!("CARGO_BIN_EXE_scripta"))
     );
 }

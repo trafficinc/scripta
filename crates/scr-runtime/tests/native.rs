@@ -292,7 +292,7 @@ fn runtime_context_exposes_metadata_env_streams_and_call_location() {
     let mut runtime = Runtime::with_options(RuntimeOptions {
         context: ContextOptions {
             working_directory: PathBuf::from("/host/work"),
-            script_path: Some(PathBuf::from("/host/script.scr")),
+            script_path: Some(PathBuf::from("/host/script.scripta")),
             cli_arguments: vec![OsString::from("hello")],
             environment: BTreeMap::from([("SCR_NATIVE_TEST".into(), "value".into())]),
             redacted_values: Vec::new(),
@@ -314,7 +314,7 @@ fn runtime_context_exposes_metadata_env_streams_and_call_location() {
                     );
                     assert_eq!(
                         context.script_path.unwrap(),
-                        std::path::Path::new("/host/script.scr")
+                        std::path::Path::new("/host/script.scripta")
                     );
                     assert_eq!(context.cli_arguments, &[OsString::from("hello")]);
                     assert_eq!(context.call_span, scr_diagnostics::Span::new(26, 41));

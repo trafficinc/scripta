@@ -2,7 +2,7 @@
 // Arguments are an explicit JSON string array, never a shell command line.
 $program = Cli::arg(0);
 if ($program === null) {
-    echo "Usage: scr command-runner.scr PROGRAM [JSON_ARGUMENT_ARRAY]\n";
+    echo "Usage: scripta command-runner.scripta PROGRAM [JSON_ARGUMENT_ARRAY]\n";
     exit(2);
 }
 $value = Cli::arg(1);

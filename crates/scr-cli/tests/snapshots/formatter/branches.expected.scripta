@@ -5,7 +5,7 @@ if (true)
     else
         echo "b";
 try {
-    require_once "x.scr";
+    require_once "x.scripta";
 } catch (Error $e) {
     Log::error($e);
 }

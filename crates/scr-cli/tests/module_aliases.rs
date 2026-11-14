@@ -4,7 +4,7 @@ use std::{fs, path::Path};
 fn runtime(dir: &Path) -> Runtime {
     let mut rt = Runtime::with_options(RuntimeOptions {
         context: ContextOptions {
-            script_path: Some(dir.join("main.scr")),
+            script_path: Some(dir.join("main.scripta")),
             working_directory: dir.into(),
             ..Default::default()
         },
@@ -27,16 +27,16 @@ fn aliases_isolate_functions_variables_and_caller_names_but_keep_native_function
     let dir = tempfile::tempdir().unwrap();
     write(
         dir.path(),
-        "a.scr",
+        "a.scripta",
         "$name='a'; function normalize() { return String::upper($name); } function greet() { return normalize(); }",
     );
     write(
         dir.path(),
-        "b.scr",
+        "b.scripta",
         "$name='b'; function normalize() { return String::upper($name); } function greet() { return normalize(); }",
     );
     let mut rt = runtime(dir.path());
-    assert_eq!(run(&mut rt, "$name='caller'; function normalize() { return 'caller'; } require_once 'a.scr' as A; require_once 'b.scr' as B; echo A::greet() . B::greet() . normalize() . $name;").unwrap(), "ABcallercaller");
+    assert_eq!(run(&mut rt, "$name='caller'; function normalize() { return 'caller'; } require_once 'a.scripta' as A; require_once 'b.scripta' as B; echo A::greet() . B::greet() . normalize() . $name;").unwrap(), "ABcallercaller");
     assert!(
         run(&mut rt, "greet();")
             .unwrap_err()
@@ -49,16 +49,16 @@ fn aliases_isolate_functions_variables_and_caller_names_but_keep_native_function
             .message
             .contains("module alias A has no function missing")
     );
-    write(dir.path(), "read-caller.scr", "echo $name;");
+    write(dir.path(), "read-caller.scripta", "echo $name;");
     assert!(
-        run(&mut rt, "require 'read-caller.scr' as Read;")
+        run(&mut rt, "require 'read-caller.scripta' as Read;")
             .unwrap_err()
             .message
             .contains("undefined variable $name")
     );
-    write(dir.path(), "call-caller.scr", "normalize();");
+    write(dir.path(), "call-caller.scripta", "normalize();");
     assert!(
-        run(&mut rt, "require 'call-caller.scr' as Call;")
+        run(&mut rt, "require 'call-caller.scripta' as Call;")
             .unwrap_err()
             .message
             .contains("undefined function normalize")
@@ -71,12 +71,12 @@ fn once_aliases_share_state_and_require_reexecutes_in_a_fresh_instance() {
     let dir = tempfile::tempdir().unwrap();
     write(
         dir.path(),
-        "counter.scr",
+        "counter.scripta",
         "echo 'init;'; $n=0; function next() { $n+=1; return str($n); }",
     );
     let mut rt = runtime(dir.path());
-    assert_eq!(run(&mut rt, "require_once 'counter.scr' as Counter; echo Counter::next(); require_once './counter.scr' as Other; echo Other::next(); require_once 'counter.scr' as Counter; echo Counter::next();").unwrap(), "init;123");
-    assert_eq!(run(&mut rt, "require 'counter.scr' as Counter; echo Counter::next() . Other::next(); require_once 'counter.scr' as Latest; echo Latest::next();").unwrap(), "init;142");
+    assert_eq!(run(&mut rt, "require_once 'counter.scripta' as Counter; echo Counter::next(); require_once './counter.scripta' as Other; echo Other::next(); require_once 'counter.scripta' as Counter; echo Counter::next();").unwrap(), "init;123");
+    assert_eq!(run(&mut rt, "require 'counter.scripta' as Counter; echo Counter::next() . Other::next(); require_once 'counter.scripta' as Latest; echo Latest::next();").unwrap(), "init;142");
     rt.collect_garbage();
     assert_eq!(
         run(&mut rt, "echo Counter::next() . Other::next();").unwrap(),
@@ -86,13 +86,13 @@ fn once_aliases_share_state_and_require_reexecutes_in_a_fresh_instance() {
     assert_eq!(
         run(
             &mut rt,
-            "require_once 'counter.scr'; require_once 'counter.scr'; echo str($n);"
+            "require_once 'counter.scripta'; require_once 'counter.scripta'; echo str($n);"
         )
         .unwrap(),
         "init;0"
     );
     assert!(
-        run(&mut rt, "require 'counter.scr';")
+        run(&mut rt, "require 'counter.scripta';")
             .unwrap_err()
             .message
             .contains("already declared")
@@ -102,15 +102,15 @@ fn once_aliases_share_state_and_require_reexecutes_in_a_fresh_instance() {
 #[test]
 fn alias_conflicts_are_catchable_and_do_not_execute_or_replace_the_module() {
     let dir = tempfile::tempdir().unwrap();
-    write(dir.path(), "a.scr", "function name() { return 'a'; }");
+    write(dir.path(), "a.scripta", "function name() { return 'a'; }");
     write(
         dir.path(),
-        "b.scr",
+        "b.scripta",
         "echo 'should not run'; function name() { return 'b'; }",
     );
     let mut rt = runtime(dir.path());
-    assert_eq!(run(&mut rt, "require_once 'a.scr' as Lib; try { require 'b.scr' as Lib; } catch (ModuleAliasError $e) { echo 'conflict;'; } echo Lib::name();").unwrap(), "conflict;a");
-    assert_eq!(run(&mut rt, "try { require 'b.scr' as String; } catch (ModuleAliasError $e) { echo String::upper('reserved'); }").unwrap(), "RESERVED");
+    assert_eq!(run(&mut rt, "require_once 'a.scripta' as Lib; try { require 'b.scripta' as Lib; } catch (ModuleAliasError $e) { echo 'conflict;'; } echo Lib::name();").unwrap(), "conflict;a");
+    assert_eq!(run(&mut rt, "try { require 'b.scripta' as String; } catch (ModuleAliasError $e) { echo String::upper('reserved'); }").unwrap(), "RESERVED");
     let error = rt
         .register(
             "Lib::new",
@@ -129,28 +129,28 @@ fn local_includes_once_tracking_and_aliases_follow_the_enclosing_module() {
     let dir = tempfile::tempdir().unwrap();
     write(
         dir.path(),
-        "helper.scr",
+        "helper.scripta",
         "function helper() { return 'helper'; }",
     );
     write(
         dir.path(),
-        "inner.scr",
+        "inner.scripta",
         "function value() { return 'inner'; }",
     );
     write(
         dir.path(),
-        "outer.scr",
-        "require_once 'helper.scr'; require_once './helper.scr'; require_once 'inner.scr' as Inner; function value() { return helper() . Inner::value(); }",
+        "outer.scripta",
+        "require_once 'helper.scripta'; require_once './helper.scripta'; require_once 'inner.scripta' as Inner; function value() { return helper() . Inner::value(); }",
     );
     let mut rt = runtime(dir.path());
-    assert_eq!(run(&mut rt, "require 'outer.scr' as First; require 'outer.scr' as Second; require_once 'helper.scr'; echo First::value() . Second::value() . helper();").unwrap(), "helperinnerhelperinnerhelper");
+    assert_eq!(run(&mut rt, "require 'outer.scripta' as First; require 'outer.scripta' as Second; require_once 'helper.scripta'; echo First::value() . Second::value() . helper();").unwrap(), "helperinnerhelperinnerhelper");
     assert!(
         run(&mut rt, "Inner::value();")
             .unwrap_err()
             .message
             .contains("undefined function Inner::value")
     );
-    assert_eq!(run(&mut rt, "function factory() { require_once 'outer.scr' as Local; return function () { return Local::value(); }; } $f=factory();").unwrap(), "");
+    assert_eq!(run(&mut rt, "function factory() { require_once 'outer.scripta' as Local; return function () { return Local::value(); }; } $f=factory();").unwrap(), "");
     rt.collect_garbage();
     assert_eq!(run(&mut rt, "echo $f();").unwrap(), "helperinner");
 }
@@ -158,21 +158,21 @@ fn local_includes_once_tracking_and_aliases_follow_the_enclosing_module() {
 #[test]
 fn module_cache_and_old_alias_edges_survive_collection_even_without_functions() {
     let dir = tempfile::tempdir().unwrap();
-    write(dir.path(), "empty.scr", "echo 'loaded';");
+    write(dir.path(), "empty.scripta", "echo 'loaded';");
     write(
         dir.path(),
-        "lib.scr",
+        "lib.scripta",
         "$n=0; function tick() { $n+=1; return str($n); } function callback() { return function () { return tick(); }; }",
     );
     let mut rt = runtime(dir.path());
-    assert_eq!(run(&mut rt, "{ require_once 'empty.scr' as Empty; } require_once 'lib.scr' as Old; $f=Old::callback(); require 'lib.scr' as New; echo Old::tick();").unwrap(), "loaded1");
+    assert_eq!(run(&mut rt, "{ require_once 'empty.scripta' as Empty; } require_once 'lib.scripta' as Old; $f=Old::callback(); require 'lib.scripta' as New; echo Old::tick();").unwrap(), "loaded1");
     for _ in 0..3 {
         rt.collect_garbage();
     }
     assert_eq!(
         run(
             &mut rt,
-            "require_once 'empty.scr' as Again; echo Old::tick() . New::tick() . $f();"
+            "require_once 'empty.scripta' as Again; echo Old::tick() . New::tick() . $f();"
         )
         .unwrap(),
         "213"
@@ -190,39 +190,47 @@ fn module_cache_and_old_alias_edges_survive_collection_even_without_functions() 
 #[test]
 fn failed_initialization_restores_scope_preserves_existing_alias_and_allows_retry() {
     let dir = tempfile::tempdir().unwrap();
-    write(dir.path(), "lib.scr", "function name() { return 'old'; }");
-    let mut rt = runtime(dir.path());
-    run(&mut rt, "require_once 'lib.scr' as Lib;").unwrap();
     write(
         dir.path(),
-        "lib.scr",
+        "lib.scripta",
+        "function name() { return 'old'; }",
+    );
+    let mut rt = runtime(dir.path());
+    run(&mut rt, "require_once 'lib.scripta' as Lib;").unwrap();
+    write(
+        dir.path(),
+        "lib.scripta",
         "$caller='changed'; function name() { return 'partial'; } throw 'failed';",
     );
-    assert_eq!(run(&mut rt, "$caller='safe'; try { require 'lib.scr' as Lib; } catch ($e) { echo 'caught;'; } echo Lib::name() . $caller;").unwrap(), "caught;oldsafe");
-    write(dir.path(), "lib.scr", "function name() { return 'new'; }");
+    assert_eq!(run(&mut rt, "$caller='safe'; try { require 'lib.scripta' as Lib; } catch ($e) { echo 'caught;'; } echo Lib::name() . $caller;").unwrap(), "caught;oldsafe");
+    write(
+        dir.path(),
+        "lib.scripta",
+        "function name() { return 'new'; }",
+    );
     assert_eq!(
-        run(&mut rt, "require 'lib.scr' as Lib; echo Lib::name();").unwrap(),
+        run(&mut rt, "require 'lib.scripta' as Lib; echo Lib::name();").unwrap(),
         "new"
     );
     write(
         dir.path(),
-        "retry.scr",
+        "retry.scripta",
         "function value() { return 'partial'; } throw 'failed';",
     );
     run(
         &mut rt,
-        "try { require_once 'retry.scr' as Retry; } catch ($e) {}",
+        "try { require_once 'retry.scripta' as Retry; } catch ($e) {}",
     )
     .unwrap();
     write(
         dir.path(),
-        "retry.scr",
+        "retry.scripta",
         "function value() { return 'retry'; }",
     );
     assert_eq!(
         run(
             &mut rt,
-            "require_once 'retry.scr' as Retry; echo Retry::value();"
+            "require_once 'retry.scripta' as Retry; echo Retry::value();"
         )
         .unwrap(),
         "retry"
@@ -235,34 +243,52 @@ fn cycles_source_errors_and_call_traces_retain_files_and_do_not_poison_runtime()
     let dir = tempfile::tempdir().unwrap();
     write(
         dir.path(),
-        "cycle.scr",
-        "require_once 'cycle.scr' as Cycle;",
+        "cycle.scripta",
+        "require_once 'cycle.scripta' as Cycle;",
     );
-    write(dir.path(), "syntax.scr", "function broken(;");
+    write(dir.path(), "syntax.scripta", "function broken(;");
     write(
         dir.path(),
-        "trace.scr",
+        "trace.scripta",
         "function fail() { return $missing; }",
     );
     let mut rt = runtime(dir.path());
-    assert_eq!(run(&mut rt, "try { require_once 'cycle.scr' as Cycle; } catch (CircularIncludeError $e) { echo 'cycle'; }").unwrap(), "cycle");
-    let error = run(&mut rt, "require_once 'syntax.scr' as Syntax;").unwrap_err();
+    assert_eq!(run(&mut rt, "try { require_once 'cycle.scripta' as Cycle; } catch (CircularIncludeError $e) { echo 'cycle'; }").unwrap(), "cycle");
+    let error = run(&mut rt, "require_once 'syntax.scripta' as Syntax;").unwrap_err();
     assert_eq!(error.code, "E0201");
-    assert!(error.source.unwrap().path.ends_with("syntax.scr"));
-    run(&mut rt, "require_once 'trace.scr' as Trace;").unwrap();
+    assert!(error.source.unwrap().path.ends_with("syntax.scripta"));
+    run(&mut rt, "require_once 'trace.scripta' as Trace;").unwrap();
     let error = run(&mut rt, "Trace::fail();").unwrap_err();
-    assert!(error.source.as_ref().unwrap().path.ends_with("trace.scr"));
-    assert!(error.trace.iter().any(|frame| frame.function == "fail"
-        && frame.source.as_ref().unwrap().path.ends_with("main.scr")));
+    assert!(
+        error
+            .source
+            .as_ref()
+            .unwrap()
+            .path
+            .ends_with("trace.scripta")
+    );
+    assert!(error.trace.iter().any(|frame| {
+        frame.function == "fail"
+            && frame
+                .source
+                .as_ref()
+                .unwrap()
+                .path
+                .ends_with("main.scripta")
+    }));
     assert_eq!(run(&mut rt, "echo 'recovered';").unwrap(), "recovered");
 }
 
 #[test]
 fn cached_aliases_still_require_permissions_and_host_policy_and_scopes_are_budgeted() {
     let dir = tempfile::tempdir().unwrap();
-    write(dir.path(), "lib.scr", "function value() { return 'ok'; }");
+    write(
+        dir.path(),
+        "lib.scripta",
+        "function value() { return 'ok'; }",
+    );
     let mut rt = runtime(dir.path());
-    run(&mut rt, "require_once 'lib.scr' as Lib;").unwrap();
+    run(&mut rt, "require_once 'lib.scripta' as Lib;").unwrap();
     rt.set_module_policy(|_| {
         Err(scr_runtime::NativeError::new(
             "PermissionError",
@@ -270,14 +296,14 @@ fn cached_aliases_still_require_permissions_and_host_policy_and_scopes_are_budge
         ))
     });
     assert!(
-        run(&mut rt, "require_once 'lib.scr' as Other;")
+        run(&mut rt, "require_once 'lib.scripta' as Other;")
             .unwrap_err()
             .message
             .contains("denied by host")
     );
     assert_eq!(run(&mut rt, "echo Lib::value();").unwrap(), "ok");
     let mut options = RuntimeOptions::default();
-    options.context.script_path = Some(dir.path().join("main.scr"));
+    options.context.script_path = Some(dir.path().join("main.scripta"));
     options
         .context
         .permissions
@@ -285,7 +311,7 @@ fn cached_aliases_still_require_permissions_and_host_policy_and_scopes_are_budge
         .remove("filesystem.read");
     let mut denied = Runtime::with_options(options.clone());
     assert!(
-        run(&mut denied, "require_once 'lib.scr' as Lib;")
+        run(&mut denied, "require_once 'lib.scripta' as Lib;")
             .unwrap_err()
             .message
             .contains("permission denied")
@@ -298,7 +324,7 @@ fn cached_aliases_still_require_permissions_and_host_policy_and_scopes_are_budge
     options.max_scopes = Some(1);
     let mut limited = Runtime::with_options(options);
     assert!(
-        run(&mut limited, "require_once 'lib.scr' as Lib;")
+        run(&mut limited, "require_once 'lib.scripta' as Lib;")
             .unwrap_err()
             .message
             .contains("scope limit")
@@ -311,10 +337,10 @@ fn alias_formatting_preserves_comments_and_execution_and_check_does_not_load_fil
     let dir = tempfile::tempdir().unwrap();
     write(
         dir.path(),
-        "lib.scr",
+        "lib.scripta",
         "function greet($name='Ada') { return $name; }",
     );
-    let source = "<?scr require_once /* path */ ('lib.scr') as /* alias */ Helpers;echo Helpers :: greet ( );";
+    let source = "<?scr require_once /* path */ ('lib.scripta') as /* alias */ Helpers;echo Helpers :: greet ( );";
     scr_cli::pipeline::check(source).unwrap();
     scr_cli::pipeline::check("<?scr require_once 'nonexistent' as Missing; Missing::unknown();")
         .unwrap();
@@ -333,54 +359,61 @@ fn alias_formatting_preserves_comments_and_execution_and_check_does_not_load_fil
 #[test]
 fn repeated_require_reclaims_old_instances_and_fatal_failures_restore_scope() {
     let dir = tempfile::tempdir().unwrap();
-    write(dir.path(), "lib.scr", "function value() { return 'ok'; }");
+    write(
+        dir.path(),
+        "lib.scripta",
+        "function value() { return 'ok'; }",
+    );
     let mut rt = Runtime::with_options(RuntimeOptions {
         max_scopes: Some(8),
         context: ContextOptions {
-            script_path: Some(dir.path().join("main.scr")),
+            script_path: Some(dir.path().join("main.scripta")),
             ..Default::default()
         },
         ..Default::default()
     });
     // Each fresh module contains a function/environment cycle. Scope pressure
     // must reclaim replaced instances while retaining the current binding/cache.
-    assert_eq!(run(&mut rt, "for ($i=0; $i<100; $i+=1) { require 'lib.scr' as Lib; } require_once 'lib.scr' as Current; echo Current::value();").unwrap(), "ok");
-    write(dir.path(), "steps.scr", "while (true) {}");
+    assert_eq!(run(&mut rt, "for ($i=0; $i<100; $i+=1) { require 'lib.scripta' as Lib; } require_once 'lib.scripta' as Current; echo Current::value();").unwrap(), "ok");
+    write(dir.path(), "steps.scripta", "while (true) {}");
     let mut limited = Runtime::with_options(RuntimeOptions {
         instruction_limit: Some(20),
         context: ContextOptions {
-            script_path: Some(dir.path().join("main.scr")),
+            script_path: Some(dir.path().join("main.scripta")),
             ..Default::default()
         },
         ..Default::default()
     });
     assert!(
-        run(&mut limited, "require_once 'steps.scr' as Steps;")
+        run(&mut limited, "require_once 'steps.scripta' as Steps;")
             .unwrap_err()
             .message
             .contains("instruction limit")
     );
     write(
         dir.path(),
-        "steps.scr",
+        "steps.scripta",
         "function value() { return 'retry'; }",
     );
     assert_eq!(
         run(
             &mut limited,
-            "require_once 'steps.scr' as Steps; echo Steps::value();"
+            "require_once 'steps.scripta' as Steps; echo Steps::value();"
         )
         .unwrap(),
         "retry"
     );
     write(
         dir.path(),
-        "exit.scr",
+        "exit.scripta",
         "function value() { return 'partial'; } exit 7;",
     );
     assert_eq!(
-        rt.execute_source("<?scr require_once 'exit.scr' as Exiting;", &mut Vec::new())
-            .unwrap(),
+        rt.execute_source(
+            "<?scr require_once 'exit.scripta' as Exiting;",
+            &mut Vec::new()
+        )
+        .unwrap(),
         7
     );
     assert!(
@@ -391,13 +424,13 @@ fn repeated_require_reclaims_old_instances_and_fatal_failures_restore_scope() {
     );
     write(
         dir.path(),
-        "exit.scr",
+        "exit.scripta",
         "function value() { return 'complete'; }",
     );
     assert_eq!(
         run(
             &mut rt,
-            "require_once 'exit.scr' as Exiting; echo Exiting::value();"
+            "require_once 'exit.scripta' as Exiting; echo Exiting::value();"
         )
         .unwrap(),
         "complete"
@@ -409,14 +442,14 @@ fn module_entry_once_identity_is_retained_for_later_calls_and_canonical_aliases(
     let dir = tempfile::tempdir().unwrap();
     write(
         dir.path(),
-        "self.scr",
-        "echo 'init'; function check() { require_once 'self.scr'; return 'ok'; }",
+        "self.scripta",
+        "echo 'init'; function check() { require_once 'self.scripta'; return 'ok'; }",
     );
     let mut rt = runtime(dir.path());
     assert_eq!(
         run(
             &mut rt,
-            "require_once 'self.scr' as Lib; echo Lib::check();"
+            "require_once 'self.scripta' as Lib; echo Lib::check();"
         )
         .unwrap(),
         "initok"
@@ -425,12 +458,15 @@ fn module_entry_once_identity_is_retained_for_later_calls_and_canonical_aliases(
     assert_eq!(run(&mut rt, "echo Lib::check();").unwrap(), "ok");
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(dir.path().join("self.scr"), dir.path().join("link.scr"))
-            .unwrap();
+        std::os::unix::fs::symlink(
+            dir.path().join("self.scripta"),
+            dir.path().join("link.scripta"),
+        )
+        .unwrap();
         assert_eq!(
             run(
                 &mut rt,
-                "require_once 'link.scr' as Lib; echo Lib::check();"
+                "require_once 'link.scripta' as Lib; echo Lib::check();"
             )
             .unwrap(),
             "ok"

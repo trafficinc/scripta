@@ -527,9 +527,9 @@ fn runtime_errors_have_precise_spans_and_inner_first_stack_traces() {
             .collect::<Vec<_>>(),
         ["<main>", "outer", "inner"]
     );
-    let rendered = error.render("trace.scr", source);
+    let rendered = error.render("trace.scripta", source);
     assert!(rendered.find("at inner").unwrap() < rendered.find("at outer").unwrap());
-    assert!(rendered.contains("trace.scr:1:"));
+    assert!(rendered.contains("trace.scripta:1:"));
     let error = failure("function f() { throw 1; } f();");
     assert_eq!(error.trace.last().unwrap().function, "f");
 }

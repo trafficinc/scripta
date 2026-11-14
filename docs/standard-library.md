@@ -86,7 +86,7 @@ Default and variadic parameters and anonymous literals are language features,
 separate from native function registration. A script variadic annotation checks
 each extra argument and binds a list. See
 [function parameters and captures](language-spec.md#function-parameters-and-captures)
-and [the functions playground](../playground/functions.scr). Callback-based
+and [the functions playground](../playground/functions.scripta). Callback-based
 collection transforms remain deferred; callbacks can be passed to script helpers.
 
 ## Strings
@@ -163,7 +163,7 @@ memory ceiling; input arguments are still subject to the runtime's ordinary
 limits. Cancellation is checked at native-call boundaries and during iterative
 result construction. A failed helper does not replace an assignment destination.
 
-Try [the strings playground](../playground/strings.scr) for a complete status
+Try [the strings playground](../playground/strings.scripta) for a complete status
 record normalization example.
 
 ## Binary values
@@ -275,8 +275,8 @@ where applicable. Use `int` explicitly for conversion, which still rejects
 out-of-range values. Rounding operates on the represented binary floating-point
 value. No decimal precision argument, power, or random API is provided.
 
-Try [the reporting playground](../playground/reporting.scr):
-`cargo run -p scr-cli --locked -- run playground/reporting.scr`.
+Try [the reporting playground](../playground/reporting.scripta):
+`cargo run -p scr-cli --locked -- run playground/reporting.scripta`.
 
 ## Collections
 
@@ -382,9 +382,9 @@ core operand/index types raise `TypeError`, and arithmetic overflow or division
 by zero raises `ArithmeticError`. Core runtime safety limits and cancellation
 remain outside catches. Existing helper `RangeError` and `ResourceLimitError`
 exceptions are unchanged. See the [exception contract](language-spec.md#statement-grammar)
-and [errors playground](../playground/errors.scr). Callback transforms and recursive merge variants
-are deferred. Try the [collections playground](../playground/collections.scr)
-and [log analyzer](../playground/log-analyzer.scr) for complete examples.
+and [errors playground](../playground/errors.scripta). Callback transforms and recursive merge variants
+are deferred. Try the [collections playground](../playground/collections.scripta)
+and [log analyzer](../playground/log-analyzer.scripta) for complete examples.
 
 
 ### PHP array function mapping
@@ -605,8 +605,8 @@ is not an adversarial filesystem sandbox. Atomicity ultimately depends on the
 underlying filesystem, especially for network or unusual mounts. Each platform
 needs native validation before support is claimed.
 
-Try [atomic-report.scr](../examples/atomic-report.scr): preview with
-`scr examples/atomic-report.scr report.json`, then add `--apply` to publish it.
+Try [atomic-report.scripta](../examples/atomic-report.scripta): preview with
+`scripta examples/atomic-report.scripta report.json`, then add `--apply` to publish it.
 
 | Directory method | Behavior |
 | --- | --- |
@@ -707,9 +707,9 @@ Finally runs for normal completion and recoverable failures/control flow, under
 the ordinary execution limits. Fatal runtime failures and cancellation bypass
 script cleanup; dropping the last stream reference still closes its descriptor.
 Whole-file helpers remain available. There is no writable stream, iterator syntax,
-or asynchronous I/O. The [streaming playground](../playground/streaming.scr)
+or asynchronous I/O. The [streaming playground](../playground/streaming.scripta)
 counts sample log records with bounded per-line input and constant-size counters:
-`cargo run -p scr-cli --locked -- run playground/streaming.scr playground/sample-events.txt`.
+`cargo run -p scr-cli --locked -- run playground/streaming.scripta playground/sample-events.txt`.
 
 ### Permissions and exceptions
 
@@ -946,13 +946,13 @@ lossy replacement. Read/has/all require `environment.read`; set/remove require
 These forms expose exactly the same script argument list:
 
 ```sh
-scr script.scr arg1 arg2
-scr run script.scr arg1 arg2
+scripta script.scripta arg1 arg2
+scripta run script.scripta arg1 arg2
 ```
 
 The executable, `run`, and the script path are excluded. All tokens after the
 script path belong to the script, including `--help`, `--version`, empty strings,
-and `--`. `scr check` still accepts just one path. `scr run -- <path> ...` permits
+and `--`. `scripta check` still accepts just one path. `scripta run -- <path> ...` permits
 paths starting with a hyphen or matching interpreter commands.
 
 | API | Behavior |
@@ -1235,7 +1235,7 @@ $body = Form::encode(["name" => "Jane Doe", "message" => "A+B"]);
 
 For HTTP form submission, pass `$body` to `Http::post` and explicitly set the
 `Content-Type` header to `application/x-www-form-urlencoded`. The local-only
-[encoding example](../examples/url-encoding.scr) runs without making requests.
+[encoding example](../examples/url-encoding.scripta) runs without making requests.
 
 PHP mapping: `rawurlencode` / `rawurldecode` correspond to
 `Url::encodeComponent` / `Url::decodeComponent`; `http_build_query` corresponds
@@ -1342,7 +1342,7 @@ helpers and configuration files. HTTP never acts as a remote module loader.
 
 ## Distribution and resource behavior
 
-Every module above is statically linked into scr; there is no separate standard
+Every module above is statically linked into scripta; there is no separate standard
 library runtime to install. File/module/JSON/date/log/metrics examples can run
 offline. Only an explicit Http call requires its endpoint, and only an explicit
 Process call requires another executable. See [compatibility](compatibility.md)

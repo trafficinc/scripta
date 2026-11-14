@@ -25,7 +25,7 @@ function copyDirectory($source: string, $destination: string, $apply: bool): voi
 $source = Cli::arg(0);
 $destination = Cli::arg(1);
 if ($source === null || $destination === null) {
-    echo "Usage: scr directory-backup.scr SOURCE NEW_DESTINATION [--apply]\n";
+    echo "Usage: scripta directory-backup.scripta SOURCE NEW_DESTINATION [--apply]\n";
     exit(2);
 }
 $source = canonicalDirectory($source);

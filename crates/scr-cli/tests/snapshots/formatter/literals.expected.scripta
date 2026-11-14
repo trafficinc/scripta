@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env scr
+﻿#!/usr/bin/env scripta
 <?scr
 $s = 'line
 two';

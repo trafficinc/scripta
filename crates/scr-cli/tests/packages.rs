@@ -2,15 +2,15 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-fn scr(root: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_scr"))
+fn scripta(root: &Path, args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_scripta"))
         .current_dir(root)
         .args(args)
         .output()
         .unwrap()
 }
 fn ok(root: &Path, args: &[&str]) -> String {
-    let result = scr(root, args);
+    let result = scripta(root, args);
     assert!(
         result.status.success(),
         "{args:?}: {}",
@@ -19,7 +19,7 @@ fn ok(root: &Path, args: &[&str]) -> String {
     String::from_utf8(result.stdout).unwrap()
 }
 fn fails(root: &Path, args: &[&str], message: &str) {
-    let result = scr(root, args);
+    let result = scripta(root, args);
     assert!(!result.status.success(), "{args:?} unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains(message), "{args:?}: {stderr}");
@@ -28,10 +28,10 @@ fn package(root: &Path, name: &str, version: &str, code: &str) {
     fs::create_dir_all(root).unwrap();
     fs::write(
         root.join("scripta.toml"),
-        format!("[package]\nname = '{name}'\nversion = '{version}'\nentry = 'main.scr'\n"),
+        format!("[package]\nname = '{name}'\nversion = '{version}'\nentry = 'main.scripta'\n"),
     )
     .unwrap();
-    fs::write(root.join("main.scr"), code).unwrap();
+    fs::write(root.join("main.scripta"), code).unwrap();
 }
 fn dependency(root: &Path, name: &str, path: &str) {
     use std::io::Write;
@@ -96,38 +96,38 @@ fn local_install_loading_checksums_and_transactional_failure() {
     fails(&app, &["init"], "error[E0601]");
     ok(&app, &["add", "helpers", "--path", "../helpers"]);
     fs::write(
-        app.join("main.scr"),
+        app.join("main.scripta"),
         "<?scr require_once 'helpers'; require_once 'helpers'; echo greeting();",
     )
     .unwrap();
-    assert_eq!(ok(&app, &["run", "main.scr"]), "hello");
+    assert_eq!(ok(&app, &["run", "main.scripta"]), "hello");
     let lock = fs::read(app.join("scripta.lock")).unwrap();
     ok(&app, &["install", "--locked", "--offline"]);
     assert_eq!(fs::read(app.join("scripta.lock")).unwrap(), lock);
     // Snapshot packages remain executable even when the original source changes.
     fs::write(
-        lib.join("main.scr"),
+        lib.join("main.scripta"),
         "<?scr function greeting() { return 'updated'; }",
     )
     .unwrap();
-    assert_eq!(ok(&app, &["main.scr"]), "hello");
+    assert_eq!(ok(&app, &["main.scripta"]), "hello");
     fails(
         &app,
         &["install", "--locked"],
         "locked package content changed",
     );
     assert_eq!(fs::read(app.join("scripta.lock")).unwrap(), lock);
-    assert_eq!(ok(&app, &["main.scr"]), "hello");
+    assert_eq!(ok(&app, &["main.scripta"]), "hello");
     ok(&app, &["update", "--offline"]);
-    assert_eq!(ok(&app, &["main.scr"]), "updated");
+    assert_eq!(ok(&app, &["main.scripta"]), "updated");
     fs::write(
-        app.join(".scripta/packages/helpers/main.scr"),
+        app.join(".scripta/packages/helpers/main.scripta"),
         "<?scr echo 'tampered';",
     )
     .unwrap();
-    fails(&app, &["main.scr"], "checksum mismatch");
+    fails(&app, &["main.scripta"], "checksum mismatch");
     ok(&app, &["install", "--locked"]);
-    assert_eq!(ok(&app, &["main.scr"]), "updated");
+    assert_eq!(ok(&app, &["main.scripta"]), "updated");
     let manifest = fs::read(app.join("scripta.toml")).unwrap();
     fails(
         &app,
@@ -135,7 +135,7 @@ fn local_install_loading_checksums_and_transactional_failure() {
         "package declares name",
     );
     assert_eq!(fs::read(app.join("scripta.toml")).unwrap(), manifest);
-    assert_eq!(ok(&app, &["main.scr"]), "updated");
+    assert_eq!(ok(&app, &["main.scripta"]), "updated");
 }
 
 #[test]
@@ -148,9 +148,9 @@ fn private_transitive_dependencies_and_relative_local_loading() {
         &root.join("a"),
         "a",
         "1.0.0",
-        "<?scr require_once 'util'; require 'extra.scr';",
+        "<?scr require_once 'util'; require 'extra.scripta';",
     );
-    fs::write(root.join("a/extra.scr"), "<?scr echo '!';").unwrap();
+    fs::write(root.join("a/extra.scripta"), "<?scr echo '!';").unwrap();
     package(&root.join("b"), "b", "1.0.0", "<?scr require_once 'util';");
     package(&root.join("u1"), "util", "1.0.0", "<?scr echo 'one';");
     package(&root.join("u2"), "util", "2.0.0", "<?scr echo 'two';");
@@ -160,24 +160,24 @@ fn private_transitive_dependencies_and_relative_local_loading() {
     ok(&app, &["add", "a", "--path", "../a"]);
     ok(&app, &["add", "b", "--path", "../b"]);
     fs::write(
-        app.join("main.scr"),
+        app.join("main.scripta"),
         "<?scr require_once 'a'; require_once 'b';",
     )
     .unwrap();
-    assert_eq!(ok(root, &["run", "app/main.scr"]), "one!two");
-    fs::write(app.join("private.scr"), "<?scr require 'util';").unwrap();
-    fails(&app, &["private.scr"], "cannot resolve required file");
+    assert_eq!(ok(root, &["run", "app/main.scripta"]), "one!two");
+    fs::write(app.join("private.scripta"), "<?scr require 'util';").unwrap();
+    fails(&app, &["private.scripta"], "cannot resolve required file");
     // A local file takes precedence over a same-named package.
     fs::write(app.join("a"), "<?scr echo 'local';").unwrap();
-    assert_eq!(ok(&app, &["main.scr"]), "localtwo");
+    assert_eq!(ok(&app, &["main.scripta"]), "localtwo");
     fs::remove_file(app.join("a")).unwrap();
     // The root lock, rather than package-provided lockfiles, owns the transitive graph.
     fs::write(
-        app.join(".scripta/packages/a/.scripta/packages/util/main.scr"),
+        app.join(".scripta/packages/a/.scripta/packages/util/main.scripta"),
         "<?scr echo 'changed';",
     )
     .unwrap();
-    fails(&app, &["main.scr"], "checksum mismatch");
+    fails(&app, &["main.scripta"], "checksum mismatch");
 }
 
 #[test]
@@ -196,15 +196,15 @@ fn git_semver_pins_updates_reinstall_and_revision_sources() {
         &app,
         &["add", "helpers", "--git", "../repo", "--version", "^1.0"],
     );
-    fs::write(app.join("main.scr"), "<?scr require 'helpers';").unwrap();
-    assert_eq!(ok(&app, &["main.scr"]), "one.two");
+    fs::write(app.join("main.scripta"), "<?scr require 'helpers';").unwrap();
+    assert_eq!(ok(&app, &["main.scripta"]), "one.two");
     let lock = fs::read_to_string(app.join("scripta.lock")).unwrap();
     assert!(lock.contains(&selected));
     commit(&repo, "1.3.0", "one.three");
     // Existing installation is sufficient even if the upstream repository disappears.
     fs::rename(&repo, temp.path().join("hidden")).unwrap();
     ok(&app, &["install", "--locked", "--offline"]);
-    assert_eq!(ok(&app, &["main.scr"]), "one.two");
+    assert_eq!(ok(&app, &["main.scripta"]), "one.two");
     fs::remove_dir_all(app.join(".scripta/packages")).unwrap();
     fails(
         &app,
@@ -214,14 +214,14 @@ fn git_semver_pins_updates_reinstall_and_revision_sources() {
     fs::rename(temp.path().join("hidden"), &repo).unwrap();
     ok(&app, &["install", "--locked"]);
     assert_eq!(fs::read_to_string(app.join("scripta.lock")).unwrap(), lock);
-    assert_eq!(ok(&app, &["main.scr"]), "one.two");
+    assert_eq!(ok(&app, &["main.scripta"]), "one.two");
     ok(&app, &["update"]);
-    assert_eq!(ok(&app, &["main.scr"]), "one.three");
+    assert_eq!(ok(&app, &["main.scripta"]), "one.three");
     ok(
         &app,
         &["add", "helpers", "--git", "../repo", "--rev", "v2.0.0"],
     );
-    assert_eq!(ok(&app, &["main.scr"]), "two");
+    assert_eq!(ok(&app, &["main.scripta"]), "two");
 }
 
 #[test]
@@ -270,10 +270,10 @@ fn local_git_sources_support_cli_paths_and_canonical_manifest_paths() {
                 ],
             );
         }
-        fs::write(app.join("main.scr"), "<?scr require 'helpers';").unwrap();
-        assert_eq!(ok(&app, &["main.scr"]), "local");
+        fs::write(app.join("main.scripta"), "<?scr require 'helpers';").unwrap();
+        assert_eq!(ok(&app, &["main.scripta"]), "local");
         ok(&app, &["install", "--locked", "--offline"]);
-        assert_eq!(ok(&app, &["main.scr"]), "local");
+        assert_eq!(ok(&app, &["main.scripta"]), "local");
     }
 }
 
@@ -297,7 +297,7 @@ fn missing_stale_locks_cycles_and_invalid_manifests() {
     assert!(!app.join(".scripta-install.lock").exists());
     assert_eq!(
         fs::read_to_string(app.join("scripta.toml")).unwrap().trim(),
-        "[dependencies]"
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\nentry = \"main.scripta\"\n\n[dependencies]"
     );
     fails(
         &app,
@@ -345,7 +345,7 @@ fn rejects_package_links_and_entry_traversal() {
     fs::remove_file(lib.join("escape")).unwrap();
     fs::write(
         lib.join("scripta.toml"),
-        "[package]\nname='helpers'\nversion='1.0.0'\nentry='../outside.scr'\n",
+        "[package]\nname='helpers'\nversion='1.0.0'\nentry='../outside.scripta'\n",
     )
     .unwrap();
     fails(
@@ -360,11 +360,11 @@ fn resolver_respects_read_permission_and_entry_policy() {
     use scr_runtime::{ContextOptions, NativeError, Runtime, RuntimeOptions};
     use std::{cell::Cell, rc::Rc};
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("entry.scr");
+    let path = temp.path().join("entry.scripta");
     fs::write(&path, "<?scr echo 'must not run';").unwrap();
     let called = Rc::new(Cell::new(false));
     let mut context = ContextOptions {
-        script_path: Some(temp.path().join("main.scr")),
+        script_path: Some(temp.path().join("main.scripta")),
         ..Default::default()
     };
     context.permissions.allowed.remove("filesystem.read");
@@ -385,7 +385,7 @@ fn resolver_respects_read_permission_and_entry_policy() {
 
     let mut runtime = Runtime::with_options(RuntimeOptions {
         context: ContextOptions {
-            script_path: Some(temp.path().join("main.scr")),
+            script_path: Some(temp.path().join("main.scripta")),
             ..Default::default()
         },
         ..Default::default()
@@ -428,11 +428,11 @@ fn package_functions_keep_dependency_resolution_context() {
     ok(&app, &["init"]);
     ok(&app, &["add", "helpers", "--path", "../helpers"]);
     fs::write(
-        app.join("main.scr"),
+        app.join("main.scripta"),
         "<?scr require_once 'helpers'; later();",
     )
     .unwrap();
-    assert_eq!(ok(&app, &["main.scr"]), "from dependency");
+    assert_eq!(ok(&app, &["main.scripta"]), "from dependency");
 }
 
 #[test]
@@ -465,18 +465,50 @@ fn package_aliases_keep_same_named_private_dependency_versions_isolated() {
     ok(&app, &["init"]);
     ok(&app, &["add", "a", "--path", "../a"]);
     ok(&app, &["add", "b", "--path", "../b"]);
-    fs::write(app.join("main.scr"), "<?scr function value() { return 'caller'; } require_once 'a' as A; require_once 'b' as B; require_once 'a' as Again; echo A::value() . B::value() . Again::value() . value();").unwrap();
-    assert_eq!(ok(root, &["run", "app/main.scr"]), "onetwoonecaller");
+    fs::write(app.join("main.scripta"), "<?scr function value() { return 'caller'; } require_once 'a' as A; require_once 'b' as B; require_once 'a' as Again; echo A::value() . B::value() . Again::value() . value();").unwrap();
+    assert_eq!(ok(root, &["run", "app/main.scripta"]), "onetwoonecaller");
     fs::write(
-        app.join("private.scr"),
+        app.join("private.scripta"),
         "<?scr require_once 'a' as A; Util::value();",
     )
     .unwrap();
-    fails(&app, &["private.scr"], "undefined function Util::value");
+    fails(&app, &["private.scripta"], "undefined function Util::value");
     fs::write(
-        app.join(".scripta/packages/a/.scripta/packages/util/main.scr"),
+        app.join(".scripta/packages/a/.scripta/packages/util/main.scripta"),
         "<?scr function value() { return 'tampered'; }",
     )
     .unwrap();
-    fails(&app, &["main.scr"], "checksum mismatch");
+    fails(&app, &["main.scripta"], "checksum mismatch");
+}
+
+#[test]
+fn new_projects_declare_scripta_entries_and_legacy_packages_keep_scr_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = dir.path().join("app");
+    let legacy = dir.path().join("legacy");
+    fs::create_dir_all(&app).unwrap();
+    fs::create_dir_all(&legacy).unwrap();
+    ok(&app, &["init"]);
+    let manifest = fs::read_to_string(app.join("scripta.toml")).unwrap();
+    assert!(manifest.contains("entry = \"main.scripta\""), "{manifest}");
+    fs::write(
+        legacy.join("scripta.toml"),
+        "[package]\nname = 'legacy'\nversion = '1.0.0'\n",
+    )
+    .unwrap();
+    fs::write(
+        legacy.join("main.scr"),
+        "<?scr function message() { return 'legacy'; }",
+    )
+    .unwrap();
+    fs::write(legacy.join("main.scripta"), "<?scr throw 'wrong entry';").unwrap();
+    ok(&app, &["add", "legacy", "--path", "../legacy"]);
+    fs::write(
+        app.join("main.scripta"),
+        "<?scr require_once 'legacy'; echo message();",
+    )
+    .unwrap();
+    assert_eq!(ok(&app, &["main.scripta"]), "legacy");
+    ok(&app, &["install", "--locked", "--offline"]);
+    assert_eq!(ok(&app, &["main.scripta"]), "legacy");
 }

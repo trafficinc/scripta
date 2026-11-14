@@ -4,7 +4,7 @@ use std::{
 };
 
 fn piped(args: &[&str], input: &[u8], cwd: &std::path::Path, limit: Option<&str>) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_scr"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_scripta"));
     command
         .args(args)
         .current_dir(cwd)
@@ -27,7 +27,7 @@ fn command_help_is_successful_but_script_arguments_and_escaped_paths_remain_lite
             vec![topic, "--help"],
             vec![topic, "-h"],
         ] {
-            let output = Command::new(env!("CARGO_BIN_EXE_scr"))
+            let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
                 .args(args)
                 .output()
                 .unwrap();
@@ -36,7 +36,7 @@ fn command_help_is_successful_but_script_arguments_and_escaped_paths_remain_lite
             assert!(
                 String::from_utf8(output.stdout)
                     .unwrap()
-                    .contains(&format!("Usage: scr {topic}"))
+                    .contains(&format!("Usage: scripta {topic}"))
             );
         }
     }
@@ -55,11 +55,11 @@ fn command_help_is_successful_but_script_arguments_and_escaped_paths_remain_lite
 fn stdin_source_supports_arguments_includes_eof_and_exit_codes() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
-        dir.path().join("helper.scr"),
+        dir.path().join("helper.scripta"),
         "<?scr function hello() { return \"hello\"; }",
     )
     .unwrap();
-    let source = b"<?scr require_once \"helper.scr\"; echo hello() . Cli::arg(0); if (Cli::readLine() !== null) exit 9; exit 7;";
+    let source = b"<?scr require_once \"helper.scripta\"; echo hello() . Cli::arg(0); if (Cli::readLine() !== null) exit 9; exit 7;";
     let output = piped(&["run", "-", "--help"], source, dir.path(), None);
     assert_eq!(output.status.code(), Some(7), "{:?}", output);
     assert_eq!(output.stdout, b"hello--help");
@@ -90,7 +90,7 @@ fn stdin_source_enforces_tags_utf8_and_source_budget() {
 #[test]
 fn file_script_consumes_piped_records_and_streaming_example_matches_file_mode() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let script = root.join("playground/streaming.scr");
+    let script = root.join("playground/streaming.scripta");
     let data = root.join("playground/sample-events.txt");
     let output = piped(
         &["run", script.to_str().unwrap(), "-"],
@@ -100,7 +100,7 @@ fn file_script_consumes_piped_records_and_streaming_example_matches_file_mode() 
     );
     assert!(output.status.success(), "{:?}", output);
     assert!(output.stderr.is_empty());
-    let file = Command::new(env!("CARGO_BIN_EXE_scr"))
+    let file = Command::new(env!("CARGO_BIN_EXE_scripta"))
         .args(["run", script.to_str().unwrap(), data.to_str().unwrap()])
         .output()
         .unwrap();

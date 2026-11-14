@@ -15,6 +15,14 @@ locations as a filename, one-based line, and one-based character column.
 | scr-cli | CLI arguments, file loading, shared pipeline, stdout/stderr, exit codes | All pipeline crates |
 | scr-release | Maintainer archive/checksum/license verification and offline package smoke | None (standalone build tool) |
 
+## Executable names
+
+The primary Cargo binary is `scripta` and the compatibility binary is `scr`.
+Both small entry points call `scr_cli::entry::main`, so arguments, runtime
+configuration, diagnostics, and exit behavior share one implementation. Cargo's
+`default-run` selects `scripta`. Release archives contain the primary executable
+and an identical compatibility copy, covered by the release inventory.
+
 ## Public application interfaces
 
 `scr_cli::args::parse` consumes arguments excluding the executable name and

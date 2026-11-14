@@ -1,23 +1,23 @@
 # Packages
 
-Package management is built into `scr`. Git packages require the `git` executable
+Package management is built into `scripta`. Git packages require the `git` executable
 on PATH; local packages do not. There is no hosted registry in this version.
 
-The runnable [local package example](../examples/packages/main.scr) includes a
+The runnable [local package example](../examples/packages/main.scripta) includes a
 manifest, lockfile, and library. From `examples/packages`, run
-`scr install --locked --offline` followed by `scr main.scr`.
+`scripta install --locked --offline` followed by `scripta main.scripta`.
 
 ## Use a package
 
 From your project directory:
 
 ```sh
-scr init
-scr add helpers --path ./lib/helpers
+scripta init
+scripta add helpers --path ./lib/helpers
 # Or install a Git package with semantic-version tags:
-scr add helpers --git https://example.com/team/helpers.git --version '^1.2'
+scripta add helpers --git https://example.com/team/helpers.git --version '^1.2'
 # Or pin a branch, tag, or commit, resolved to an exact commit in the lockfile:
-scr add helpers --git https://example.com/team/helpers.git --rev v1.2.3
+scripta add helpers --git https://example.com/team/helpers.git --rev v1.2.3
 ```
 
 `init` creates `scripta.toml` and refuses to overwrite an existing manifest.
@@ -29,7 +29,7 @@ directory or its ancestors. Paths supplied to `add` are relative to your current
 directory. Paths saved in a manifest resolve against that manifest's directory;
 `add` keeps paths inside the project relative and uses absolute paths for external
 folders. For a portable project, edit external paths to suitable relative paths
-before committing and run `scr install` again. Local Git repository paths supplied
+before committing and run `scripta install` again. Local Git repository paths supplied
 to `add` are made absolute. Windows drive and UNC paths are passed to Git using
 forward slashes without extended-length prefixes, so local repositories are
 not mistaken for SSH hostnames. Existing manifests containing canonical
@@ -94,7 +94,7 @@ rolled back. Failed loads can be retried. Native permissions, source/include/cal
 limits, and logical value budgets continue to apply; aliases are name isolation,
 not a security sandbox.
 
-The same syntax works for local files: `require_once "lib/helpers.scr" as Helpers;`.
+The same syntax works for local files: `require_once "lib/helpers.scripta" as Helpers;`.
 Without `as`, includes retain the existing shared-scope behavior and duplicate
 function errors. Unaliased `require_once` tracking is separate for the application
 and each isolated module, so a local helper file can be included once in each.
@@ -112,14 +112,17 @@ provide `[package]`:
 [package]
 name = "helpers"
 version = "1.2.3"
-entry = "src/main.scr"
+entry = "src/main.scripta"
 
 [dependencies]
 strings = { git = "https://example.com/team/strings.git", version = "^1.0" }
 config = { path = "../config", version = "^2.0" }
 ```
 
-The entry defaults to `main.scr`. Names start with a lowercase ASCII letter and
+`scripta init` declares `entry = "main.scripta"` explicitly for new projects;
+create that source file yourself. For compatibility, existing package manifests
+that omit `entry` still default to `main.scr`. Explicit `.scripta`, `.scta`, and
+`.scr` entry paths are all accepted. Names start with a lowercase ASCII letter and
 contain lowercase letters, digits, underscores, or hyphens (maximum 64 characters).
 The dependency name must match the package's declared name. Package versions use
 semantic versioning. Unknown manifest fields are rejected to catch typos.
@@ -136,18 +139,18 @@ terminal credential prompts are disabled.
 
 Local dependencies may optionally specify a version constraint. Their contents
 are copied into the installation, so editing the original does not affect an
-already installed package. Run `scr update` to accept those edits. Relative local
+already installed package. Run `scripta update` to accept those edits. Relative local
 dependencies within a Git package must be available in that repository's checked
 out tree. Git submodules are not fetched.
 
 ## Install and update
 
 ```sh
-scr install                   # reuse existing pins; resolve new/changed dependencies
-scr install --locked          # fail if the root manifest and lockfile differ
-scr install --locked --offline # use installed Git snapshots without network access
-scr update                    # resolve all dependencies again and accept source changes
-scr update --offline          # update local sources; Git resolution requires a network-capable install
+scripta install                   # reuse existing pins; resolve new/changed dependencies
+scripta install --locked          # fail if the root manifest and lockfile differ
+scripta install --locked --offline # use installed Git snapshots without network access
+scripta update                    # resolve all dependencies again and accept source changes
+scripta update --offline          # update local sources; Git resolution requires a network-capable install
 ```
 
 Commit `scripta.toml` and `scripta.lock`. Ignore `.scripta/` and
@@ -167,13 +170,13 @@ Existing Git installations with matching checksums can be reused without fetchin
 If a Git snapshot is missing or modified, an online install fetches its locked
 commit and verifies its checksum. Offline installs fail if that snapshot cannot
 be reused. Local sources are always checked against their pinned checksum; source
-changes require `scr update`. `--locked` requires an existing matching root
+changes require `scripta update`. `--locked` requires an existing matching root
 lockfile and also validates pinned transitive content.
 
 Execution never downloads packages, invokes Git, or reads the original local
 source. Package resolution validates installed contents against the project
 lockfile and raises `PackageError` for stale metadata, missing installations,
-or checksum mismatches. `scr check` continues to check only the supplied source.
+or checksum mismatches. `scripta check` continues to check only the supplied source.
 The runtime's read permission, include-depth limits, and module path policy
 continue to apply to loading package entry scripts. Embedders opt in with
 `Runtime::set_module_resolver`; `scr_cli::pipeline` configures the package resolver.

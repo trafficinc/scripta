@@ -222,7 +222,7 @@ fn cleanup_errors_preserve_diagnostic_redaction() {
     });
     let source = "<?scr try { throw 'old'; } finally { throw 'cleanup-secret'; }";
     let error = runtime.execute_source(source, &mut Vec::new()).unwrap_err();
-    let rendered = error.render("test.scr", source);
+    let rendered = error.render("test.scripta", source);
     assert!(!rendered.contains("cleanup-secret"));
     assert!(rendered.contains("[REDACTED]"));
 }

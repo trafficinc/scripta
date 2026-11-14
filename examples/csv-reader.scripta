@@ -1,7 +1,7 @@
 <?scr
 $path = Cli::arg(0);
 if ($path === null) {
-    echo "Usage: scr csv-reader.scr INPUT.csv\n";
+    echo "Usage: scripta csv-reader.scripta INPUT.csv\n";
     exit(2);
 }
 $reader = Csv::open($path);

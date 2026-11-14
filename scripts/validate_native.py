@@ -148,7 +148,7 @@ class Validation:
         version = self.run('workspace-version', [release, 'version']).strip()
         for variant, features in [('base', []), ('sqlite', ['--features', 'sqlite'])]:
             self.cargo('build-' + variant, ['build', '-p', 'scr-cli', '--profile', 'dist', *features])
-            binary = ROOT / 'target' / self.target / 'dist' / ('scr' + extension)
+            binary = ROOT / 'target' / self.target / 'dist' / ('scripta' + extension)
             description = self.run('version-' + variant, [binary, 'version', '--verbose'])
             expected = 'extensions: ' + ('none' if variant == 'base' else 'sqlite')
             if expected not in description.splitlines() or ('commit: ' + revision) not in description.splitlines():

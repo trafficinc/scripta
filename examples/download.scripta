@@ -3,7 +3,7 @@
 $url = Cli::arg(0);
 $destination = Cli::arg(1);
 if ($url === null || $destination === null) {
-    echo "Usage: scr download.scr URL NEW_DESTINATION\n";
+    echo "Usage: scripta download.scripta URL NEW_DESTINATION\n";
     exit(2);
 }
 // The default host HTTP ceiling is 8 MiB, including for downloads.
