@@ -45,8 +45,8 @@ replace a fresh run against the intended release source.
 
 ## Candidate review before tagging and automatic publication
 
-- [ ] Verify aggregate SHA256SUMS, all eight base/SQLite archives, and the evidence ZIP.
-- [ ] Keep exactly ten uploaded assets: eight packages, SHA256SUMS, and one
+- [ ] Verify aggregate SHA256SUMS, all four SQLite-enabled platform archives, and the evidence ZIP.
+- [ ] Keep exactly six uploaded assets: four packages, SHA256SUMS, and one
   validation-evidence.zip containing all supporting checksums, records, logs,
   and the release manifest.
 - [ ] Inspect documentation/examples and installation/uninstallation for every

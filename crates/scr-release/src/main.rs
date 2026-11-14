@@ -183,6 +183,7 @@ fn notices(
     command.current_dir(root()).args([
         "metadata",
         "--locked",
+        "--no-default-features",
         "--format-version",
         "1",
         "--filter-platform",
@@ -323,9 +324,11 @@ fn package(
     epoch: u32,
     features: Option<&str>,
 ) -> Result<PathBuf> {
-    if features.is_some_and(|features| features != "sqlite") {
-        return Err(fail("supported optional release features: sqlite"));
-    }
+    let features = match features.unwrap_or("sqlite") {
+        "sqlite" => Some("sqlite"),
+        "none" => None,
+        _ => return Err(fail("release --features must be sqlite (default) or none")),
+    };
     let mut files = BTreeMap::new();
     let name = if target.contains("windows") {
         "scripta.exe"
@@ -739,7 +742,7 @@ fn smoke(path: &Path) -> Result<()> {
     if output.stdout != b"Status: offline\n2026\n" {
         return Err(fail("offline smoke output differs"));
     }
-    let validation = json!({"version":version,"target":target,"binary_sha256":manifest["binary_sha256"],"archive_sha256":digest(&fs::read(path)?),"host_os":env::consts::OS,"host_arch":env::consts::ARCH,"offline_smoke":"passed with cleared environment and PATH containing only extracted package, including the collection playground","workspace_tests":"must be checked in the associated native validation record; not inferred from smoke"});
+    let validation = json!({"version":version,"target":target,"extensions":manifest["extensions"],"binary_sha256":manifest["binary_sha256"],"archive_sha256":digest(&fs::read(path)?),"host_os":env::consts::OS,"host_arch":env::consts::ARCH,"offline_smoke":"passed with cleared environment and PATH containing only extracted package, including the collection playground","workspace_tests":"must be checked in the associated native validation record; not inferred from smoke"});
     fs::write(
         path.with_file_name(format!(
             "{}.validation.json",

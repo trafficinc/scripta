@@ -1,8 +1,10 @@
 # Standard library
 
-The optional [SQLite extension](sqlite.md) registers `Sqlite::open`, `execute`,
-`query`, and `close` when the CLI is built with `--features sqlite`. These four
-functions are separate from the default standard-library export index below.
+Default CLI builds include [SQLite](sqlite.md): `Sqlite::open`, `Sqlite::execute`,
+`Sqlite::query`, and `Sqlite::close`. No SQLite server, installed library, or
+separate download is needed. Source builds can omit it with `--no-default-features`.
+Embedders using `scr_stdlib::register` still register SQLite separately through
+`scr_ext_sqlite`; its database handles and host policy remain in that crate.
 
 The standard library registers functions through the public runtime native API.
 Scalar built-ins take exactly one positional argument. Invalid counts, types, and
@@ -44,8 +46,8 @@ registered by default.
 
 ## Release 0.1.0 export index
 
-This reference covers all 129 registered functions in the default library, plus
-native response/entry properties and local loading statements. No optional plugin,
+This reference covers 156 core functions and four default CLI SQLite functions
+(160 in total), plus native response/entry properties and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
 
@@ -72,6 +74,7 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Http | `Http::get`, `Http::post`, `Http::request`, `Http::download` | [HTTP](#http) |
 | Url | `Url::encodeComponent`, `Url::decodeComponent`, `Url::buildQuery`, `Url::parseQuery` | [URL and form encoding](#url-and-form-encoding) |
 | Form | `Form::encode`, `Form::decode` | [URL and form encoding](#url-and-form-encoding) |
+| Sqlite (CLI default) | `Sqlite::open`, `Sqlite::execute`, `Sqlite::query`, `Sqlite::close` | [SQLite](sqlite.md) |
 
 `DirEntry`, `ProcessResult`, `ProcessHandle`, `MemoryUsage`, `DiskUsage`,
 `HttpResponse`, `CsvReader`, and `FileStream` are read-only native objects whose properties

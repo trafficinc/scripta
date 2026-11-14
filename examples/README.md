@@ -10,7 +10,7 @@ package or source checkout; sample input directories must already exist.
 | variables.scripta | `scripta examples/variables.scripta` | Explicit values, concatenation and conversion. |
 | loops.scripta | `scripta examples/loops.scripta` | Prints 1, 2, 3 on separate lines. |
 | functions.scripta | `scripta examples/functions.scripta` | Typed function arguments/returns; greeting and addition. |
-| sqlite.scripta | `cargo run -p scr-cli --features sqlite -- examples/sqlite.scripta` | Optional built-in SQLite: in-memory database, bound parameters, transaction, and query rows. |
+| sqlite.scripta | `scripta examples/sqlite.scripta` | Built-in SQLite: in-memory database, bound parameters, transaction, and query rows. |
 | file-organizer.scripta | `scripta examples/file-organizer.scripta downloads organized` | Previews shallow file moves grouped by extension; --apply performs them, refusing collisions. |
 | log-cleaner.scripta | `scripta examples/log-cleaner.scripta logs --days=30` | Previews regular .log files older than the threshold; --apply deletes only those files. |
 | directory-backup.scripta | `scripta examples/directory-backup.scripta documents backup-new` | Previews recursive copying to a new destination with an existing parent, outside the source tree; --apply copies bytes without overwrite. |

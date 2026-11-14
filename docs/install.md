@@ -17,7 +17,8 @@ There is no curl-to-shell installer or automatic privileged installation.
 The extracted directory contains the standalone executable, LICENSE, dependency
 notices, examples, runnable playgrounds and their fixtures, reference
 documentation, and release.json with file hashes.
-The primary executable is `scripta` (`scripta.exe` on Windows). Archives also
+Every standard platform package includes bundled SQLite; no extra database
+package, server, or installed SQLite library is required. The primary executable is `scripta` (`scripta.exe` on Windows). Archives also
 include an identical compatibility executable named `scr` (`scr.exe`). Put the
 primary executable on PATH; optionally copy the compatibility executable beside
 it if older commands or shebangs need `scr`. Both use the same implementation.

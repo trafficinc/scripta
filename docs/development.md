@@ -50,9 +50,10 @@ includes `str`, `int`, `float`, `bool`, `type`, `len`, and `sleep`. See the
 [registration guide](standard-library.md#registering-rust-modules) for new Rust modules.
 For a complete crate, optional Cargo feature, CLI wiring, and testing walkthrough,
 see [Writing built-in extensions](writing-extensions.md).
-The [SQLite extension](sqlite.md) is the first optional built-in crate; use
-`--features sqlite` for CLI builds and `--all-features` for extension-inclusive
-workspace validation. SQLite-enabled builds need a C compiler.
+The [SQLite module](sqlite.md) is enabled by default in the CLI. Building from
+source needs a C compiler for bundled SQLite; downloaded executables do not.
+Use `-p scr-cli --no-default-features` for a minimal source build. Embedders
+continue to register `scr-ext-sqlite` explicitly.
 `File`, `Dir`, and `Path` provide filesystem operations and optional root policies;
 filesystem tests live in `crates/scr-stdlib/tests` and use temporary directories.
 Process/Env/Cli now support owned children, literal arguments, bounded output,
@@ -83,11 +84,13 @@ Four native jobs use Ubuntu 22.04 x86-64, Ubuntu 22.04 ARM64, Windows Server 202
 x86-64, and macOS 15 Apple Silicon. No Intel macOS job is included. Each installs
 the pinned compiler, verifies its host target, checks formatting and the Python
 validation/publication tests, and runs default/all-feature workspace tests in
-both debug and dist profiles. All-target/all-feature Clippy denies warnings.
+both debug and dist profiles. Each profile also tests the minimal source build
+with `--no-default-features --test sqlite_extension` to verify SQLite absence.
+All-target/all-feature Clippy denies warnings.
 Explicit native targets preserve Windows static CRT settings; macOS builds set
 `MACOSX_DEPLOYMENT_TARGET=15.0`.
 
-Each job builds base and SQLite executables, inspects dependencies, verifies
+Each job builds one standard executable with SQLite, inspects dependencies, verifies
 archives/checksums, compares identical-input repacks, and smoke-tests extracted
 packages. Full evidence is retained as Actions artifacts for seven days, including
 failure logs. Jobs do not cancel one another.
@@ -106,9 +109,9 @@ use a new tag. Failed uploads leave a draft that a rerun can resume. Rerunning a
 replaces only its temporary Actions artifact, so rerunning a failed publisher
 can reuse the completed build artifacts from the same run.
 
-The release has exactly ten uploaded assets: four base and four distinct
-`-sqlite` archives, `SHA256SUMS`, and `validation-evidence.zip`. The checksum file
-covers all eight packages and the evidence ZIP. Individual checksums, native
+The release has exactly six uploaded assets: four platform archives, each with
+SQLite included, `SHA256SUMS`, and `validation-evidence.zip`. The checksum file
+covers all four packages and the evidence ZIP. Individual checksums, native
 validation records, package smoke records, logs, and `release-manifest.json` are
 bundled inside that one evidence ZIP. These release assets are
 independent of the seven-day Actions artifact expiration. Windows downloads

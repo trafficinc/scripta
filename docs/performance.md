@@ -1,5 +1,9 @@
 # Performance and safety review — Phase 13
 
+Default CLI builds now include bundled SQLite. The historical measurements below
+retain their original source/build configurations; rerun the benchmarks with the
+current executable before comparing its startup time, memory, or binary size.
+
 ## Measurement environment and method
 
 Measured on 2026-11-12: macOS-27.0.1-arm64-arm-64bit, 8 logical CPUs,

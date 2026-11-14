@@ -1,14 +1,16 @@
 # SQLite extension
 
-SQLite is an optional built-in extension. Enable it when building the CLI:
+SQLite is included in standard Scripta executables and default CLI source builds:
 
 ```sh
-cargo build -p scr-cli --locked --features sqlite
-cargo run -p scr-cli --locked --features sqlite -- examples/sqlite.scripta
+cargo build -p scr-cli --locked
+cargo run -p scr-cli --locked -- examples/sqlite.scripta
 ```
 
-The extension is disabled in default builds. `scripta version --verbose` reports
-`extensions: sqlite` or `extensions: none`. It registers four native functions;
+`scripta version --verbose` reports `extensions: sqlite` in standard builds.
+A minimal source build made with `cargo build -p scr-cli --locked --no-default-features`
+reports `extensions: none`. Minimal builds are not separate release downloads.
+SQLite registers four native functions;
 script packages and `require` do not enable it. The
 [runnable example](../examples/sqlite.scripta) uses an in-memory database and prints:
 
@@ -214,29 +216,32 @@ every call, including failed calls.
 
 ```sh
 cargo test -p scr-ext-sqlite --locked
-cargo test -p scr-cli --locked --features sqlite --test sqlite_extension
+cargo test -p scr-cli --locked --test sqlite_extension
 cargo test -p scr-cli --locked --no-default-features --test sqlite_extension
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 cargo test --workspace --no-default-features --locked
 ```
 
-Default CLI builds do not link this extension. A full workspace build/test still
-builds `scr-ext-sqlite` as a workspace member and therefore needs a C compiler.
+Default CLI builds link bundled SQLite and need a C compiler when building from
+source. A full workspace build/test also builds `scr-ext-sqlite` as a member,
+even when the CLI uses `--no-default-features`.
 Use `-p scr-cli --no-default-features` to build only the CLI without SQLite.
 
-For a native release, build with `--features sqlite` and tell the release
-packager to use the same feature graph. For example, on macOS ARM64:
+For a native release, the CLI and packager both default to SQLite. For example,
+on macOS ARM64:
 
 ```sh
-cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked --features sqlite
-cargo run -p scr-release --locked -- package --binary target/aarch64-apple-darwin/dist/scripta --target aarch64-apple-darwin --out-dir dist/sqlite --features sqlite
-cargo run -p scr-release --locked -- verify --archive dist/sqlite/scripta-0.1.0-aarch64-apple-darwin.tar.gz
-cargo run -p scr-release --locked -- smoke --archive dist/sqlite/scripta-0.1.0-aarch64-apple-darwin.tar.gz
+cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked
+cargo run -p scr-release --locked -- package --binary target/aarch64-apple-darwin/dist/scripta --target aarch64-apple-darwin --out-dir dist/standard
+cargo run -p scr-release --locked -- verify --archive dist/standard/scripta-0.1.0-aarch64-apple-darwin.tar.gz
+cargo run -p scr-release --locked -- smoke --archive dist/standard/scripta-0.1.0-aarch64-apple-darwin.tar.gz
 ```
 
 The archive records its declared extensions and includes the selected dependency
 notices. Smoke validates the executable's extension list against that metadata
-and runs the SQLite example for enabled archives. Use separate output directories
-for different feature variants, since their archive filenames are the same.
+and executes the SQLite example. Custom minimal source builds use
+`--no-default-features` for the CLI and `--features none` for the packager; keep
+those custom archives in separate output directories. Official releases publish
+one SQLite-enabled archive per platform.
 These commands do not publish a release or establish support for untested targets.
