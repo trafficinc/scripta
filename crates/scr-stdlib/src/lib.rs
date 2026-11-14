@@ -237,5 +237,11 @@ fn bool_value(args: &[Value]) -> Result<Value, String> {
     Ok(Value::Bool(value))
 }
 
+// A forked unit-test child can briefly inherit a locked file description,
+// despite CLOEXEC. Keep the close/lock probe isolated from child setup so it
+// tests the runtime's descriptor ownership, not a concurrent fork/exec window.
+#[cfg(test)]
+static DESCRIPTOR_LIFECYCLE_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests;

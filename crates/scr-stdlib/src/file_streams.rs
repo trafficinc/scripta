@@ -330,6 +330,9 @@ mod tests {
     #[test]
     fn runtime_teardown_and_explicit_close_release_descriptors() {
         use fs2::FileExt;
+        let _guard = crate::DESCRIPTOR_LIFECYCLE_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("data.txt");
         std::fs::write(&path, "data\n").unwrap();

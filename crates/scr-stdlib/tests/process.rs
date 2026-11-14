@@ -94,7 +94,11 @@ fn child_fixture() {
                 "{}|{}|{}",
                 std::env::var("SCR_CHILD_VALUE").unwrap_or_default(),
                 std::env::var("SCR_CHILD_REMOVED").unwrap_or_else(|_| "absent".into()),
-                std::env::current_dir().unwrap().display()
+                // Windows can report an 8.3 spelling even when the requested
+                // directory used a canonical extended-length path.
+                fs::canonicalize(std::env::current_dir().unwrap())
+                    .unwrap()
+                    .display()
             );
         }
         "literal" => {

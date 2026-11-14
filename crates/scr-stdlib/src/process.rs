@@ -741,6 +741,9 @@ mod setup_tests {
     }
     #[test]
     fn failed_platform_setup_kills_and_reaps_the_new_child() {
+        let _guard = crate::DESCRIPTOR_LIFECYCLE_TEST
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let mut command = StdCommandWrap::with_new(std::env::current_exe().unwrap(), |command| {
             command
