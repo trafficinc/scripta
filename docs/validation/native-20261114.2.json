@@ -1,0 +1,226 @@
+{
+  "tag": "v0.1.0-validation.20261114.2",
+  "source_revision": "dc81e10f05bb7c60b7e0b3517749392ce904195d",
+  "run_url": "https://github.com/trafficinc/scripta/actions/runs/43608759544",
+  "receipts": [
+    {
+      "job_url": "https://github.com/trafficinc/scripta/actions/runs/43608759544/job/132488930661",
+      "evidence": {
+        "target": "x86_64-unknown-linux-gnu",
+        "source_revision": "dc81e10f05bb7c60b7e0b3517749392ce904195d",
+        "tests": {
+          "tests-debug-default": {
+            "passed": 447,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-debug-all-features": {
+            "passed": 448,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-default": {
+            "passed": 447,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-all-features": {
+            "passed": 448,
+            "failed": 0,
+            "ignored": 0
+          }
+        },
+        "packages": {
+          "base": {
+            "archive": "base/scripta-0.1.0-x86_64-unknown-linux-gnu.tar.gz",
+            "archive_sha256": "325a0f134ac8889ae3e1502201763734b4bd807a48a1b5e186bd9189072ee12e",
+            "binary_sha256": "900da6b15218f568d8bcfddc15437cc5b0242ef93f233329c7ebd0fcd602f816",
+            "dependencies": [
+              "linux-vdso.so.1 (0x00007ffeb5b91000)",
+              "libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f3397e05000)",
+              "libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f3397400000)",
+              "/lib64/ld-linux-x86-64.so.2 (0x00007f3397e33000)"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          },
+          "sqlite": {
+            "archive": "sqlite/scripta-0.1.0-x86_64-unknown-linux-gnu.tar.gz",
+            "archive_sha256": "6ac8c47ded17382dc0745f0600bd032def638fbe65eaad36c388306a87c467ee",
+            "binary_sha256": "37ebc8bb3d7154bb9cb5866b4b654797a154746ff92a77b942cb9154b8435f06",
+            "dependencies": [
+              "linux-vdso.so.1 (0x00007ffd4e14b000)",
+              "libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f83104a6000)",
+              "libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f83103bf000)",
+              "libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f830f800000)",
+              "/lib64/ld-linux-x86-64.so.2 (0x00007f83104d4000)"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          }
+        }
+      },
+      "artifact": {
+        "id": 14119573120,
+        "name": "native-validation-x86_64-unknown-linux-gnu-1",
+        "digest": "sha256:fff508f568ec2ce99724a9b86bc90999bc024abdf1b69174cf9734452016d7c5",
+        "expires_at": "2026-11-21T15:23:18Z",
+        "size_in_bytes": 13061005
+      },
+      "download_url": "https://github.com/trafficinc/scripta/actions/runs/43608759544/artifacts/14119573120"
+    },
+    {
+      "job_url": "https://github.com/trafficinc/scripta/actions/runs/43608759544/job/132488930881",
+      "evidence": {
+        "target": "x86_64-pc-windows-msvc",
+        "source_revision": "dc81e10f05bb7c60b7e0b3517749392ce904195d",
+        "tests": {
+          "tests-debug-default": {
+            "passed": 440,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-debug-all-features": {
+            "passed": 441,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-default": {
+            "passed": 440,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-all-features": {
+            "passed": 441,
+            "failed": 0,
+            "ignored": 0
+          }
+        },
+        "packages": {
+          "base": {
+            "archive": "base\\scripta-0.1.0-x86_64-pc-windows-msvc.zip",
+            "archive_sha256": "45ffeee3543e88ec0bbe22026dbb8535ccab28879d186826d759e09d57ace415",
+            "binary_sha256": "fb795814b1a030706197f7df02aeb489a98f55c23aeedbc7a74634c3f21202b7",
+            "dependencies": [
+              "advapi32.dll",
+              "ADVAPI32.dll",
+              "api-ms-win-core-synch-l1-2-0.dll",
+              "bcrypt.dll",
+              "bcryptprimitives.dll",
+              "kernel32.dll",
+              "KERNEL32.dll",
+              "ntdll.dll",
+              "oleaut32.dll",
+              "pdh.dll",
+              "powrprof.dll",
+              "psapi.dll",
+              "shell32.dll",
+              "userenv.dll",
+              "ws2_32.dll"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          },
+          "sqlite": {
+            "archive": "sqlite\\scripta-0.1.0-x86_64-pc-windows-msvc.zip",
+            "archive_sha256": "c3deed87ab98d80ed2305964d1077d8f2ec0d5cd5c3d9a179a58c9c693278611",
+            "binary_sha256": "a19cb38c3c8c85e86a04011422e09e126ebc4c71f6da5fdcdf2215241897baa3",
+            "dependencies": [
+              "advapi32.dll",
+              "ADVAPI32.dll",
+              "api-ms-win-core-synch-l1-2-0.dll",
+              "bcrypt.dll",
+              "bcryptprimitives.dll",
+              "kernel32.dll",
+              "KERNEL32.dll",
+              "ntdll.dll",
+              "oleaut32.dll",
+              "pdh.dll",
+              "powrprof.dll",
+              "psapi.dll",
+              "shell32.dll",
+              "userenv.dll",
+              "ws2_32.dll"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          }
+        }
+      },
+      "artifact": {
+        "id": 14120455247,
+        "name": "native-validation-x86_64-pc-windows-msvc-1",
+        "digest": "sha256:5a49c643e580c8dcae9709160799f38e1a48b51015bc2e3eda98a9e7cad3031e",
+        "expires_at": "2026-11-21T15:27:10Z",
+        "size_in_bytes": 33659003
+      },
+      "download_url": "https://github.com/trafficinc/scripta/actions/runs/43608759544/artifacts/14120455247"
+    },
+    {
+      "job_url": "https://github.com/trafficinc/scripta/actions/runs/43608759544/job/132488931170",
+      "evidence": {
+        "target": "aarch64-unknown-linux-gnu",
+        "source_revision": "dc81e10f05bb7c60b7e0b3517749392ce904195d",
+        "tests": {
+          "tests-debug-default": {
+            "passed": 447,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-debug-all-features": {
+            "passed": 448,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-default": {
+            "passed": 447,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-all-features": {
+            "passed": 448,
+            "failed": 0,
+            "ignored": 0
+          }
+        },
+        "packages": {
+          "base": {
+            "archive": "base/scripta-0.1.0-aarch64-unknown-linux-gnu.tar.gz",
+            "archive_sha256": "75541a7d95395a67dfac6f571ab2f0e32598db9632e1da72768a3c983ffe6830",
+            "binary_sha256": "02edcbe4eee1c2894498371b12ec8bc9412740fe3740bfb2e756cbb00c876972",
+            "dependencies": [
+              "linux-vdso.so.1 (0x0000ff231c1e2000)",
+              "libgcc_s.so.1 => /lib/aarch64-linux-gnu/libgcc_s.so.1 (0x0000ff231bc70000)",
+              "libc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000ff231bac0000)",
+              "/lib/ld-linux-aarch64.so.1 (0x0000ff231c1a0000)"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          },
+          "sqlite": {
+            "archive": "sqlite/scripta-0.1.0-aarch64-unknown-linux-gnu.tar.gz",
+            "archive_sha256": "13b58a96fc4da01b1a6a4e19e47beb249c3fd4af7d9f95ede1eed977b1d91f88",
+            "binary_sha256": "b8d7fc2b0d0ba618bcc03f678da41d6131b3683e181a75da2259eaffe70a24af",
+            "dependencies": [
+              "linux-vdso.so.1 (0x0000ff56aecd9000)",
+              "libgcc_s.so.1 => /lib/aarch64-linux-gnu/libgcc_s.so.1 (0x0000ff56ae5a0000)",
+              "libm.so.6 => /lib/aarch64-linux-gnu/libm.so.6 (0x0000ff56ae500000)",
+              "libc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000ff56ae350000)",
+              "/lib/ld-linux-aarch64.so.1 (0x0000ff56aeca0000)"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          }
+        }
+      },
+      "artifact": {
+        "id": 14118893796,
+        "name": "native-validation-aarch64-unknown-linux-gnu-1",
+        "digest": "sha256:807dcef8b26200641eb2716ad321999307059ed02f254fdb9a987765b52a716a",
+        "expires_at": "2026-11-21T15:20:01Z",
+        "size_in_bytes": 12324552
+      },
+      "download_url": "https://github.com/trafficinc/scripta/actions/runs/43608759544/artifacts/14118893796"
+    }
+  ]
+}
