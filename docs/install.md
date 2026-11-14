@@ -58,10 +58,9 @@ scr run scripta-0.1.0-x86_64-unknown-linux-gnu/examples/hello.scr
 Add the PATH export to your shell startup file if needed. Check the glibc/platform
 baseline in the matrix. Do not use the GNU/Linux artifact on musl/Alpine.
 
-## macOS ARM64 / x86-64
+## macOS Apple Silicon (M-series)
 
 ```sh
-# ARM64; substitute x86_64-apple-darwin only after that target is verified.
 archive=scripta-0.1.0-aarch64-apple-darwin.tar.gz
 shasum -a 256 -c "$archive.sha256"
 tar -xzf "$archive"
@@ -75,7 +74,7 @@ scr run scripta-0.1.0-aarch64-apple-darwin/examples/hello.scr
 Candidates are not Developer-ID-signed or notarized. A downloaded executable may
 require manual approval through macOS security settings after verification. The
 release does not claim Developer ID signing or notarization. Use an archive for
-the machine's native architecture; Rosetta compatibility is not established.
+Apple Silicon Macs; Intel Macs are not supported.
 
 ## Windows x86-64 (PowerShell)
 

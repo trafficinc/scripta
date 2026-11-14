@@ -45,7 +45,8 @@ maintainer review; they do not announce a published release or stable API.
   or ignored tests. Both package variants passed verification, static-CRT import
   inspection, offline smoke, and identical-input repacking.
 - The binaries target macOS 15.0 but have not been run on that OS baseline.
-  macOS Intel and macOS 15 ARM64 native evidence remain pending.
+  macOS support is limited to Apple Silicon (M-series) Macs; Intel Macs are
+  excluded. macOS 15 ARM64 native evidence remains pending.
   Reviewed macOS binaries have linker-generated ad hoc signatures, with no
   publisher identity or notarization. No Windows signing is claimed.
 
@@ -99,7 +100,7 @@ cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify-checks
 ```
 
 Use the Windows target explicitly for **all** Cargo commands on Windows. Package
-extension is selected by the target; target values outside the five configured
+extension is selected by the target; target values outside the four configured
 candidate names are rejected. `--tag v0.1.0` validates tag/version agreement.
 Choose a fresh output directory for each validation run so prior evidence and
 archives are retained; `dist/local-base` above is only an example. Packages
