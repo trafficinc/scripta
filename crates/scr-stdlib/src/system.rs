@@ -196,6 +196,10 @@ pub(crate) fn register(runtime: &mut Runtime, policy: FilesystemPolicy) -> Nativ
                 policy.check(context, &path, false)?;
                 #[cfg(any(unix, windows))]
                 {
+                    // Windows statvfs resolves the volume root and can succeed
+                    // for a nonexistent child path. Enforce the API's existing
+                    // file/directory contract before querying capacity.
+                    std::fs::metadata(&path)?;
                     let stats = fs2::statvfs(&path)?;
                     usage(
                         "DiskUsage",

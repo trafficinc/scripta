@@ -33,7 +33,7 @@ fn run(runtime: &mut Runtime, source: &str) -> Result<(), RuntimeError> {
         .map(|_| ())
 }
 fn error(runtime: &mut Runtime, source: &str, kind: &str) {
-    let error = run(runtime, source).unwrap_err();
+    let error = run(runtime, source).expect_err(source);
     assert!(
         error.message.starts_with(&format!("{kind}:")),
         "{source}: {error}"
@@ -176,6 +176,37 @@ fn host_metrics_have_portable_types_and_real_sampling_interval() {
         )
         .unwrap();
     error(&mut runtime, "System::diskUsage($path);", "IoError");
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+#[test]
+fn disk_usage_checks_path_existence_before_querying_the_volume() {
+    let directory = tempfile::tempdir().unwrap();
+    let existing = directory.path().join("existing");
+    std::fs::write(&existing, "contents").unwrap();
+    let mut runtime = runtime();
+    for path in [directory.path(), existing.as_path()] {
+        runtime
+            .set_global("path", Value::String(path.to_str().unwrap().into()))
+            .unwrap();
+        run(&mut runtime, "$usage = System::diskUsage($path);").unwrap();
+        assert!(int(field(&runtime, "usage", "totalBytes")) > 0);
+    }
+    for path in [
+        directory.path().join("missing"),
+        existing.join("not-a-directory"),
+    ] {
+        runtime
+            .set_global("path", Value::String(path.to_str().unwrap().into()))
+            .unwrap();
+        runtime.set_global("result", Value::Int(123)).unwrap();
+        error(
+            &mut runtime,
+            "$result = System::diskUsage($path);",
+            "IoError",
+        );
+        assert_eq!(runtime.get_global("result"), Some(&Value::Int(123)));
+    }
 }
 
 #[test]
