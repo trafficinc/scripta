@@ -1,7 +1,7 @@
-# Local release validation — 2026-11-13
+# Release validation — 2026-11-13
 
-This record covers local release-readiness work for Scripta 0.1.0. It is not a
-published release or validation of the other candidate platforms.
+This record covers local macOS release-readiness work for Scripta 0.1.0 and
+subsequent native Linux/Windows validation. No release has been published.
 
 ## Source and environment
 
@@ -15,8 +15,8 @@ published release or validation of the other candidate platforms.
 - Dependency inputs: committed `Cargo.lock`, `--locked`, offline cached crates.
 
 The declaration of macOS 15.0 as a deployment target is not evidence of execution
-on macOS 15. Linux x86-64/ARM64, macOS Intel, and Windows x86-64 remain pending
-native validation. This local run did not use GitHub Actions. Subsequent
+on macOS 15. At the time of this local run, the other targets had not been
+validated natively. This local run did not use GitHub Actions. Subsequent
 [tag-triggered validation](development.md#tag-triggered-linux-and-windows-validation)
 collects separate native Linux/Windows evidence.
 
@@ -83,5 +83,48 @@ repackaged after selecting the reviewed source revision.
   notarization; the local macOS binaries have ad hoc linker signatures.
 
 The [release checklist](release-checklist.md) and [compatibility matrix](compatibility.md)
-remain the sources for release gates and platform claims. No commit, tag,
-published asset, installation into a user's PATH, or release was performed.
+remain the sources for release gates and platform claims. The local run did not
+create a commit, tag, published asset, installation into a user's PATH, or release.
+
+## Native GitHub Actions validation
+
+The [validation run](https://github.com/trafficinc/scripta/actions/runs/43551112355)
+tests tag `v0.1.0-validation.20261113.6`, source revision
+`142df7808fc0ee2d07a99a094fd8afd15e966f3e`, with pinned Rust 1.99.1.
+All three jobs passed: Ubuntu 22.04 x86-64/ARM64 and Windows Server 2022 x86-64.
+
+| Native host | Debug default | Debug all features | Dist default | Dist all features |
+| --- | ---: | ---: | ---: | ---: |
+| [Ubuntu 22.04 x86-64](https://github.com/trafficinc/scripta/actions/runs/43551112355/job/132313528683) | 433 | 434 | 433 | 434 |
+| [Ubuntu 22.04 ARM64](https://github.com/trafficinc/scripta/actions/runs/43551112355/job/132313529012) | 433 | 434 | 433 | 434 |
+| [Windows Server 2022 x86-64](https://github.com/trafficinc/scripta/actions/runs/43551112355/job/132313529026) | 426 | 427 | 426 | 427 |
+
+All listed suites passed with zero failed or ignored tests. Formatting,
+validation-driver unit tests, and workspace/all-target/all-feature Clippy with
+warnings denied also passed. Each successful job built both base and SQLite
+packages, verified archive checksums and contents, inspected native library
+dependencies, ran offline extracted-package smoke tests, and confirmed identical
+hashes when repacking identical inputs. Linux dependencies were confined to the
+documented system libraries. Windows imports contained system DLLs, without
+dynamic MSVC/UCRT, OpenSSL, or SQLite runtime dependencies. Platform-specific
+test guards account for the different suite counts; no failing tests were ignored.
+
+Earlier validation attempts exposed Windows local Git path normalization,
+transient atomic replacement denials, short-path reporting in a process fixture,
+and nonexistent-path acceptance in disk-usage queries. These were fixed with
+regression coverage. A concurrent Linux descriptor fixture was isolated from a
+child-spawn fixture to prevent inherited locks from interfering with close checks.
+The atomic-reader and descriptor-lifecycle assertions remain enforced.
+
+The run artifacts contain full logs, packages, dependency reports, and
+`validation.json`, with seven-day retention. Public check annotations retain
+compact test counts, package/binary hashes, dependency lists, and smoke/repack
+results. The committed [native receipts](validation/native-20261113.6.json)
+preserve those summaries, archive/binary SHA-256 hashes, dependency lists,
+job URLs, and artifact IDs/digests. These receipts are compact public evidence;
+full logs and package smoke records remain in the run artifacts.
+
+This validation-only tag does not publish a release. Documentation
+recording these results was added after the tested tag and is not contained in
+those immutable candidate archives; final release inputs still need a reviewed
+source tag and fresh packages.
