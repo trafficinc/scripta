@@ -232,6 +232,26 @@ Use the explicit `--target` on Windows Cargo build/test/install commands. The
 project enables the static MSVC CRT for that target; separating host builds keeps
 that setting away from compiler plugins. Windows ARM64 is outside the matrix.
 
+For a downloaded Windows executable, add Scripta to your **user PATH** so you can
+run it from any folder. Rust and Visual Studio are not required for downloaded
+executables.
+
+1. Extract the download and put `scripta.exe` in a permanent folder, such as
+   `C:\Users\YourName\Apps\Scripta`. Replace `YourName` with your Windows username.
+2. Search Start for **Edit environment variables for your account**.
+3. Under **User variables**, select **Path** → **Edit** → **New**.
+4. Add the folder containing `scripta.exe`, not the executable itself.
+5. Click **OK** on all dialogs, then close and reopen PowerShell.
+
+Verify that the command is available:
+
+```powershell
+scripta version --verbose
+```
+
+You can then run an existing script with `scripta`, followed by its actual file
+path, without typing the path to `scripta.exe`.
+
 ### Install a source build on PATH
 
 On macOS/Linux, `cargo install --path crates/scr-cli --locked` installs into
