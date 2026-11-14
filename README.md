@@ -32,8 +32,8 @@ The playground is optional and is not included in normal Scripta installations.
 
 **0.1.0 is a first public-test candidate.** Tag pushes now build and test all four
 supported targets and publish a GitHub Release only after every job succeeds.
-[Release downloads](https://github.com/trafficinc/scripta/releases) include base
-and SQLite variants; validation tags are marked as prereleases.
+[Release downloads](https://github.com/trafficinc/scripta/releases) include SQLite
+by default; validation tags are marked as prereleases.
 Local macOS ARM64 validation covers debug and distribution-profile tests,
 formatting, Clippy, the Rust 1.85 source check, archive checksums and
 reproducibility, and an offline test of the packaged executable, including the
@@ -73,7 +73,7 @@ generated HTML or JSON through an existing web server when you need a dashboard.
   captures, local `require` / `require_once`, and versioned Git/local packages.
 - **Developer tools:** syntax checks, a comment-preserving formatter, error codes,
   source locations, and runtime stack traces.
-- **Optional SQLite:** build with `--features sqlite` for parameterized SQL,
+- **Built-in SQLite:** default builds include parameterized SQL,
   transactions, and bounded query results. See the [SQLite extension](docs/sqlite.md).
 - **A standalone interpreter:** the installed executable uses platform system
   libraries. Local scripts need no Python, Node.js, PHP, Docker, Rust, or network.
@@ -419,7 +419,7 @@ examples and have not been deployment-tested in this checkout.
 
 ## Standard library
 
-The [complete reference](docs/standard-library.md) documents all **123 functions**,
+The [complete reference](docs/standard-library.md) documents all **160 functions**,
 return values, native objects, limits, and errors.
 
 | Modules | Use |
@@ -430,6 +430,8 @@ return values, native objects, limits, and errors.
 | `System` | Platform, CPU sampling, system memory, disk usage, and host details. |
 | `Date`, `Log` | UTC timestamps, parsing, sleep, and redacted local JSON logs. |
 | `Json`, `Http` | JSON conversion, binary HTTP/HTTPS requests, and downloads directly to disk. |
+| `Sqlite` | Bundled local databases, parameterized SQL, transactions, and bounded query results. |
+| `Url`, `Form` | UTF-8 percent/query encoding and form bodies. |
 | `Bytes`, `Csv`, `Regex` | Explicit UTF-8 conversion, byte slicing, CSV records and streams, and simple Rust-backed regex. |
 | `String` | Grapheme length/slicing for emoji and combining text; trim, split/join, search, replace, take substrings, convert case, and format scalar values with `{}`. |
 | `Math` | Type-preserving abs, min/max, floor, ceil, and round (ties away from zero). |

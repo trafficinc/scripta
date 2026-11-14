@@ -13,7 +13,7 @@ from pathlib import Path
 from validate_native import ROOT, TARGETS, digest
 
 SUITES = {'tests-' + profile + '-' + features
-          for profile in ('debug', 'dist') for features in ('default', 'all-features')}
+          for profile in ('debug', 'dist') for features in ('default', 'all-features', 'minimal')}
 
 
 def release_kind(tag, version):
@@ -44,8 +44,8 @@ def prepare(inputs, output, revision, tag, version):
                 raise ValueError('Native tests failed, were ignored, or are missing')
         if not record.get('steps') or any(s.get('exit_code') != 0 for s in record['steps']):
             raise ValueError('Native validation contains unsuccessful steps')
-        if set(record.get('packages', {})) != {'base', 'sqlite'}:
-            raise ValueError('Both base and SQLite packages are required')
+        if set(record.get('packages', {})) != {'standard'}:
+            raise ValueError('One standard SQLite-enabled package is required per target')
         records[target] = (path, record)
     if set(records) != set(TARGETS):
         raise ValueError('All four native targets must pass before publication')
@@ -56,6 +56,8 @@ def prepare(inputs, output, revision, tag, version):
         root = path.parent.resolve()
         extension = '.zip' if target.endswith('windows-msvc') else '.tar.gz'
         for variant, package in sorted(record['packages'].items()):
+            if package.get('extensions') != ['sqlite']:
+                raise ValueError('Standard packages must include SQLite')
             expected = f'scripta-{version}-{target}{extension}'
             relative = Path(package['archive'].replace('\\', '/'))
             if relative.as_posix() != f'{variant}/{expected}':
@@ -70,12 +72,12 @@ def prepare(inputs, output, revision, tag, version):
                 raise ValueError('Native package evidence is incomplete')
             smoke = archive.with_name(archive.name + '.validation.json')
             evidence = json.loads(smoke.read_text(encoding='utf-8'))
-            for key, value in [('target', target), ('version', version),
+            for key, value in [('target', target), ('version', version), ('extensions', ['sqlite']),
                                ('archive_sha256', package['archive_sha256']),
                                ('binary_sha256', package['binary_sha256'])]:
                 if evidence.get(key) != value:
                     raise ValueError('Extracted-package evidence differs from archive')
-            name = f'scripta-{version}-{target}' + ('-sqlite' if variant == 'sqlite' else '') + extension
+            name = expected
             packages.append((archive, smoke, name, target, variant))
 
     output.mkdir(parents=True)
@@ -89,7 +91,7 @@ def prepare(inputs, output, revision, tag, version):
             (evidence / (name + '.sha256')).write_text(f'{checksum}  {name}\n', encoding='utf-8')
             shutil.copyfile(smoke, evidence / (name + '.validation.json'))
             manifest['packages'].append({'asset': name, 'target': target, 'variant': variant,
-                                         'archive_sha256': checksum})
+                                         'archive_sha256': checksum, 'extensions': ['sqlite']})
         for target, (path, _) in sorted(records.items()):
             shutil.copyfile(path, evidence / f'validation-{target}.json')
             logs = evidence / 'logs' / target
@@ -108,11 +110,11 @@ def prepare(inputs, output, revision, tag, version):
     (output / 'SHA256SUMS').write_text(''.join(checksums), encoding='utf-8')
     notes = [f'Scripta {version}', '', f'Tag: `{tag}`', f'Source: `{revision}`', '',
              'Native validation passed on Linux x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon.',
-             'Both default/all-feature debug/dist suites, Clippy, dependency inspection, archive verification,',
+             'Default/all-feature debug/dist suites, minimal-build compatibility tests, Clippy, dependency inspection, archive verification,',
              'offline extracted-package smoke, and identical-input repacking passed.', '',
-             'Download the archive for your platform. `-sqlite` archives include the SQLite extension.',
+             'Download the single archive for your platform; SQLite is included by default.',
              'Archives contain `scripta` and legacy `scr` commands; no Rust installation is required.',
-             'SHA256SUMS verifies the eight packages and validation-evidence.zip.',
+             'SHA256SUMS verifies the four packages and validation-evidence.zip.',
              'The evidence ZIP contains individual checksums, native/smoke records, logs, and release-manifest.json.',
              'Candidates have no publisher signatures or macOS notarization.']
     notes_path = output.parent / (output.name + '-notes.md')

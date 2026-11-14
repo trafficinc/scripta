@@ -19,7 +19,7 @@ maintainer review; they do not announce a published release or stable API.
   captured scopes. Cached module roots and host-held callables remain protected.
 - Standard-library automation covers filesystem operations, bounded subprocesses,
   HTTP/HTTPS with text or binary bodies, JSON, CSV, regular expressions, dates,
-  logging, system metrics, and optional SQLite. The SQLite extension does not
+  logging, system metrics, and bundled SQLite. The SQLite extension does not
   currently bind or return the core bytes type as BLOB data.
 - Collection helpers provide list end operations and splice, generation,
   aggregation, comparisons, record columns, and typed map merging/construction.
@@ -86,14 +86,14 @@ must match the workspace's base version. Push the intended reviewed commit's tag
 branch pushes do not publish anything.
 
 The [publisher](../scripts/publish_release.py) validates the downloaded native
-records and hashes before staging assets. Base archive names are unchanged;
-SQLite downloads add `-sqlite` before `.zip`/`.tar.gz` so all eight archives have
-unique release asset names. Publish only those eight packages, `SHA256SUMS`,
-and one `validation-evidence.zip`: ten uploaded assets. `SHA256SUMS` verifies the
-eight packages and the evidence ZIP. Matching individual `.sha256` files,
-smoke/native records, per-target logs, and `release-manifest.json` live inside
-the evidence ZIP and identify the tested source and artifacts. Do not upload
-these supporting files as separate release assets.
+records and hashes before staging assets. Standard archive names are unchanged.
+Each platform has one standard archive with SQLite included. Publish only four
+platform packages, `SHA256SUMS`, and `validation-evidence.zip`: six uploaded
+assets. `SHA256SUMS` verifies the four packages and the evidence ZIP. Individual
+checksums, native/smoke records, per-target logs, and `release-manifest.json` live
+inside the evidence ZIP. Do not upload these supporting files separately.
+Standard-package records and extracted-package smoke must both confirm SQLite
+is enabled; minimal source builds are tested but are not release variants.
 
 Uploads remain in a draft until every asset succeeds. A failed upload can be
 retried while the release is still a draft; a published release is not replaced.
@@ -138,18 +138,18 @@ cargo test --workspace --locked --target aarch64-apple-darwin
 cargo test --workspace --all-features --locked --target aarch64-apple-darwin
 cargo test --workspace --profile dist --target aarch64-apple-darwin --locked
 cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- package --binary target/aarch64-apple-darwin/dist/scripta --target aarch64-apple-darwin --out-dir dist/local-base
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify --archive dist/local-base/scripta-0.1.0-aarch64-apple-darwin.tar.gz
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- smoke --archive dist/local-base/scripta-0.1.0-aarch64-apple-darwin.tar.gz
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- checksums --dir dist/local-base
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify-checksums --dir dist/local-base
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- package --binary target/aarch64-apple-darwin/dist/scripta --target aarch64-apple-darwin --out-dir dist/local-standard
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify --archive dist/local-standard/scripta-0.1.0-aarch64-apple-darwin.tar.gz
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- smoke --archive dist/local-standard/scripta-0.1.0-aarch64-apple-darwin.tar.gz
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- checksums --dir dist/local-standard
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify-checksums --dir dist/local-standard
 ```
 
 Use the Windows target explicitly for **all** Cargo commands on Windows. Package
 extension is selected by the target; target values outside the four configured
 candidate names are rejected. `--tag v0.1.0` validates tag/version agreement.
 Choose a fresh output directory for each validation run so prior evidence and
-archives are retained; `dist/local-base` above is only an example. Packages
+archives are retained; `dist/local-standard` above is only an example. Packages
 include reference documentation, examples, and runnable playgrounds with their
 fixtures. Offline smoke executes the collection playground as well as the
 basic examples, and records workspace tests as a separate native-evidence gate.
@@ -157,13 +157,14 @@ basic examples, and records workspace tests as a separate native-evidence gate.
 maintainer-only scr-release tool requires Rust and cached/fetched crate metadata;
 it is not included in or required by the installed scripta interpreter.
 
-For a SQLite-enabled variant, build the CLI with `--features sqlite` and pass
-`--features sqlite` to the `scr-release package` subcommand as well. This selects
-the matching dependency notices and records the extension in `release.json`.
-Smoke checks the executable's reported extension list and runs the SQLite example
-for enabled archives. Use a separate output directory for each variant; archive
-staging names do not encode features; automatic publication adds `-sqlite` to
-the SQLite asset names. See the [SQLite release instructions](sqlite.md#validation-and-release-builds).
+The CLI and packager include SQLite by default. `--features sqlite` remains an
+explicit equivalent for the packager. For a custom minimal source build, use
+`--no-default-features` for the CLI and `--features none` for `scr-release package`.
+The packager selects the matching notice graph with default features disabled
+and then SQLite explicitly enabled where required. Smoke verifies the executable's
+extension list and executes the SQLite example for standard archives. Minimal
+custom archives are not published as official release variants. See the
+[SQLite build instructions](sqlite.md#validation-and-release-builds).
 
 SHA-256 sidecars contain `hex  filename` in the standard checksum format.
 `checksums --dir` writes a sorted manifest for every archive in that directory;

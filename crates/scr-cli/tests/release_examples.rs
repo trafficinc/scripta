@@ -489,7 +489,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Path", "join filename extension parent normalize absolute"),
         ("Process", "run spawn shell wait poll kill exists currentId"),
         ("Env", "get set has remove all"),
-        ("Cli", "args arg has option prompt readLine"),
+        ("Cli", "args arg has option isTerminal prompt readLine"),
         (
             "System",
             "platform architecture hostname cpuUsage memoryUsage diskUsage uptime homeDirectory tempDirectory",
@@ -503,6 +503,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             "encodeComponent decodeComponent buildQuery parseQuery",
         ),
         ("Form", "encode decode"),
+        ("Sqlite", "open execute query close"),
         ("Bytes", "encodeUtf8 decodeUtf8 slice"),
         ("Csv", "parse encode open readRow close"),
         ("Regex", "isMatch findAll replace"),
@@ -511,8 +512,14 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             "trim split join contains startsWith endsWith replace substring lower upper format graphemeLength graphemeSubstring",
         ),
         ("Math", "abs min max floor ceil round"),
-        ("List", "remove slice concat contains sort"),
-        ("Map", "create has get keys values remove"),
+        (
+            "List",
+            "remove slice concat contains sort push unshift pop shift splice reverse chunk fill search unique sum product diff intersect column",
+        ),
+        (
+            "Map",
+            "create has get keys values remove merge replace combine flip search reverse diff intersect diffKeys intersectKeys column",
+        ),
     ];
     let mut count = 7;
     for (namespace, functions) in modules {
@@ -524,7 +531,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 129);
+    assert_eq!(count, 160);
 }
 
 #[test]

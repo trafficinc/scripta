@@ -22,7 +22,7 @@ semver = "1"
 sha2 = "0.10"
 
 [features]
-default = []
+default = ["sqlite"]
 sqlite = ["dep:scr-ext-sqlite"]
 
 [[bin]]

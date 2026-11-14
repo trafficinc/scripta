@@ -142,6 +142,11 @@ class Validation:
                 text = self.cargo(name, ['test', '--workspace', *profile, *features])
                 self.record['tests'][name] = test_counts(text)
                 self.save()
+            name = 'tests-' + label + '-minimal'
+            text = self.cargo(name, ['test', '-p', 'scr-cli', '--no-default-features',
+                                     '--test', 'sqlite_extension', *profile])
+            self.record['tests'][name] = test_counts(text)
+            self.save()
         self.run('clippy', ['cargo', 'clippy', '--workspace', '--all-targets', '--all-features',
                            '--locked', '--target', self.target, '--', '-D', 'warnings'])
         self.cargo('build-release-tool', ['build', '-p', 'scr-release'])
@@ -149,33 +154,34 @@ class Validation:
         release = ROOT / 'target' / self.target / 'debug' / ('scr-release' + extension)
         version = self.run('workspace-version', [release, 'version']).strip()
         self.record['version'] = version
-        for variant, features in [('base', []), ('sqlite', ['--features', 'sqlite'])]:
-            self.cargo('build-' + variant, ['build', '-p', 'scr-cli', '--profile', 'dist', *features])
-            binary = ROOT / 'target' / self.target / 'dist' / ('scripta' + extension)
-            description = self.run('version-' + variant, [binary, 'version', '--verbose'])
-            expected = 'extensions: ' + ('none' if variant == 'base' else 'sqlite')
-            if expected not in description.splitlines() or ('commit: ' + revision) not in description.splitlines():
-                raise RuntimeError('Binary feature/revision metadata mismatch')
-            dependencies = self.dependencies(variant, binary)
-            destination = self.output / variant
-            arguments = [release, 'package', '--binary', binary, '--target', self.target,
-                         '--epoch', self.record['source_date_epoch'], *features]
-            self.run('package-' + variant, [*arguments, '--out-dir', destination])
-            archive = destination / ('scripta-' + version + '-' + self.target + ('.zip' if extension else '.tar.gz'))
-            self.run('verify-' + variant, [release, 'verify', '--archive', archive])
-            self.run('smoke-' + variant, [release, 'smoke', '--archive', archive])
-            self.run('checksums-' + variant, [release, 'checksums', '--dir', destination])
-            self.run('verify-checksums-' + variant, [release, 'verify-checksums', '--dir', destination])
-            with tempfile.TemporaryDirectory(prefix='scripta-repack-') as scratch:
-                self.run('repack-' + variant, [*arguments, '--out-dir', scratch])
-                if archive.read_bytes() != (Path(scratch) / archive.name).read_bytes():
-                    raise RuntimeError('Identical-input repacking changed the archive')
-            self.record['packages'][variant] = {
-                'archive': str(archive.relative_to(self.output)), 'archive_sha256': digest(archive),
-                'binary_sha256': digest(binary), 'dependencies': dependencies,
-                'identical_input_repack': 'passed', 'offline_package_smoke': 'passed',
-            }
-            self.save()
+        variant = 'standard'
+        self.cargo('build-' + variant, ['build', '-p', 'scr-cli', '--profile', 'dist'])
+        binary = ROOT / 'target' / self.target / 'dist' / ('scripta' + extension)
+        description = self.run('version-' + variant, [binary, 'version', '--verbose'])
+        expected = 'extensions: sqlite'
+        if expected not in description.splitlines() or ('commit: ' + revision) not in description.splitlines():
+            raise RuntimeError('Binary feature/revision metadata mismatch')
+        dependencies = self.dependencies(variant, binary)
+        destination = self.output / variant
+        arguments = [release, 'package', '--binary', binary, '--target', self.target,
+                     '--epoch', self.record['source_date_epoch']]
+        self.run('package-' + variant, [*arguments, '--out-dir', destination])
+        archive = destination / ('scripta-' + version + '-' + self.target + ('.zip' if extension else '.tar.gz'))
+        self.run('verify-' + variant, [release, 'verify', '--archive', archive])
+        self.run('smoke-' + variant, [release, 'smoke', '--archive', archive])
+        self.run('checksums-' + variant, [release, 'checksums', '--dir', destination])
+        self.run('verify-checksums-' + variant, [release, 'verify-checksums', '--dir', destination])
+        with tempfile.TemporaryDirectory(prefix='scripta-repack-') as scratch:
+            self.run('repack-' + variant, [*arguments, '--out-dir', scratch])
+            if archive.read_bytes() != (Path(scratch) / archive.name).read_bytes():
+                raise RuntimeError('Identical-input repacking changed the archive')
+        self.record['packages'][variant] = {
+            'archive': str(archive.relative_to(self.output)), 'archive_sha256': digest(archive),
+            'binary_sha256': digest(binary), 'dependencies': dependencies,
+            'extensions': ['sqlite'],
+            'identical_input_repack': 'passed', 'offline_package_smoke': 'passed',
+        }
+        self.save()
         self.record['status'] = 'passed'
 
 

@@ -5,7 +5,7 @@ Scripta's existing native registration API to expose functions and host objects.
 There is no additional extension framework to implement or runtime loader to
 configure. The standard library uses this same API.
 
-The optional [SQLite extension](sqlite.md), implemented in `crates/scr-ext-sqlite`,
+The default-enabled [SQLite extension](sqlite.md), implemented in `crates/scr-ext-sqlite`,
 provides a complete stateful example with runtime-owned handles and resource limits.
 
 This guide adds a small optional `Greeting::hello(name)` extension in a source
@@ -123,7 +123,7 @@ Add a `[features]` section, or merge these entries into one if present:
 
 ```toml
 [features]
-default = []
+default = ["sqlite"]
 greeting = ["dep:scr-ext-greeting"]
 ```
 
