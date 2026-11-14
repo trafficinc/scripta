@@ -572,7 +572,11 @@ new contents on filesystems that support atomic replacement. Readers holding an
 old Unix descriptor keep reading the old file. Concurrent writers use
 last-successful-replacement behavior; there is no compare-and-swap or multi-file
 transaction. Windows handles opened without delete sharing may block replacement;
-this raises an exception and leaves the old file in place.
+transient Windows access/sharing/lock errors are retried within a 250 ms window,
+with at most 5 ms sleeps and cancellation/destination-policy checks between
+attempts. Persistent errors raise an exception and leave the old file in place.
+This retry window is not a hard deadline for blocking OS calls and does not add
+a delete/copy fallback.
 
 Existing regular files must allow OS write access and must not be read-only.
 On Unix, replacement preserves the currently observed ordinary rwx permission
