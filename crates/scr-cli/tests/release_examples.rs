@@ -41,6 +41,7 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
         "command-runner.scr",
         "atomic-report.scr",
         "data-handling.scr",
+        "url-encoding.scr",
         "csv-reader.scr",
         "download.scr",
     ];
@@ -497,6 +498,11 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Log", "info warn error debug setFile"),
         ("Json", "encode decode pretty"),
         ("Http", "get post request download"),
+        (
+            "Url",
+            "encodeComponent decodeComponent buildQuery parseQuery",
+        ),
+        ("Form", "encode decode"),
         ("Bytes", "encodeUtf8 decodeUtf8 slice"),
         ("Csv", "parse encode open readRow close"),
         ("Regex", "isMatch findAll replace"),
@@ -518,7 +524,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 123);
+    assert_eq!(count, 129);
 }
 
 #[test]
@@ -624,4 +630,12 @@ fn download_example_saves_binary_bytes() {
     );
     worker.join().unwrap();
     assert_eq!(fs::read(destination).unwrap(), b"\x00\xffPK");
+}
+
+#[test]
+fn url_encoding_example_executes_with_expected_outputs() {
+    assert_eq!(
+        success(run("url-encoding.scr", &[])),
+        "https://example.com/search?q=caf%C3%A9%20%26%20tea&page=2\n[[\"tag\",\"rust\"],[\"tag\",\"scripting\"]]\nname=Jane+Doe&message=A%2BB\ntrue\n"
+    );
 }

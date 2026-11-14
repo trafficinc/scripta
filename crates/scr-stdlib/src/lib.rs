@@ -21,6 +21,7 @@ mod paths;
 pub mod process;
 mod strings;
 mod system;
+mod url;
 pub use filesystem::FilesystemPolicy;
 
 #[derive(Debug, Clone, Default)]
@@ -110,6 +111,7 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
     csv::register(runtime, options.filesystem.clone())?;
     json::register(runtime)?;
     strings::register(runtime)?;
+    url::register(runtime)?;
     math::register(runtime)?;
     collections::register(runtime)?;
     http::register(runtime, options.http, options.filesystem.clone())?;

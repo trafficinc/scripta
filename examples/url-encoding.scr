@@ -1,0 +1,8 @@
+<?scr
+// Local-only URL and form construction; no HTTP requests are made.
+$query = Url::buildQuery(["q" => "café & tea", "page" => str(2)]);
+echo "https://example.com/search?" . $query . "\n";
+$pairs = [["tag", "rust"], ["tag", "scripting"]];
+echo Json::encode(Url::parseQuery(Url::buildQuery($pairs))) . "\n";
+echo Form::encode(["name" => "Jane Doe", "message" => "A+B"]) . "\n";
+echo str(Url::decodeComponent(Url::encodeComponent("é /+%")) === "é /+%") . "\n";

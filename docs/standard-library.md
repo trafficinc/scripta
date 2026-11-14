@@ -39,12 +39,12 @@ Embedders opt in by calling `scr_stdlib::register(&mut runtime)?`. Registration
 returns `NativeResult<()>`; duplicate names produce `RegistryError` and preserve
 the existing registration. `echo` and `exit` remain language statements. Neither
 is registered as a native function; exit returns a code without terminating the
-embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Log`, `Json`, `Http`, `String`, `Math`, `List`, `Map`, `Bytes`, `Csv`, and `Regex` are
+embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Log`, `Json`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Csv`, and `Regex` are
 registered by default.
 
 ## Release 0.1.0 export index
 
-This reference covers all 123 registered functions in the default library, plus
+This reference covers all 129 registered functions in the default library, plus
 native response/entry properties and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -70,6 +70,8 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Csv | `Csv::parse`, `Csv::encode`, `Csv::open`, `Csv::readRow`, `Csv::close` | [CSV](#csv) |
 | Regex | `Regex::isMatch`, `Regex::findAll`, `Regex::replace` | [Regex](#regex) |
 | Http | `Http::get`, `Http::post`, `Http::request`, `Http::download` | [HTTP](#http) |
+| Url | `Url::encodeComponent`, `Url::decodeComponent`, `Url::buildQuery`, `Url::parseQuery` | [URL and form encoding](#url-and-form-encoding) |
+| Form | `Form::encode`, `Form::decode` | [URL and form encoding](#url-and-form-encoding) |
 
 `DirEntry`, `ProcessResult`, `ProcessHandle`, `MemoryUsage`, `DiskUsage`,
 `HttpResponse`, `CsvReader`, and `FileStream` are read-only native objects whose properties
@@ -1182,6 +1184,65 @@ Encoding is capped at 64 nesting levels and decoding at 128. Arguments and arity
 $data = Json::decode("{\"status\":\"up\",\"count\":3}");
 echo Json::pretty($data) . "\n";
 ```
+
+## URL and form encoding
+
+These pure helpers require no network or filesystem capabilities. They operate
+on UTF-8 text, preserve input collections, and check cancellation and result byte
+limits (including nested pair slots) before allocating growing outputs.
+
+| Function | Contract |
+| --- | --- |
+| `Url::encodeComponent(text: string): string` | Percent-encodes UTF-8 bytes, leaving only ASCII letters, digits, and `-._~` unchanged. Spaces become `%20`; literal `+` becomes `%2B`. |
+| `Url::decodeComponent(text: string): string` | Decodes percent escapes once; literal `+` remains `+`. |
+| `Url::buildQuery(parameters): string` | Encodes names/values and joins them with `&` and `=`, without a leading `?`. |
+| `Url::parseQuery(text: string): list` | Parses a query into ordered two-string pairs, optionally removing one leading `?`. Literal `+` remains `+`. |
+| `Form::encode(parameters): string` | Builds an `application/x-www-form-urlencoded` body. Spaces become `+`; ASCII letters, digits, and `*-._` remain unchanged. |
+| `Form::decode(text: string): list` | Parses a form body into ordered two-string pairs. Converts raw `+` to space before percent-decoding; does not remove a leading `?`. |
+
+Both builders accept a map of string keys and string values, or a list of
+exactly two-string pairs. Map insertion order and list order are preserved;
+pairs allow duplicate names. Integers, booleans, null, nested values, integer map
+keys, and malformed pairs raise `TypeError`; use explicit conversions such as
+`str(2)`. Empty maps/lists produce an empty string.
+
+Both parsers split on `&`, ignore empty segments, and split each remaining
+segment at its first `=` before decoding. Missing `=` means an empty value;
+empty names/values and duplicate names are retained. Empty input returns an
+empty list. Inputs are query strings or form bodies, not complete URLs. Neither
+parser treats bracketed names as nested structures. Use `Form::decode` for
+queries produced using HTML form conventions.
+
+All encoders emit uppercase hexadecimal escapes. Decoders accept either hex
+case, reject incomplete/nonhex escapes, and reject invalid decoded UTF-8 with
+`EncodingError`. They never recursively decode: `%2526` becomes `%26`. Encoders
+expect raw text: an existing `%` is encoded again. Component encoding applies to
+one query name/value or individual path segment, not an entire URL, hostname, or
+filesystem path. The percent profile uses the unreserved set from
+[RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-2.3); form encoding uses
+the [WHATWG form safe set](https://url.spec.whatwg.org/#application/x-www-form-urlencoded).
+Decoding here is deliberately strict about malformed escapes and UTF-8.
+
+```scr
+$query = Url::buildQuery(["q" => "café & tea", "page" => str(2)]);
+$url = "https://example.com/search?" . $query;
+// https://example.com/search?q=caf%C3%A9%20%26%20tea&page=2
+$pairs = Url::parseQuery("tag=rust&tag=scripting");
+// [["tag", "rust"], ["tag", "scripting"]]
+$body = Form::encode(["name" => "Jane Doe", "message" => "A+B"]);
+// name=Jane+Doe&message=A%2BB
+```
+
+For HTTP form submission, pass `$body` to `Http::post` and explicitly set the
+`Content-Type` header to `application/x-www-form-urlencoded`. The local-only
+[encoding example](../examples/url-encoding.scr) runs without making requests.
+
+PHP mapping: `rawurlencode` / `rawurldecode` correspond to
+`Url::encodeComponent` / `Url::decodeComponent`; `http_build_query` corresponds
+to `Url::buildQuery` for the percent profile or `Form::encode` for form encoding.
+Scripta requires string parameters and does not implement PHP's nested-array or
+implicit scalar conversion rules. `Form::decode` preserves pairs instead of
+`parse_str`-style variable, name, or nesting transformations.
 
 ## HTTP
 
