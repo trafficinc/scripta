@@ -5,7 +5,7 @@
 Workspace version: **0.1.0**. This is a first public-test candidate, not a stable
 language/API compatibility guarantee. See [compatibility](compatibility.md) for
 actual native evidence. No release is automatically published by these changes.
-See the [local validation record](release-validation.md) for the reviewed scope,
+See the [validation record](release-validation.md) for the reviewed scope,
 source provenance, generated evidence, and outstanding release gates.
 
 ## Draft candidate notes
@@ -34,8 +34,18 @@ maintainer review; they do not announce a published release or stable API.
   isolated local installation/removal, and matching dependency-notice inventories.
   These checks establish local artifact behavior, not other-platform support or
   maintainer attribution signoff.
+- Native Ubuntu 22.04 x86-64 and ARM64 validation passed on
+  `v0.1.0-validation.20261113.6`: 433 default-feature and 434 all-feature tests
+  in each of debug and dist profiles, with no failed or ignored tests. Clippy,
+  base/SQLite package verification, dependency inspection, offline smoke, and
+  identical-input repacking passed; see the
+  [Actions evidence](release-validation.md#native-github-actions-validation).
+- Native Windows Server 2022 x86-64 validation passed on the same tag:
+  426 default-feature and 427 all-feature tests in each profile, with no failed
+  or ignored tests. Both package variants passed verification, static-CRT import
+  inspection, offline smoke, and identical-input repacking.
 - The binaries target macOS 15.0 but have not been run on that OS baseline.
-  Linux, Windows, macOS Intel, and macOS 15 ARM64 native evidence remain pending.
+  macOS Intel and macOS 15 ARM64 native evidence remain pending.
   Reviewed macOS binaries have linker-generated ad hoc signatures, with no
   publisher identity or notarization. No Windows signing is claimed.
 

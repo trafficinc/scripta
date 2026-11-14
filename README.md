@@ -31,15 +31,17 @@ formatting, Clippy, the Rust 1.85 source check, archive checksums and
 reproducibility, and an offline test of the packaged executable, including the
 collection playground. See the [local validation record](docs/release-validation.md)
 for the tested source, feature variants, results, and limitations.
-The other targets still need their native validation.
+Native Ubuntu 22.04 x86-64/ARM64 and Windows Server 2022 x86-64 validation also
+passed; see the
+[Actions validation record](docs/release-validation.md#native-github-actions-validation).
 
 | Target | Current validation |
 | --- | --- |
 | macOS ARM64 | Verified locally on macOS 27.0.1; macOS 15 validation pending |
 | macOS x86-64 | Native validation pending |
-| Linux x86-64 | Native validation pending |
-| Linux ARM64 | Native validation pending |
-| Windows x86-64 | Native validation pending |
+| Linux x86-64 | Verified natively on Ubuntu 22.04 |
+| Linux ARM64 | Verified natively on Ubuntu 22.04 |
+| Windows x86-64 | Verified natively on Windows Server 2022 |
 
 Build instructions below describe the configured targets; they do not certify an
 untested platform. See the [compatibility matrix](docs/compatibility.md) for OS

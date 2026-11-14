@@ -1,0 +1,241 @@
+{
+  "run_url": "https://github.com/trafficinc/scripta/actions/runs/43551112355",
+  "tag": "v0.1.0-validation.20261113.6",
+  "source_revision": "142df7808fc0ee2d07a99a094fd8afd15e966f3e",
+  "scope": "Native Linux x86-64/ARM64 and Windows x86-64; no macOS baseline or release publication implied",
+  "receipts": [
+    {
+      "job_url": "https://github.com/trafficinc/scripta/actions/runs/43551112355/job/132313528683",
+      "runner_labels": [
+        "ubuntu-22.04"
+      ],
+      "evidence": {
+        "target": "x86_64-unknown-linux-gnu",
+        "source_revision": "142df7808fc0ee2d07a99a094fd8afd15e966f3e",
+        "tests": {
+          "tests-debug-default": {
+            "passed": 433,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-debug-all-features": {
+            "passed": 434,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-default": {
+            "passed": 433,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-all-features": {
+            "passed": 434,
+            "failed": 0,
+            "ignored": 0
+          }
+        },
+        "packages": {
+          "base": {
+            "archive": "base/scripta-0.1.0-x86_64-unknown-linux-gnu.tar.gz",
+            "archive_sha256": "1c042903d6947fd68ddeadf5b2df8d36ab6f0a853f74f935a449a60700ea1556",
+            "binary_sha256": "bfc6303ff5e655234efb7890e1d4e3c4baf01755e7cb7a44cfce8aa7ae5bef21",
+            "dependencies": [
+              "linux-vdso.so.1 (0x00007ffdf8f9c000)",
+              "libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fe2f15e0000)",
+              "libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fe2f1200000)",
+              "/lib64/ld-linux-x86-64.so.2 (0x00007fe2f1bbd000)"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          },
+          "sqlite": {
+            "archive": "sqlite/scripta-0.1.0-x86_64-unknown-linux-gnu.tar.gz",
+            "archive_sha256": "998143b693f33d8dfd144ed78789c1fbc0d4cd75a95386e867932a3a06239174",
+            "binary_sha256": "6a5fada847681466047023fa385492863aa470b41282d58548a4b9106b5ef873",
+            "dependencies": [
+              "linux-vdso.so.1 (0x00007ffe3dfba000)",
+              "libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fb2b368a000)",
+              "libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fb2b35a3000)",
+              "libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fb2b2a00000)",
+              "/lib64/ld-linux-x86-64.so.2 (0x00007fb2b36b8000)"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          }
+        }
+      }
+    },
+    {
+      "job_url": "https://github.com/trafficinc/scripta/actions/runs/43551112355/job/132313529012",
+      "runner_labels": [
+        "ubuntu-22.04-arm"
+      ],
+      "evidence": {
+        "target": "aarch64-unknown-linux-gnu",
+        "source_revision": "142df7808fc0ee2d07a99a094fd8afd15e966f3e",
+        "tests": {
+          "tests-debug-default": {
+            "passed": 433,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-debug-all-features": {
+            "passed": 434,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-default": {
+            "passed": 433,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-all-features": {
+            "passed": 434,
+            "failed": 0,
+            "ignored": 0
+          }
+        },
+        "packages": {
+          "base": {
+            "archive": "base/scripta-0.1.0-aarch64-unknown-linux-gnu.tar.gz",
+            "archive_sha256": "86af43fb4170dcde5d8367c9d898184ede3d88640cf601a1fcc30e9b84f568c1",
+            "binary_sha256": "3b07bbf3b33668117db7ece0718d73c866a313efefe8d0984ae8fe89f8678d28",
+            "dependencies": [
+              "linux-vdso.so.1 (0x0000ff51a3a05000)",
+              "libgcc_s.so.1 => /lib/aarch64-linux-gnu/libgcc_s.so.1 (0x0000ff51a3490000)",
+              "libc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000ff51a32e0000)",
+              "/lib/ld-linux-aarch64.so.1 (0x0000ff51a39c0000)"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          },
+          "sqlite": {
+            "archive": "sqlite/scripta-0.1.0-aarch64-unknown-linux-gnu.tar.gz",
+            "archive_sha256": "dbb44f0c9d6cf01eaba46508209e19d998e84b641cbdea8bbce0afb62420ef99",
+            "binary_sha256": "0b9a5b149658ffb69ba1dc6d39bb98aad7dd788117a4d1c1dc836240e88a6042",
+            "dependencies": [
+              "linux-vdso.so.1 (0x0000ff127f1d1000)",
+              "libgcc_s.so.1 => /lib/aarch64-linux-gnu/libgcc_s.so.1 (0x0000ff127eaa0000)",
+              "libm.so.6 => /lib/aarch64-linux-gnu/libm.so.6 (0x0000ff127ea00000)",
+              "libc.so.6 => /lib/aarch64-linux-gnu/libc.so.6 (0x0000ff127e850000)",
+              "/lib/ld-linux-aarch64.so.1 (0x0000ff127f190000)"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          }
+        }
+      }
+    },
+    {
+      "job_url": "https://github.com/trafficinc/scripta/actions/runs/43551112355/job/132313529026",
+      "runner_labels": [
+        "windows-2022"
+      ],
+      "evidence": {
+        "target": "x86_64-pc-windows-msvc",
+        "source_revision": "142df7808fc0ee2d07a99a094fd8afd15e966f3e",
+        "tests": {
+          "tests-debug-default": {
+            "passed": 426,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-debug-all-features": {
+            "passed": 427,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-default": {
+            "passed": 426,
+            "failed": 0,
+            "ignored": 0
+          },
+          "tests-dist-all-features": {
+            "passed": 427,
+            "failed": 0,
+            "ignored": 0
+          }
+        },
+        "packages": {
+          "base": {
+            "archive": "base\\scripta-0.1.0-x86_64-pc-windows-msvc.zip",
+            "archive_sha256": "6949d97fb7cc69f048815b9e31f8f01039861c1ff8c562ae004d0298e34b70af",
+            "binary_sha256": "fb9cb44d81725e9654bf0afd690664bf329132d6c0ec1f6a611154d1f7fecf4b",
+            "dependencies": [
+              "ADVAPI32.dll",
+              "advapi32.dll",
+              "api-ms-win-core-synch-l1-2-0.dll",
+              "bcrypt.dll",
+              "bcryptprimitives.dll",
+              "kernel32.dll",
+              "KERNEL32.dll",
+              "ntdll.dll",
+              "oleaut32.dll",
+              "pdh.dll",
+              "powrprof.dll",
+              "psapi.dll",
+              "shell32.dll",
+              "userenv.dll",
+              "ws2_32.dll"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          },
+          "sqlite": {
+            "archive": "sqlite\\scripta-0.1.0-x86_64-pc-windows-msvc.zip",
+            "archive_sha256": "3423a37276f13f342a4603c694593c5259dacb9b15fedb175e604337cf120352",
+            "binary_sha256": "58fe5dc47fd07e0c51fc41acf1733c4bb605e5ab6805f9f16e46c1bcf15a1e95",
+            "dependencies": [
+              "ADVAPI32.dll",
+              "advapi32.dll",
+              "api-ms-win-core-synch-l1-2-0.dll",
+              "bcrypt.dll",
+              "bcryptprimitives.dll",
+              "kernel32.dll",
+              "KERNEL32.dll",
+              "ntdll.dll",
+              "oleaut32.dll",
+              "pdh.dll",
+              "powrprof.dll",
+              "psapi.dll",
+              "shell32.dll",
+              "userenv.dll",
+              "ws2_32.dll"
+            ],
+            "identical_input_repack": "passed",
+            "offline_package_smoke": "passed"
+          }
+        }
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 14097076334,
+      "name": "native-validation-x86_64-pc-windows-msvc-1",
+      "digest": "sha256:44889ba7d86c27dc531546945fd422cebfbc9104e3598ae5011b15981f1cb4a7",
+      "size_in_bytes": 19967156,
+      "created_at": "2026-11-14T03:40:43Z",
+      "expires_at": "2026-11-21T03:40:41Z",
+      "expired": false
+    },
+    {
+      "id": 14096698006,
+      "name": "native-validation-x86_64-unknown-linux-gnu-1",
+      "digest": "sha256:5c3984b304accf86db4d9465be6ed0b66e394768805a13b9b8d65c1d5c88b879",
+      "size_in_bytes": 6859667,
+      "created_at": "2026-11-14T03:31:41Z",
+      "expires_at": "2026-11-21T03:31:39Z",
+      "expired": false
+    },
+    {
+      "id": 14096266772,
+      "name": "native-validation-aarch64-unknown-linux-gnu-1",
+      "digest": "sha256:b60a3fe26f8aaa936f81addd4f09e5f2819577bd200da1affab8f1fe80b8cfa8",
+      "size_in_bytes": 6488611,
+      "created_at": "2026-11-14T03:28:39Z",
+      "expires_at": "2026-11-21T03:28:33Z",
+      "expired": false
+    }
+  ]
+}

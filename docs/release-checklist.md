@@ -36,11 +36,11 @@ replace a fresh run against the intended release source.
 
 ## Required native evidence before advertising all targets
 
-- [ ] Linux x86-64 debug/dist/CLI/package tests and dependency report.
-- [ ] Linux ARM64 debug/dist/CLI/package tests and dependency report.
+- [x] Linux x86-64 debug/dist/CLI/package tests and dependency report.
+- [x] Linux ARM64 debug/dist/CLI/package tests and dependency report.
 - [ ] macOS ARM64 debug/dist/CLI/package tests on the declared macOS baseline.
 - [ ] macOS x86-64 debug/dist/CLI/package tests and dependency report.
-- [ ] Windows x86-64 debug/dist/CLI/package tests and static-CRT import report.
+- [x] Windows x86-64 debug/dist/CLI/package tests and static-CRT import report.
 - [ ] Review the MSRV check and every relevant test; no ignored/skipped platform failures.
 - [ ] Attach per-target validation records; update compatibility rows.
 
