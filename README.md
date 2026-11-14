@@ -219,6 +219,111 @@ on Ubuntu 22.04. musl/Alpine and ARM32 are outside the release matrix.
 
 Install Rust through rustup using the **MSVC** toolchain and Visual Studio Build
 Tools with the **Desktop development with C++** workload and Windows SDK.
+
+1. Install Rust
+Open PowerShell or Windows Terminal and run:
+
+```powershell
+winget install --id Rustlang.Rustup -e
+```
+
+Close and reopen your terminal, then run:
+
+```powershell
+rustup default stable
+rustc --version
+cargo --version
+```
+
+2. Install the Windows C++ build tools
+   
+Scripta needs the Microsoft Visual C++ compiler and Windows SDK.
+
+Download and install:
+
+Visual Studio Build Tools 
+
+In the installer:
+
+Select Desktop development with C++.
+
+Make sure MSVC build tools are selected.
+
+Make sure a Windows 11 SDK is selected.
+
+Complete the installation.
+
+3. Download Scripta
+In PowerShell, run:
+
+```powershell
+cd $HOME
+git clone https://github.com/trafficinc/scripta.git
+cd scripta
+```
+
+If Git isn't installed:
+
+```powershell
+winget install --id Git.Git -e
+```
+
+Restart PowerShell before continuing.
+
+4. Build and install Scripta
+From the Scripta repository folder, run:
+
+
+```powershell
+cargo install --path crates/scr-cli --target x86_64-pc-windows-msvc --locked
+```
+
+This compiles Scripta and installs its executables into:
+
+
+```powershell
+C:\Users\YOUR_USERNAME\.cargo\bin
+```
+
+The installation includes both scripta.exe and scr.exe.
+
+5. Make sure it's on PATH
+Rust normally adds its Cargo bin directory to your user PATH automatically.
+
+Check:
+
+```powershell
+$env:Path -split ';' | Select-String '\.cargo\\bin'
+If nothing appears, add it permanently:
+```
+
+```powershell
+$cargoBin = "$HOME\.cargo\bin"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+
+if (($userPath -split ';') -notcontains $cargoBin) {
+    [Environment]::SetEnvironmentVariable(
+        "Path",
+        "$cargoBin;$userPath",
+        "User"
+    )
+}
+```
+
+Close and reopen PowerShell.
+
+6. Verify the installation
+
+Run:
+
+```powershell
+scripta version
+```
+
+You should be able to execute either command from any directory.
+
+## Or if you don't want to run it from path:
+
 Open PowerShell in the repository root:
 
 ```powershell
