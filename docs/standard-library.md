@@ -1059,6 +1059,8 @@ free bytes; available bytes are those available to the caller/nonprivileged user
 Reserved space/quotas can make used + available less than total.
 Percent used is `100 * usedBytes / totalBytes`. A single native filesystem stats
 query supplies these counters; an invalid/nonexistent path raises an I/O error.
+Path existence is checked before the capacity query, including on Windows where
+the native volume lookup alone can succeed for a nonexistent child path.
 
 `MemoryUsage` has the same read-only property names, but used bytes are explicitly
 `totalBytes - availableBytes`. Available includes memory the OS considers
