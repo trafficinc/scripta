@@ -38,10 +38,10 @@ collection playground. See the [local validation record](docs/release-validation
 for the tested source, feature variants, results, and limitations.
 Native Ubuntu 22.04 x86-64/ARM64 and Windows Server 2022 x86-64 validation also
 passed; see the
-[Actions validation record](docs/release-validation.md#native-github-actions-validation).
+[Actions validation record](docs/release-validation.md#post-migration-native-validation).
 
-The recorded platform evidence predates the command/extension migration. The
-renamed executables and archives need fresh native validation before publication.
+The latest native run covers the URL/form helpers, `scripta`/`scr` commands,
+source extensions, canonical `<?scripta` tag, and legacy `<?scr` compatibility.
 
 | Target | Current validation |
 | --- | --- |

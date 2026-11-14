@@ -7,14 +7,14 @@ sources, native environments, and retained local and Actions evidence.
 
 | Platform | Rust target / asset suffix | Evidence available here | Status |
 | --- | --- | --- | --- |
-| Linux x86-64 | `x86_64-unknown-linux-gnu.tar.gz` | [Native debug/dist tests, dependency inspection and base/SQLite package checks](release-validation.md#native-github-actions-validation) | Verified on Ubuntu 22.04 |
-| Linux ARM64 | `aarch64-unknown-linux-gnu.tar.gz` | [Native debug/dist tests, dependency inspection and base/SQLite package checks](release-validation.md#native-github-actions-validation) | Verified on Ubuntu 22.04 |
+| Linux x86-64 | `x86_64-unknown-linux-gnu.tar.gz` | [Native debug/dist tests, dependency inspection and base/SQLite package checks](release-validation.md#post-migration-native-validation) | Verified on Ubuntu 22.04 |
+| Linux ARM64 | `aarch64-unknown-linux-gnu.tar.gz` | [Native debug/dist tests, dependency inspection and base/SQLite package checks](release-validation.md#post-migration-native-validation) | Verified on Ubuntu 22.04 |
 | macOS ARM64 | `aarch64-apple-darwin.tar.gz` | Local macOS 27.0.1 arm64 debug/dist suites, dependency inspection and extracted-package smoke passed | Verified locally on macOS 27.0.1; macOS 15 validation pending |
-| Windows x86-64 | `x86_64-pc-windows-msvc.zip` | [Native debug/dist tests, static-CRT inspection and base/SQLite package checks](release-validation.md#native-github-actions-validation) | Verified on Windows Server 2022 |
+| Windows x86-64 | `x86_64-pc-windows-msvc.zip` | [Native debug/dist tests, static-CRT inspection and base/SQLite package checks](release-validation.md#post-migration-native-validation) | Verified on Windows Server 2022 |
 
-The native receipts above describe the historical `scr`/`.scr` revision. The
-`scripta`/`.scripta` migration preserves source syntax but requires fresh native
-executable and archive validation before publishing the renamed artifacts.
+The current Linux/Windows receipts cover tag `v0.1.0-validation.20261114.2`,
+including the renamed executables/extensions and canonical/legacy opening tags.
+Earlier receipts remain historical; macOS 15 execution is still pending.
 
 Every archive is named `scripta-0.1.0-TARGET.tar.gz` or `.zip`. Windows contains
 `scripta.exe` and compatibility `scr.exe`; other platforms contain `scripta` and

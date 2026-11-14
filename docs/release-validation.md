@@ -128,3 +128,40 @@ This validation-only tag does not publish a release. Documentation
 recording these results was added after the tested tag and is not contained in
 those immutable candidate archives; final release inputs still need a reviewed
 source tag and fresh packages.
+
+## Post-migration native validation
+
+On 2026-11-14, [run 43608759544](https://github.com/trafficinc/scripta/actions/runs/43608759544)
+passed on all three native targets at tag `v0.1.0-validation.20261114.2`, source
+revision `dc81e10f05bb7c60b7e0b3517749392ce904195d`, with Rust 1.99.1.
+This validates the URL/form helpers, primary `scripta` and compatibility `scr`
+commands, `.scripta`/`.scta`/`.scr` filenames, and canonical `<?scripta` with
+legacy `<?scr` support.
+
+| Native host | Debug default | Debug all features | Dist default | Dist all features |
+| --- | ---: | ---: | ---: | ---: |
+| Ubuntu 22.04 x86-64 | 447 | 448 | 447 | 448 |
+| Ubuntu 22.04 ARM64 | 447 | 448 | 447 | 448 |
+| Windows Server 2022 x86-64 | 440 | 441 | 440 | 441 |
+
+All suites passed with zero failed or ignored tests. Formatting, all five
+validation-driver tests, and workspace/all-target/all-feature Clippy passed.
+Base and SQLite archives passed verification, dependency inspection, offline
+extracted-package smoke, checksum verification, and identical-input repacking.
+The archives include matching primary and compatibility executables.
+
+The first post-migration Windows run exposed stale `.scr` Git attributes, which
+allowed renamed source files to check out as CRLF. The fix enforces LF for all
+three source extensions while preserving exact snapshot/benchmark fixture bytes.
+An isolated `core.autocrlf=true` checkout regression test reproduced the failure
+before the fix and passed afterward; the original formatter assertion remains.
+
+The [native receipts](validation/native-20261114.2.json) retain job/download URLs,
+test counts, archive/binary SHA-256 hashes, dependencies, artifact IDs/digests,
+and expiration times. Full packages and logs are attached to the run with
+seven-day retention. The Windows artifact contains `base/` and `sqlite/` ZIPs;
+each contains `scripta.exe` and legacy `scr.exe`.
+
+This is validation evidence, not a published release. These documentation updates
+follow the tested tag and do not alter the immutable candidate archives. macOS
+15 baseline validation and maintainer publication review remain outstanding.

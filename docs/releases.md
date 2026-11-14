@@ -69,8 +69,10 @@ so the companion can execute the renamed binary without a protocol change;
 its editor file-extension filters belong to the separate companion repository.
 
 Existing native receipts and immutable archives retain their original names and
-hashes. Run fresh native validation and package smoke for the migrated revision;
-the previous receipts do not establish validation of the new archives.
+hashes. The [post-migration native run](release-validation.md#post-migration-native-validation)
+passed on Linux x86-64/ARM64 and Windows x86-64 at
+`v0.1.0-validation.20261114.2`, including both package variants. Native macOS 15
+validation and maintainer publication review remain pending.
 
 ## Pinned inputs and profiles
 
