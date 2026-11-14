@@ -197,10 +197,12 @@ def main():
         validation.record['error'] = str(error)
         print(str(error), file=sys.stderr)
         if os.environ.get('GITHUB_ACTIONS') == 'true':
-            details = str(error)
+            details = str(error)[:500]
             if validation.record['steps']:
                 log = validation.output / validation.record['steps'][-1]['log']
-                details += '\n' + log.read_text(encoding='utf-8', errors='replace')[-6000:]
+                # Check annotations truncate at 4096 characters. Keep the
+                # final failure, rather than losing it behind preceding passes.
+                details += '\n' + log.read_text(encoding='utf-8', errors='replace')[-3000:]
             # Preserve the useful error in public check annotations, even when
             # downloading the complete job log requires authentication.
             escaped = details.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')

@@ -88,7 +88,7 @@ fn replace_with(
     path: &Path,
     policy: &FilesystemPolicy,
     stage: impl FnOnce(&RuntimeContext<'_>, &mut File) -> NativeResult<()>,
-    publish: impl FnOnce(TempPath, &Path) -> Result<(), PathPersistError>,
+    mut publish: impl FnMut(TempPath, &Path) -> Result<(), PathPersistError>,
 ) -> NativeResult<()> {
     policy.check(context, path, true)?;
     destination_permissions(path)?;
@@ -123,17 +123,59 @@ fn replace_with(
     }
     // Close the data handle before rename (important for Windows sharing rules).
     let temporary = temporary.into_temp_path();
-    if let Err(error) = context.check_cancelled() {
-        return Err(cleanup_error(error, temporary.close()));
+    #[cfg(not(windows))]
+    {
+        if let Err(error) = context.check_cancelled() {
+            return Err(cleanup_error(error, temporary.close()));
+        }
+        publish(temporary, path).map_err(|error| {
+            cleanup_error(
+                failure("replace atomic destination", path, error.error),
+                error.path.close(),
+            )
+        })
     }
-    // No fallible work or cancellation check follows the commit point. persist
-    // uses same-filesystem rename/replacement, never a delete/copy fallback.
-    publish(temporary, path).map_err(|error| {
-        cleanup_error(
-            failure("replace atomic destination", path, error.error),
-            error.path.close(),
-        )
-    })
+    #[cfg(windows)]
+    {
+        let mut temporary = temporary;
+        let retry_start = std::time::Instant::now();
+        loop {
+            if let Err(error) = context.check_cancelled() {
+                return Err(cleanup_error(error, temporary.close()));
+            }
+            // No fallible work or cancellation check follows a successful commit.
+            // persist remains a rename/replacement, never a delete/copy fallback.
+            let error = match publish(temporary, path) {
+                Ok(()) => return Ok(()),
+                Err(error) => error,
+            };
+            if matches!(error.error.raw_os_error(), Some(5 | 32 | 33)) {
+                // Shared readers can temporarily deny replacement on Windows.
+                // Keep the staged path and recheck cancellation and destination
+                // policy before each new commit attempt within a bounded window.
+                let remaining =
+                    std::time::Duration::from_millis(250).saturating_sub(retry_start.elapsed());
+                if !remaining.is_zero() {
+                    temporary = error.path;
+                    std::thread::sleep(remaining.min(std::time::Duration::from_millis(5)));
+                    let validation = (|| {
+                        context.check_cancelled()?;
+                        policy.check(context, path, true)?;
+                        destination_permissions(path)?;
+                        Ok(())
+                    })();
+                    if let Err(error) = validation {
+                        return Err(cleanup_error(error, temporary.close()));
+                    }
+                    continue;
+                }
+            }
+            return Err(cleanup_error(
+                failure("replace atomic destination", path, error.error),
+                error.path.close(),
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -258,6 +300,75 @@ mod tests {
             )
             .unwrap_err();
             assert_eq!(error.kind, "Interrupted");
+        });
+        assert_clean(dir.path(), &destination, Some(b"original"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn transient_windows_replacement_denials_retry_without_partial_publication() {
+        for code in [5, 32, 33] {
+            let dir = tempfile::tempdir().unwrap();
+            let destination = dir.path().join("report");
+            std::fs::write(&destination, "original").unwrap();
+            with_context(|context, _| {
+                let mut attempts = 0;
+                replace_with(
+                    context,
+                    &destination,
+                    &FilesystemPolicy::default(),
+                    |_, file| {
+                        file.write_all(b"complete new contents")?;
+                        Ok(())
+                    },
+                    |path, destination| {
+                        attempts += 1;
+                        if attempts == 1 {
+                            assert_eq!(std::fs::read(destination).unwrap(), b"original");
+                            Err(PathPersistError {
+                                error: io::Error::from_raw_os_error(code),
+                                path,
+                            })
+                        } else {
+                            path.persist(destination)
+                        }
+                    },
+                )
+                .unwrap();
+                assert_eq!(attempts, 2);
+            });
+            assert_clean(dir.path(), &destination, Some(b"complete new contents"));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cancellation_during_windows_replacement_retry_preserves_original_and_cleans_stage() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("report");
+        std::fs::write(&destination, "original").unwrap();
+        with_context(|context, flag| {
+            let mut attempts = 0;
+            let error = replace_with(
+                context,
+                &destination,
+                &FilesystemPolicy::default(),
+                |_, file| {
+                    file.write_all(b"new")?;
+                    Ok(())
+                },
+                |path, _| {
+                    attempts += 1;
+                    flag.store(true, Ordering::Relaxed);
+                    Err(PathPersistError {
+                        error: io::Error::from_raw_os_error(5),
+                        path,
+                    })
+                },
+            )
+            .unwrap_err();
+            assert_eq!(error.kind, "Interrupted");
+            assert_eq!(attempts, 1);
         });
         assert_clean(dir.path(), &destination, Some(b"original"));
     }
