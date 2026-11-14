@@ -158,6 +158,14 @@ chains. These checks run as part of the Cargo test suite; they improve robustnes
 without claiming exhaustive proof over all resource inputs.
 
 
+Library unit fixtures that spawn child processes share the test-only
+`DESCRIPTOR_LIFECYCLE_TEST` guard with descriptor-close/lock probes. A forked
+child can otherwise keep a duplicate file description and lock alive briefly,
+even when descriptors are marked close-on-exec. Keep the close assertions
+strict and isolate the fixtures. Process cwd fixtures canonicalize their
+reported paths so Windows short paths and extended-length paths compare by
+directory identity rather than spelling.
+
 ## Performance and runtime safety
 
 See [the Phase 13 report](performance.md) for actual release benchmarks, per-child
