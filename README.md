@@ -171,6 +171,10 @@ After placing the executable on PATH, `scripta run hello.scripta` works on all t
 systems. An explicit `Http` call needs the requested endpoint; `Process::run`
 needs the program the script chooses to launch.
 
+## Download the package for your OS in Releases
+
+Then add to your path to have scripta available globally.
+
 ## Build from source
 
 Start in the repository root, whether obtained through Git or a source archive.
