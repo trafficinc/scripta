@@ -60,6 +60,12 @@ class EvidenceTests(unittest.TestCase):
                     validation.execute()
                 self.assertEqual(run.call_count, 2)
 
+    def test_mac_release_builds_keep_the_declared_deployment_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {'MACOSX_DEPLOYMENT_TARGET': '99.0'}):
+                validation = Validation('aarch64-apple-darwin', Path(directory))
+            self.assertEqual(validation.environment['MACOSX_DEPLOYMENT_TARGET'], '15.0')
+
     def test_failed_command_is_saved_with_log_and_nonzero_status(self):
         with tempfile.TemporaryDirectory() as directory:
             validation = Validation('aarch64-apple-darwin', Path(directory))

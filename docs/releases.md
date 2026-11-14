@@ -4,7 +4,8 @@
 
 Workspace version: **0.1.0**. This is a first public-test candidate, not a stable
 language/API compatibility guarantee. See [compatibility](compatibility.md) for
-actual native evidence. No release is automatically published by these changes.
+actual native evidence. Every future tag push runs native builds and publishes
+a release only after all four targets pass.
 See the [validation record](release-validation.md) for the reviewed scope,
 source provenance, generated evidence, and outstanding release gates.
 
@@ -74,6 +75,30 @@ passed on Linux x86-64/ARM64 and Windows x86-64 at
 `v0.1.0-validation.20261114.2`, including both package variants. Native macOS 15
 validation and maintainer publication review remain pending.
 
+## Automatic publication on tag pushes
+
+The [tag workflow](development.md#tag-triggered-builds-and-releases) builds Linux
+x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon. When all native tests
+and package checks pass, it publishes downloadable archives and evidence to a
+GitHub Release for that tag. Validation and RC tags publish prereleases; the
+exact `v<workspace-version>` tag publishes a normal release. Version-shaped tags
+must match the workspace's base version. Push the intended reviewed commit's tag;
+branch pushes do not publish anything.
+
+The [publisher](../scripts/publish_release.py) validates the downloaded native
+records and hashes before staging assets. Base archive names are unchanged;
+SQLite downloads add `-sqlite` before `.zip`/`.tar.gz` so all eight archives have
+unique release asset names. Matching `.sha256` files and aggregate `SHA256SUMS`
+refer to these published names. Smoke/native records, zipped logs, and a release
+manifest record which exact source and artifacts were tested.
+
+Uploads remain in a draft until every asset succeeds. A failed upload can be
+retried while the release is still a draft; a published release is not replaced.
+Release downloads do not use the seven-day retention of temporary Actions
+artifacts. Existing tags are not republished automatically. The workflow change
+itself does not establish native macOS 15 support; record the first successful
+four-target run before updating that compatibility row.
+
 ## Pinned inputs and profiles
 
 Rust 1.99.1 is pinned in rust-toolchain.toml; Cargo.lock is committed and every
@@ -134,7 +159,8 @@ For a SQLite-enabled variant, build the CLI with `--features sqlite` and pass
 the matching dependency notices and records the extension in `release.json`.
 Smoke checks the executable's reported extension list and runs the SQLite example
 for enabled archives. Use a separate output directory for each variant; archive
-names do not encode features. See the [SQLite release instructions](sqlite.md#validation-and-release-builds).
+staging names do not encode features; automatic publication adds `-sqlite` to
+the SQLite asset names. See the [SQLite release instructions](sqlite.md#validation-and-release-builds).
 
 SHA-256 sidecars contain `hex  filename` in the standard checksum format.
 `checksums --dir` writes a sorted manifest for every archive in that directory;

@@ -43,9 +43,9 @@ replace a fresh run against the intended release source.
 - [ ] Review the MSRV check and every relevant test; no ignored/skipped platform failures.
 - [ ] Attach per-target validation records; update compatibility rows.
 
-## Candidate review and publication (maintainer action)
+## Candidate review before tagging and automatic publication
 
-- [ ] Verify aggregate SHA256SUMS and all four uniquely named archives.
+- [ ] Verify aggregate SHA256SUMS and all eight base/SQLite archives.
 - [ ] Inspect documentation/examples and installation/uninstallation for every
   target selected for publication; local macOS artifact review is recorded above.
 - [x] Describe observed local ad hoc signatures and absent publisher
@@ -56,5 +56,7 @@ replace a fresh run against the intended release source.
 - [ ] Publish chosen validated assets, checksums, validation and dependency reports.
 - [ ] Download a published artifact, verify checksum, and repeat local-script smoke.
 
-No tag, release, registry entry, account setting, or deployment is changed merely
-by checking this file or running the local packaging commands.
+Checking this file and local packaging commands do not publish anything. Every
+tag push containing the [release workflow](development.md#tag-triggered-builds-and-releases)
+authorizes automated publication after all native validation jobs pass. The exact
+version tag produces a normal release; other tags produce prereleases.
