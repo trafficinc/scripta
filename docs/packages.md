@@ -30,7 +30,10 @@ directory. Paths saved in a manifest resolve against that manifest's directory;
 `add` keeps paths inside the project relative and uses absolute paths for external
 folders. For a portable project, edit external paths to suitable relative paths
 before committing and run `scr install` again. Local Git repository paths supplied
-to `add` are made absolute.
+to `add` are made absolute. Windows drive and UNC paths are passed to Git using
+forward slashes without extended-length prefixes, so local repositories are
+not mistaken for SSH hostnames. Existing manifests containing canonical
+Windows paths are normalized when fetched as well.
 
 ```scr
 <?scr

@@ -187,10 +187,24 @@ def main():
     validation = Validation(arguments.target, output)
     try:
         validation.execute()
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            evidence = {key: validation.record[key] for key in
+                        ['target', 'source_revision', 'tests', 'packages']}
+            message = json.dumps(evidence).replace('%', '%25')
+            print('::notice title=Native validation evidence::' + message, flush=True)
     except Exception as error:
         validation.record['status'] = 'failed'
         validation.record['error'] = str(error)
         print(str(error), file=sys.stderr)
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            details = str(error)
+            if validation.record['steps']:
+                log = validation.output / validation.record['steps'][-1]['log']
+                details += '\n' + log.read_text(encoding='utf-8', errors='replace')[-6000:]
+            # Preserve the useful error in public check annotations, even when
+            # downloading the complete job log requires authentication.
+            escaped = details.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+            print('::error title=Native validation failure::' + escaped, flush=True)
         return 1
     finally:
         validation.save()

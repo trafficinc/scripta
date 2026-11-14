@@ -159,6 +159,35 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn local_git_path(path: &Path) -> Result<String> {
+    let canonical = fs::canonicalize(path)?;
+    let text = canonical
+        .to_str()
+        .ok_or_else(|| fail("Git repository paths must be UTF-8"))?;
+    #[cfg(windows)]
+    {
+        Ok(windows_git_path(text))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(text.to_owned())
+    }
+}
+
+// Git for Windows does not accept std::fs::canonicalize's extended-length
+// prefixes as clone sources: it can interpret the drive colon as SCP syntax.
+// Preserve drive/UNC identity using Git's ordinary forward-slash path spelling.
+#[cfg(any(windows, test))]
+fn windows_git_path(path: &str) -> String {
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        format!("//{}", unc.replace('\\', "/"))
+    } else {
+        path.strip_prefix(r"\\?\")
+            .unwrap_or(path)
+            .replace('\\', "/")
+    }
+}
+
 /// Package subcommands receive native OS arguments; manifest strings must be UTF-8.
 pub fn execute(args: &[std::ffi::OsString], cwd: &Path) -> Result<String> {
     let args: Vec<&str> = args
@@ -237,9 +266,7 @@ pub fn execute(args: &[std::ffi::OsString], cwd: &Path) -> Result<String> {
             }
             if let Some(url) = &mut dep.git {
                 if cwd.join(&*url).is_dir() {
-                    *url = fs::canonicalize(cwd.join(&*url))?
-                        .to_string_lossy()
-                        .into_owned();
+                    *url = local_git_path(&cwd.join(&*url))?;
                 }
             }
             let mut manifest = read_manifest(&root)?;
@@ -406,9 +433,7 @@ impl Installer {
                 let url = dep.git.as_ref().unwrap();
                 // Relative Git paths in hand-written manifests use the manifest directory.
                 let url = if source_root.join(url).is_dir() {
-                    fs::canonicalize(source_root.join(url))?
-                        .to_string_lossy()
-                        .into_owned()
+                    local_git_path(&source_root.join(url))?
                 } else {
                     url.clone()
                 };
@@ -726,4 +751,23 @@ fn installed_dependencies(root: &Path, depth: usize) -> Result<BTreeMap<String, 
         return Err(fail("dependencies changed; run 'scr install'"));
     }
     Ok(packages)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::windows_git_path;
+
+    #[test]
+    fn git_paths_preserve_windows_drives_and_unc_shares() {
+        for (path, expected) in [
+            (r"\\?\C:\Users\runner\repo", "C:/Users/runner/repo"),
+            (r"\\?\D:\repo with spaces\世界", "D:/repo with spaces/世界"),
+            (r"\\?\UNC\server\share\repo", "//server/share/repo"),
+            (r"C:\repo with spaces", "C:/repo with spaces"),
+            (r"\\server\share\repo", "//server/share/repo"),
+            ("C:/already/normalized", "C:/already/normalized"),
+        ] {
+            assert_eq!(windows_git_path(path), expected, "{path}");
+        }
+    }
 }
