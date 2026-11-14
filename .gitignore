@@ -2,6 +2,10 @@
 
 /dist/
 
+# Python validation helpers.
+__pycache__/
+*.py[cod]
+
 # Local agent guidance.
 /[Aa]GENTS.md
 

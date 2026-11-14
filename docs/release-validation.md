@@ -16,7 +16,9 @@ published release or validation of the other candidate platforms.
 
 The declaration of macOS 15.0 as a deployment target is not evidence of execution
 on macOS 15. Linux x86-64/ARM64, macOS Intel, and Windows x86-64 remain pending
-native validation. No GitHub workflow is required or configured.
+native validation. This local run did not use GitHub Actions. Subsequent
+[tag-triggered validation](development.md#tag-triggered-linux-and-windows-validation)
+collects separate native Linux/Windows evidence.
 
 ## Validation scope
 

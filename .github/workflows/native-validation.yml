@@ -1,0 +1,54 @@
+name: Native validation
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            python: python3
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            python: python3
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            python: python
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate native tests and packages
+        shell: bash
+        run: >-
+          ${{ matrix.python }} scripts/validate_native.py
+          --target "${{ matrix.target }}"
+          --output "dist/native-validation/${{ matrix.target }}"
+
+      - name: Save test logs, packages, and native evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-validation-${{ matrix.target }}-${{ github.run_attempt }}
+          path: dist/native-validation/${{ matrix.target }}/
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
