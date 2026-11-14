@@ -17,7 +17,7 @@ subsequent native Linux/Windows validation. No release has been published.
 The declaration of macOS 15.0 as a deployment target is not evidence of execution
 on macOS 15. At the time of this local run, the other targets had not been
 validated natively. This local run did not use GitHub Actions. Subsequent
-[tag-triggered validation](development.md#tag-triggered-linux-and-windows-validation)
+[tag-triggered validation](development.md#tag-triggered-builds-and-releases)
 collects separate native Linux/Windows evidence.
 
 ## Validation scope

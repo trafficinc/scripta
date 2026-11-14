@@ -30,7 +30,10 @@ The playground is optional and is not included in normal Scripta installations.
 
 ## Project status
 
-**0.1.0 release preparation is implemented. A public release has not been published.**
+**0.1.0 is a first public-test candidate.** Tag pushes now build and test all four
+supported targets and publish a GitHub Release only after every job succeeds.
+[Release downloads](https://github.com/trafficinc/scripta/releases) include base
+and SQLite variants; validation tags are marked as prereleases.
 Local macOS ARM64 validation covers debug and distribution-profile tests,
 formatting, Clippy, the Rust 1.85 source check, archive checksums and
 reproducibility, and an offline test of the packaged executable, including the

@@ -47,6 +47,8 @@ class Validation:
         self.logs.mkdir(parents=True, exist_ok=True)
         self.environment = os.environ.copy()
         self.environment['CARGO_TERM_COLOR'] = 'never'
+        if target.endswith('apple-darwin'):
+            self.environment['MACOSX_DEPLOYMENT_TARGET'] = '15.0'
         self.record = {
             'target': target, 'host': platform.platform(), 'status': 'running',
             'steps': [], 'tests': {}, 'packages': {},
@@ -133,7 +135,7 @@ class Validation:
         self.environment['SCR_BUILD_COMMIT'] = revision
         self.record['source_date_epoch'] = self.run('epoch', ['git', 'show', '-s', '--format=%ct', 'HEAD']).strip()
         self.run('format', ['cargo', 'fmt', '--all', '--', '--check'])
-        self.run('validation-script-tests', [sys.executable, ROOT / 'scripts/test_validate_native.py'])
+        self.run('validation-script-tests', [sys.executable, '-m', 'unittest', 'discover', '-s', str(ROOT / 'scripts'), '-p', 'test_*.py'])
         for label, profile in [('debug', []), ('dist', ['--profile', 'dist'])]:
             for suffix, features in [('default', []), ('all-features', ['--all-features'])]:
                 name = 'tests-' + label + '-' + suffix
@@ -146,6 +148,7 @@ class Validation:
         extension = '.exe' if self.target.endswith('windows-msvc') else ''
         release = ROOT / 'target' / self.target / 'debug' / ('scr-release' + extension)
         version = self.run('workspace-version', [release, 'version']).strip()
+        self.record['version'] = version
         for variant, features in [('base', []), ('sqlite', ['--features', 'sqlite'])]:
             self.cargo('build-' + variant, ['build', '-p', 'scr-cli', '--profile', 'dist', *features])
             binary = ROOT / 'target' / self.target / 'dist' / ('scripta' + extension)

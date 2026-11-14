@@ -72,32 +72,49 @@ Clippy with warnings denied, and workspace tests (including lexer, expression,
 statement, recovery, runtime, conversions, and CLI coverage). These local results
 do not establish Linux or Windows validation.
 
-## Tag-triggered Linux and Windows validation
+## Tag-triggered builds and releases
 
-[Native validation](../.github/workflows/native-validation.yml) runs only when a
-`v*` tag is pushed. Ordinary branch pushes and pull requests do not trigger it.
-The tagged commit must contain the workflow and its
-[standard-library-only Python runner](../scripts/validate_native.py).
+[Native builds and releases](../.github/workflows/native-validation.yml) runs on
+**every tag push**, including validation/prerelease tags. Branch pushes and pull
+requests do not trigger it. The tagged commit must contain the workflow and its
+[Python validation runner](../scripts/validate_native.py).
 
-The three native jobs use Ubuntu 22.04 x86-64, Ubuntu 22.04 ARM64, and Windows
-Server 2022 x86-64. Each installs the pinned toolchain, verifies that the compiler
-host matches the target, checks formatting, and runs the workspace with default
-and all features in both debug and dist profiles. All-target/all-feature Clippy
-denies warnings. Builds explicitly pass the native target, preserving the
-configured Windows static CRT.
+Four native jobs use Ubuntu 22.04 x86-64, Ubuntu 22.04 ARM64, Windows Server 2022
+x86-64, and macOS 15 Apple Silicon. No Intel macOS job is included. Each installs
+the pinned compiler, verifies its host target, checks formatting and the Python
+validation/publication tests, and runs default/all-feature workspace tests in
+both debug and dist profiles. All-target/all-feature Clippy denies warnings.
+Explicit native targets preserve Windows static CRT settings; macOS builds set
+`MACOSX_DEPLOYMENT_TARGET=15.0`.
 
-Each job also builds base and SQLite executables, inspects system-library/DLL
-imports, packages both variants, verifies checksums, compares identical-input
-repacks, and smoke-tests the extracted archives. Logs, archives, and
-`validation.json` are saved as target-specific Actions artifacts for seven days,
-including failure evidence when a check fails. Jobs do not cancel one another.
-The workflow has read-only repository permissions and no release-publication step.
+Each job builds base and SQLite executables, inspects dependencies, verifies
+archives/checksums, compares identical-input repacks, and smoke-tests extracted
+packages. Full evidence is retained as Actions artifacts for seven days, including
+failure logs. Jobs do not cancel one another.
 
-For a validation-only run, push a new tag such as
-`v0.1.0-validation.20261113.1` pointing at the reviewed workflow commit. This is
-not the final `v0.1.0` release tag. Review each job's results and downloaded
-evidence before updating platform compatibility claims. No success is inferred
-from merely creating or queuing a workflow.
+After **all four jobs succeed**, a separate publisher job downloads this run's
+current target artifacts and verifies target coverage, source revision, version,
+test results, archive hashes, and package smoke records. It creates a draft
+GitHub Release, uploads all assets, then publishes it. Only this job has
+`contents: write`; build jobs remain read-only. No extra personal access token
+is required: publication uses the job's `GITHUB_TOKEN` through GitHub CLI.
+
+The exact `v<workspace-version>` tag is a normal release; validation, RC, and other
+tags are prereleases and do not become Latest. Version-shaped tags must match
+the workspace's base version. Already published releases are not overwritten;
+use a new tag. Failed uploads leave a draft that a rerun can resume. Rerunning a native job
+replaces only its temporary Actions artifact, so rerunning a failed publisher
+can reuse the completed build artifacts from the same run.
+
+The release contains four base and four distinct `-sqlite` archives, per-archive
+checksums, aggregate `SHA256SUMS`, native validation records, package smoke
+records, zipped logs, and `release-manifest.json`. These release assets are
+independent of the seven-day Actions artifact expiration. Windows downloads
+contain `scripta.exe` and legacy `scr.exe`; no Rust installation is required.
+
+The workflow applies to future tag pushes containing this configuration. Existing
+tags/releases are not changed retroactively. Review results before updating
+platform compatibility claims; queuing a workflow does not establish success.
 
 
 ## Formatter and diagnostic tooling

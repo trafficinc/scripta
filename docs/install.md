@@ -6,7 +6,8 @@ Use an archive whose target is marked verified in the release's compatibility
 matrix and whose associated native test records show passing results. See
 [compatibility.md](compatibility.md) for the current evidence; configured targets
 that are still pending are not supported-download promises. This work prepares
-release candidates and does not itself publish a GitHub Release.
+release candidates; successful tag workflows publish the validated downloads
+to [GitHub Releases](https://github.com/trafficinc/scripta/releases).
 
 Download the matching archive and its `.sha256` sidecar from the same trusted
 release. `SHA256SUMS` also lists all published candidate archives. A checksum
