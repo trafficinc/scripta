@@ -12,6 +12,7 @@ locations as a filename, one-based line, and one-based character column.
 | scr-parser | Tokens to AST; precedence and syntax errors | ast, diagnostics, lexer |
 | scr-runtime | Values, environment, evaluation, native registry | ast, diagnostics, lexer, parser |
 | scr-stdlib | Native function implementation and registration | runtime |
+| scr-web | Bounded HTTP host, worker supervision, cached entry programs, framed worker IPC | runtime, stdlib, ast, lexer, parser |
 | scr-cli | CLI arguments, file loading, shared pipeline, stdout/stderr, exit codes | All pipeline crates |
 | scr-release | Maintainer archive/checksum/license verification and offline package smoke | None (standalone build tool) |
 
@@ -26,7 +27,7 @@ and an identical compatibility copy, covered by the release inventory.
 ## Public application interfaces
 
 `scr_cli::args::parse` consumes arguments excluding the executable name and
-returns `Result<Command, UsageError>`. `Command` has `Help`, `CommandHelp`, `RunStdin { arguments }`, `Version`,
+returns `Result<Command, UsageError>`. `Command` has web `Serve` / internal `WebWorker` variants plus `Help`, `CommandHelp`, `RunStdin { arguments }`, `Version`,
 `Run { path: PathBuf, arguments: Vec<OsString> }`, `Check(PathBuf)`, and
 `Format { path: PathBuf, check: bool }` variants. Parsing performs no I/O and never
 exits the process. `args::HELP` is the shared CLI usage text. File paths preserve
@@ -290,3 +291,24 @@ does not enforce an aggregate RSS ceiling. Runtime error redaction is
 separate from script exception values. Process waiters receive monitor completion
 notifications while timeout/cancellation/capture checks remain bounded polling.
 See [measurements and safety details](performance.md).
+
+## Web request hosting
+
+`scripta serve` validates a fixed entry script and starts the `scr-web` HTTP host.
+Hyper/Tokio own HTTP/1.1 framing and asynchronous network/process I/O. A bounded
+queue dispatches requests to persistent interpreter processes, each with a cached
+entry AST and a fresh runtime per request. Source snapshots are supplied by the
+parent, including on worker replacement. Request/response native objects live in
+`scr_stdlib::web`, explicitly registered by the host; the core runtime has no HTTP
+backend. CLI-only executions do not register the Web module.
+
+`Runtime::execute_program_with_source` executes a host-cached AST with retained
+`Arc<SourceFile>` metadata. Hosts must match the AST to its source. It enforces
+source limits and restores the previous source association after execution.
+
+Worker pipes use bounded, length-prefixed JSON metadata and separate raw-body
+frames. Script output goes to a bounded writer, never the protocol stream.
+The supervisor terminates/replaces workers on deadline or protocol failure;
+worker input monitoring also exits when the parent pipe closes. Response metadata
+and output are request-local, so errors can discard partial bodies before HTTP
+headers are sent. See [web hosting](web-servers.md) for operational limits.

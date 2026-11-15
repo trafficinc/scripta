@@ -41,13 +41,14 @@ Embedders opt in by calling `scr_stdlib::register(&mut runtime)?`. Registration
 returns `NativeResult<()>`; duplicate names produce `RegistryError` and preserve
 the existing registration. `echo` and `exit` remain language statements. Neither
 is registered as a native function; exit returns a code without terminating the
-embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Log`, `Json`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Csv`, and `Regex` are
+embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Clock`, `Log`, `Json`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Csv`, and `Regex` are
 registered by default.
 
 ## Release 0.1.0 export index
 
-This reference covers 156 core functions and four default CLI SQLite functions
-(160 in total), plus native response/entry properties and local loading statements. No optional plugin,
+This reference covers 157 core functions and four default CLI SQLite functions
+(161 in total), plus six request-context Web functions, native response/entry
+properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
 
@@ -66,11 +67,13 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Cli | `Cli::args`, `Cli::arg`, `Cli::has`, `Cli::option`, `Cli::isTerminal`, `Cli::prompt`, `Cli::readLine` | [CLI](#script-arguments-and-prompts) |
 | System | `System::platform`, `System::architecture`, `System::hostname`, `System::cpuUsage`, `System::memoryUsage`, `System::diskUsage`, `System::uptime`, `System::homeDirectory`, `System::tempDirectory` | [System](#system-information) |
 | Date | `Date::now`, `Date::format`, `Date::parse`, `Date::sleep` | [Dates](#dates) |
+| Clock | `Clock::monotonicMs` | [Monotonic timing](#monotonic-timing) |
 | Log | `Log::info`, `Log::warn`, `Log::error`, `Log::debug`, `Log::setFile` | [Logging](#local-logging) |
 | Json | `Json::encode`, `Json::decode`, `Json::pretty` | [JSON](#json) |
 | Bytes | `Bytes::encodeUtf8`, `Bytes::decodeUtf8`, `Bytes::slice` | [Binary values](#binary-values) |
 | Csv | `Csv::parse`, `Csv::encode`, `Csv::open`, `Csv::readRow`, `Csv::close` | [CSV](#csv) |
 | Regex | `Regex::isMatch`, `Regex::findAll`, `Regex::replace` | [Regex](#regex) |
+| Web (request context only) | `Web::request`, `Web::status`, `Web::header`, `Web::addHeader`, `Web::redirect`, `Web::write` | [Web requests](#web-requests) |
 | Http | `Http::get`, `Http::post`, `Http::request`, `Http::download` | [HTTP](#http) |
 | Url | `Url::encodeComponent`, `Url::decodeComponent`, `Url::buildQuery`, `Url::parseQuery` | [URL and form encoding](#url-and-form-encoding) |
 | Form | `Form::encode`, `Form::decode` | [URL and form encoding](#url-and-form-encoding) |
@@ -1099,6 +1102,32 @@ metric is synthesized. Home/temp lookups use the host environment, not the mutab
  if ($disk->percentUsed > 85.0) echo "Disk capacity warning\n";
 ```
 
+## Monotonic timing
+
+`Clock::monotonicMs(): float` returns nonnegative, nondecreasing milliseconds from
+an arbitrary process-local origin, initialized by the first clock read. It uses
+Rust's monotonic `Instant`, independently of the adjustable date/time clock.
+The origin is shared across runtimes in the same process. Use differences between
+readings to measure elapsed work; values are not Unix timestamps and must not be
+compared across processes or persisted as calendar dates.
+
+Fractional milliseconds preserve submillisecond precision; actual resolution and
+whether system suspension counts as elapsed time are platform-dependent.
+The function takes no arguments, needs no capability, and respects cancellation
+and ordinary scalar-result limits. It is suitable for HTTP failures, database
+queries, filesystem work, and automation:
+
+```scr
+$started = Clock::monotonicMs();
+// Work to measure, including a try/catch around operations that may fail.
+$elapsedMs = Clock::monotonicMs() - $started;
+```
+
+PHP mapping: this serves the elapsed-time role of
+[`hrtime()`](https://www.php.net/manual/en/function.hrtime.php), using floating-point
+milliseconds rather than PHP's nanosecond number or seconds/nanoseconds array.
+`Date::now()` remains the wall-clock Unix-millisecond API for dates.
+
 ## Dates
 
 | API | Behavior |
@@ -1247,6 +1276,74 @@ Scripta requires string parameters and does not implement PHP's nested-array or
 implicit scalar conversion rules. `Form::decode` preserves pairs instead of
 `parse_str`-style variable, name, or nesting transformations.
 
+## Web requests
+
+The `scripta serve` host explicitly registers six additional `Web` functions per
+request. They are absent from ordinary CLI execution and from the default export
+count above. Embedders can use `scr_stdlib::web::register` with a bounded request
+and response-header ceiling. See [web hosting](web-servers.md) for the server,
+worker lifecycle, resource ceilings, and reverse-proxy configuration.
+
+| Function | Behavior |
+| --- | --- |
+| `Web::request(): WebRequest` | Returns this request's read-only object. |
+| `Web::status(code: int): null` | Sets status 200–599; defaults to 200. Informational responses are not supported. |
+| `Web::header(name: string, value: string): null` | Replaces all headers with this case-insensitive name. Does not change status automatically. |
+| `Web::addHeader(name: string, value: string): null` | Appends a header, preserving repeated values such as `Set-Cookie`. |
+| `Web::redirect(location: string, status: int = 302): null` | Replaces `Location` and sets 301, 302, 303, 307, or 308. Does not stop execution; follow with `exit 0`. |
+| `Web::write(value: string or bytes): null` | Appends UTF-8 or arbitrary bytes to the bounded response body. `echo` also writes the body, with its usual strict types. |
+
+`WebRequest` exposes `method`, `path`, and `queryString` string properties. `path`
+retains percent encoding and excludes the query; use explicit URL decoding when
+needed. It has these methods:
+
+| Method | Behavior |
+| --- | --- |
+| `header(name: string): string or null` | First matching value, case-insensitive; null when absent. |
+| `headers(name: string): list` | All matching string values in received order, or an empty list. |
+| `query(): list` | Decoded `[key, value]` string pairs, preserving duplicates and order. Uses form-style `+` as space. |
+| `bytes(): bytes` | Raw, fully received bounded body. |
+| `text(): string` | Body as strict UTF-8; invalid encoding raises `EncodingError`. |
+| `json(): any` | JSON body using existing `Json::decode` semantics. Requires exactly one Content-Type with `application/json` or `application/*+json`. |
+| `form(): list` | URL-encoded `[key, value]` pairs. Requires exactly one `application/x-www-form-urlencoded` Content-Type. |
+
+Query/form decoding uses the strict existing form codec: malformed percent
+escapes and invalid UTF-8 raise `EncodingError`; duplicate names remain separate
+pairs, numeric-looking keys remain strings, and no bracket/nested-key expansion
+occurs. Malformed JSON raises `JsonError`. Content-Type parameters are accepted;
+body text must still be UTF-8. Missing/ambiguous or unsupported media types raise
+`WebError`. Calling these helpers does not consume the body; repeated calls work.
+Multipart uploads and automatic cookie/session parsing are not implemented.
+
+Invalid statuses, redirect destinations, headers, or response-header ceilings
+raise `WebError` without changing the previous response metadata. Header names
+are normalized to lowercase; invalid values, including CR/LF injection, are
+rejected. Content-Length and hop-by-hop transport headers are host-managed and
+cannot be supplied by scripts. Redirects accept relative URIs or absolute HTTP(S)
+URLs without credentials; scheme-relative URLs and backslashes are rejected.
+Applications must still validate user-controlled destinations to prevent unwanted
+external redirects. Prefer 303 for redirecting a successful POST to a GET page.
+
+Output is buffered until execution finishes. Headers can therefore be changed
+after `echo` within that buffer. Uncaught errors, nonzero exits, and output overflow
+produce a generic 500 with the partial application body discarded. All body output
+shares one limit. Normal responses default to `text/html; charset=utf-8`; set an
+explicit Content-Type for JSON, text, or bytes. HEAD and no-body status behavior
+are enforced by the host. These are response-local APIs; they grant no filesystem,
+process, or outgoing-network permissions. Native work checks cancellation, and
+returned values obey the runtime's logical value limits.
+
+```scr
+<?scripta
+$request = Web::request();
+if ($request->path === "/old") {
+    Web::redirect("/new", 302);
+    exit 0;
+}
+Web::header("Content-Type", "application/json; charset=utf-8");
+echo Json::encode(["method" => $request->method, "query" => $request->query()]);
+```
+
 ## HTTP
 
 `Http::get(url, options = [])`, `Http::post(url, body, options = [])`, and
@@ -1273,12 +1370,32 @@ are optional; omit `headers` or use `headers: []` for an empty set. Each request
 | Member | Behavior |
 | --- | --- |
 | `status: int` | HTTP status code. |
+| `durationMs: float` | Read-only, nonnegative elapsed milliseconds through complete bounded body reception, including redirects. Fractional milliseconds are retained; the value is fixed when the transfer finishes. |
 | `headers: map` | Lowercase names mapped to **lists of strings**, preserving repeated header values. Header ordering is unspecified. |
 | `body: string or bytes` | Text in default mode; raw bytes when `responseType` is `"bytes"`. No charset conversion is performed. |
 | `ok(): bool` | True for status 200–299, false otherwise. |
 | `json()` | Decodes body using exactly `Json::decode` semantics, including line/column errors. Does not require a Content-Type header. |
 | `text(): string` | Strictly decodes retained bytes as UTF-8; invalid bytes raise `EncodingError`. Repeated calls do not consume the body. |
 | `bytes(): bytes` | Returns the retained raw body without decoding. Available in both response modes. |
+
+`durationMs` starts after argument/request validation and before client setup,
+covering DNS, connection/TLS setup, redirects, request upload, header capture,
+and bounded body buffering through EOF. It stops before UTF-8 validation,
+response-object construction, and later script processing such as `json()`.
+It is available for text, bytes, empty bodies, and completed HTTP 4xx/5xx
+responses. Reading it later does not increase its value.
+
+Transport, encoding, body-limit, permission, and cancellation failures produce
+no partial response. Measure attempted calls with `Clock::monotonicMs()` around
+a try/catch to obtain elapsed time on failure. The
+[HTTP timing example](../examples/http-timing.scripta) shows both APIs and runs
+locally without a URL. Use the clock around `Http::download` or other operations
+that do not return an `HttpResponse`. Detailed DNS/TLS/first-byte milestone maps
+are not exposed by this API.
+
+PHP mapping: `durationMs` serves the total-transfer role of
+[`curl_getinfo()` total_time](https://www.php.net/manual/en/function.curl-getinfo.php),
+expressed in milliseconds. It is not a complete cURL timing breakdown.
 
 HTTP response storage includes raw bytes and headers in the runtime value budget.
 Use `responseType: "bytes"` to receive a binary body; `json()` and `text()`
