@@ -55,12 +55,14 @@ impl UploadConfig {
     }
 }
 pub(crate) struct Budget {
+    observer: Option<Arc<crate::observe::Observer>>,
     used: AtomicUsize,
     limit: usize,
 }
 impl Budget {
-    pub fn new(limit: usize) -> Arc<Self> {
+    pub fn new(limit: usize, observer: Option<Arc<crate::observe::Observer>>) -> Arc<Self> {
         Arc::new(Self {
+            observer,
             used: AtomicUsize::new(0),
             limit,
         })
@@ -90,9 +92,9 @@ impl Drop for Spool {
         if cleaned {
             self.budget.used.fetch_sub(self.charged, Ordering::AcqRel);
         } else {
-            eprintln!(
-                "upload storage cleanup failed; retaining disk reservation until server restart"
-            );
+            if let Some(observer) = &self.budget.observer {
+                observer.event("storage_cleanup_failed",None,serde_json::json!({}),"upload storage cleanup failed; retaining disk reservation until server restart");
+            }
         }
     }
 }
@@ -525,7 +527,7 @@ mod tests {
     fn supervisor_owned_stages_and_spools_drop_together_and_release_disk_budget() {
         let root = tempfile::tempdir().unwrap();
         let destination = tempfile::tempdir().unwrap();
-        let budget = Budget::new(10);
+        let budget = Budget::new(10, None);
         let mut spool = Spool {
             directory: tempfile::Builder::new()
                 .prefix("request-")

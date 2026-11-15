@@ -17,6 +17,9 @@ pub(crate) struct Cancel {
     notify: Notify,
 }
 impl Cancel {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
     pub fn trigger(&self) {
         self.cancelled.store(true, Ordering::Release);
         self.notify.notify_one();
@@ -39,6 +42,11 @@ impl Drop for CancelGuard {
     }
 }
 pub(crate) enum Body {
+    Observed {
+        body: Box<Body>,
+        trace: Arc<crate::observe::Trace>,
+        finished: bool,
+    },
     Full(Full<Bytes>),
     Suppressed,
     Stream {
@@ -49,6 +57,17 @@ pub(crate) enum Body {
     },
 }
 impl Body {
+    pub fn observe(self, trace: Arc<crate::observe::Trace>) -> Self {
+        let finished = self.is_end_stream();
+        if finished {
+            trace.finish("complete");
+        }
+        Self::Observed {
+            body: Box::new(self),
+            trace,
+            finished,
+        }
+    }
     pub fn full(bytes: impl Into<Bytes>) -> Self {
         Self::Full(Full::new(bytes.into()))
     }
@@ -67,6 +86,15 @@ impl Body {
 }
 impl Drop for Body {
     fn drop(&mut self) {
+        if let Self::Observed {
+            trace,
+            finished: false,
+            ..
+        } = self
+        {
+            trace.failure("body_dropped");
+            trace.finish("interrupted");
+        }
         if let Self::Stream {
             cancel,
             finished: false,
@@ -85,6 +113,35 @@ impl HttpBody for Body {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, io::Error>>> {
         match self.get_mut() {
+            Self::Observed {
+                body,
+                trace,
+                finished,
+            } => {
+                let result = Pin::new(&mut **body).poll_frame(cx);
+                match &result {
+                    Poll::Ready(Some(Ok(frame))) => {
+                        if let Some(bytes) = frame.data_ref() {
+                            trace.bytes(bytes.len());
+                        }
+                        if body.is_end_stream() {
+                            *finished = true;
+                            trace.finish("complete");
+                        }
+                    }
+                    Poll::Ready(Some(Err(_))) => {
+                        *finished = true;
+                        trace.failure("body_error");
+                        trace.finish("failed");
+                    }
+                    Poll::Ready(None) => {
+                        *finished = true;
+                        trace.finish("complete");
+                    }
+                    Poll::Pending => {}
+                }
+                result
+            }
             Self::Full(body) => match Pin::new(body).poll_frame(cx) {
                 Poll::Ready(Some(Ok(frame))) => Poll::Ready(Some(Ok(frame))),
                 Poll::Ready(None) => Poll::Ready(None),
@@ -120,6 +177,7 @@ impl HttpBody for Body {
     }
     fn is_end_stream(&self) -> bool {
         match self {
+            Self::Observed { body, .. } => body.is_end_stream(),
             Self::Full(body) => body.is_end_stream(),
             Self::Suppressed => true,
             Self::Stream { finished, .. } => *finished,
@@ -127,6 +185,7 @@ impl HttpBody for Body {
     }
     fn size_hint(&self) -> SizeHint {
         match self {
+            Self::Observed { body, .. } => body.size_hint(),
             Self::Full(body) => body.size_hint(),
             _ => SizeHint::default(),
         }

@@ -41,6 +41,8 @@ impl Fixture {
                 query_string: String::new(),
                 headers: vec![],
                 body: vec![],
+                request_id: None,
+                connection: Default::default(),
             },
             Multipart {
                 is_multipart: true,

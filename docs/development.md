@@ -293,6 +293,8 @@ and the cached-program runtime interface. Focused checks are:
 ```sh
 cargo test -p scr-stdlib --test web --locked --offline
 cargo test -p scr-runtime --test cached_program --locked --offline
+cargo test -p scr-web --lib proxy --locked --offline
+cargo test -p scr-cli --test serve_config --locked --offline
 cargo test -p scr-cli --test web_server --all-features --locked --offline
 cargo test -p scr-cli --test web_server --no-default-features --locked --offline
 ```
@@ -300,7 +302,13 @@ cargo test -p scr-cli --test web_server --no-default-features --locked --offline
 The host uses Hyper for HTTP framing and Tokio for bounded asynchronous network
 and worker-process I/O, rather than a custom HTTP parser. New dependencies remain
 compatible with Rust 1.85. The subprocess fixtures bind localhost and require
-permission to spawn persistent workers. The web example must be executed through
+permission to spawn persistent workers. Configuration tests cover CLI/file
+precedence, read-only inspection,
+private storage paths, safe errors, and timeout boundaries. Web tests execute the
+shipped `examples/serve.toml` configuration and exercise connection, header, and
+shutdown deadlines. See [server configuration](web-servers.md#server-configuration)
+for inspection commands and path resolution. The web example must be executed
+through
 `scripta serve`, including HTTP requests; an ordinary CLI run has no Web context.
 
 Cookie/session changes additionally use `scr-stdlib --test web_sessions` and the
@@ -404,3 +412,21 @@ example over HTTP; `release_examples` runs the socket echo example with binary
 input and bounded local subprocess cleanup. No fixtures use public network
 services. PHP comparison links document deliberate API differences rather than
 claiming global PHP syntax/API compatibility.
+
+Proxy-hosting regressions cover CIDR families/boundaries, bounded forwarded chains,
+spoofed/duplicate/malformed headers, authority normalization, effective-host
+allowlists, worker IPC metadata, redirects, unchanged cookie security, and IPv6
+loopback where available. The shipped proxy script/configuration runs through a
+controlled sanitizing local forwarder. This fixture asserts the backend contract;
+it does not establish Caddy/NGINX version behavior or public TLS deployment.
+
+Observability coverage includes `cargo test -p scr-web --lib --locked --offline`
+for ID exhaustion, saturating counters, readiness/RAII, body outcomes, and bounded
+UTF-8 application-log frames. The CLI configuration/web suites additionally test
+JSON correlation/privacy, caller-ID rejection, buffered/streamed errors, client
+disconnects, deduplicated timeouts, health route separation, overload/recovery,
+and management readiness during a real termination drain. Execute the
+`examples/observe-serve.toml` configuration through controlled application and
+management HTTP requests. Host logs intentionally omit source/error text; use
+`scripta check` for local syntax diagnostics and keep explicit application logs
+free of secrets. Management probes never execute application scripts.

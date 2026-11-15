@@ -1444,7 +1444,31 @@ worker lifecycle, resource ceilings, and reverse-proxy configuration.
 `WebRequest` exposes `method`, `path`, and `queryString` string properties, plus
 `bodySize: int` (the measured raw body byte length). `path`
 retains percent encoding and excludes the query; use explicit URL decoding when
-needed. It has these methods:
+needed. It also exposes these read-only host-resolved properties:
+
+| Property | Type / meaning |
+| --- | --- |
+| `requestId` | String or null: host-generated correlation ID. `scripta serve` returns the same value in `X-Request-ID` and ignores caller-supplied IDs. |
+| `peerAddress` | String or null: actual TCP peer endpoint including port (`127.0.0.1:1234` or `[::1]:1234`). |
+| `clientAddress` | String or null: resolved client IP without port. Defaults to the peer IP; proxy resolution requires explicit host trust. |
+| `scheme` | String or null: resolved `http`/`https` under `scripta serve`, with direct connections using `http`. |
+| `host` | String or null: normalized resolved hostname/authority including an explicit port when supplied. |
+
+The HTTP supervisor resolves these once before dispatch. Raw headers remain
+unchanged and must not be substituted for these properties when identifying a
+client or building an external URL. See [proxy trust and host validation](web-servers.md#trusted-proxy-metadata-and-allowed-hosts)
+for exact chain, syntax, and allowlist rules. Hostname metadata alone is not an
+allowlist or authentication policy. Rust embeddings supply `Request.connection`
+using `web::ConnectionInfo` and `Request.request_id`; `Default::default()` for
+connection metadata and `request_id: None` leave these properties unknown
+(null), and the standard library never infers them from supplied headers.
+Connection metadata and request-ID dynamic strings count toward the request value
+budget. See [host logs and health checks](web-servers.md#logs-and-health-checks)
+for ID lifecycle and privacy rules.
+These properties do not add registered functions: export counts stay 207 default
+functions plus 19 request-context functions.
+
+It has these methods:
 
 | Method | Behavior |
 | --- | --- |

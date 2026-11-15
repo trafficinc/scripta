@@ -19,6 +19,8 @@ pub(crate) struct RequestMeta {
     pub query: String,
     pub headers: Vec<(String, String)>,
     pub multipart: Option<MultipartMeta>,
+    pub connection: scr_stdlib::web::ConnectionInfo,
+    pub request_id: String,
 }
 #[derive(Serialize, Deserialize)]
 pub(crate) struct ResponseMeta {
@@ -28,19 +30,38 @@ pub(crate) struct ResponseMeta {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub(crate) enum ParentMessage {
-    Request { metadata: RequestMeta },
+    Request { metadata: Box<RequestMeta> },
     StageReply { path: Option<WirePath> },
     FlushAck,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub(crate) enum ChildMessage {
-    Response { metadata: ResponseMeta },
-    StageRequest { index: usize, parent: WirePath },
-    Start { metadata: ResponseMeta },
+    Diagnostic {
+        code: String,
+        start: usize,
+        end: usize,
+        category: String,
+    },
+    ApplicationLog {
+        message: String,
+        truncated: bool,
+    },
+    Response {
+        metadata: ResponseMeta,
+    },
+    StageRequest {
+        index: usize,
+        parent: WirePath,
+    },
+    Start {
+        metadata: ResponseMeta,
+    },
     Chunk,
     Flush,
-    Done { success: bool },
+    Done {
+        success: bool,
+    },
 }
 pub(crate) fn read_frame(input: &mut impl Read, limit: usize) -> io::Result<Option<Vec<u8>>> {
     let mut size = [0; 4];
@@ -187,7 +208,7 @@ pub fn run_worker(
                     ParentMessage::Request { metadata } => {
                         let body = read_frame(&mut input, BODY_CEILING)?
                             .ok_or_else(|| io::Error::other("missing request body"))?;
-                        if send.send((metadata, body)).is_err() {
+                        if send.send((*metadata, body)).is_err() {
                             return Ok(());
                         }
                     }
@@ -205,16 +226,14 @@ pub fn run_worker(
             }
             Ok(())
         })();
-        if let Err(error) = result {
-            eprintln!("web worker input failed: {error}");
-        }
+        let _ = result;
         std::process::exit(0);
     });
     while let Ok((metadata, body)) = receive.recv() {
         let mut runtime = Runtime::with_options(options.clone());
         runtime.set_input_stream(io::empty());
         // Script error output belongs to the server log, never its response body.
-        runtime.set_error_stream(io::stderr());
+        runtime.set_error_stream(ApplicationWriter::new(protocol.clone()));
         register(&mut runtime)?;
         let headers = metadata.headers;
         let request = scr_stdlib::web::Request {
@@ -223,6 +242,8 @@ pub fn run_worker(
             query_string: metadata.query,
             headers: headers.clone(),
             body,
+            connection: metadata.connection,
+            request_id: Some(metadata.request_id),
         };
         let (state, uploads) = if let Some(metadata) = metadata.multipart {
             if !metadata.spool.starts_with("request-")
@@ -330,16 +351,35 @@ pub fn run_worker(
             Ok(())
         };
         let success = matches!((&result, &committed), (Ok(0), Ok(()))) && !output.exceeded;
-        if let Err(error) = committed {
-            eprintln!("web session commit failed: {error}");
-        }
-        if let Err(error) = result {
-            eprintln!(
-                "{}",
-                error.render(&source.path.to_string_lossy(), &source.text)
-            );
+        let diagnostic = if let Err(error) = &result {
+            Some(ChildMessage::Diagnostic {
+                code: error.code.into(),
+                start: error.span.start,
+                end: error.span.end,
+                category: "script".into(),
+            })
+        } else if committed.is_err() {
+            Some(ChildMessage::Diagnostic {
+                code: "SESSION".into(),
+                start: 0,
+                end: 0,
+                category: "session".into(),
+            })
         } else if !success {
-            eprintln!("web request failed: nonzero exit or response output limit");
+            Some(ChildMessage::Diagnostic {
+                code: if output.exceeded { "OUTPUT" } else { "EXIT" }.into(),
+                start: 0,
+                end: 0,
+                category: if output.exceeded { "output" } else { "exit" }.into(),
+            })
+        } else {
+            None
+        };
+        if let Some(diagnostic) = diagnostic {
+            write_frame(
+                &mut *protocol.borrow_mut(),
+                &serde_json::to_vec(&diagnostic)?,
+            )?;
         }
         let transmitted = output.started;
         let final_output = if transmitted && success {
@@ -386,4 +426,99 @@ pub fn run_worker(
         // Runtime and native resources are dropped before accepting the next request.
     }
     Ok(())
+}
+
+// Explicit application stderr is forwarded as bounded, escaped events. Host
+// diagnostics never include arbitrary error text, source, or request content.
+struct ApplicationWriter<W: Write> {
+    protocol: Rc<RefCell<W>>,
+    bytes: Vec<u8>,
+    truncated: bool,
+    emitted: usize,
+}
+impl<W: Write> ApplicationWriter<W> {
+    fn new(protocol: Rc<RefCell<W>>) -> Self {
+        Self {
+            protocol,
+            bytes: vec![],
+            truncated: false,
+            emitted: 0,
+        }
+    }
+    fn emit(&mut self) -> io::Result<()> {
+        if self.emitted >= 16 || self.bytes.is_empty() && !self.truncated {
+            return Ok(());
+        }
+        let message = String::from_utf8_lossy(&self.bytes).into_owned();
+        write_frame(
+            &mut *self.protocol.borrow_mut(),
+            &serde_json::to_vec(&ChildMessage::ApplicationLog {
+                message,
+                truncated: self.truncated,
+            })?,
+        )?;
+        self.emitted += 1;
+        self.bytes.clear();
+        self.truncated = false;
+        Ok(())
+    }
+}
+impl<W: Write> Write for ApplicationWriter<W> {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        if self.emitted >= 16 {
+            return Ok(data.len());
+        }
+        for byte in data {
+            if *byte == b'\n' {
+                self.emit()?;
+                if self.emitted >= 16 {
+                    break;
+                }
+            } else if self.bytes.len() < 4096 {
+                self.bytes.push(*byte);
+            } else {
+                self.truncated = true;
+            }
+        }
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.emit()
+    }
+}
+impl<W: Write> Drop for ApplicationWriter<W> {
+    fn drop(&mut self) {
+        let _ = self.emit();
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+    #[test]
+    fn application_records_are_bounded_utf8_safe_and_framed() {
+        let protocol = Rc::new(RefCell::new(vec![]));
+        let mut writer = ApplicationWriter::new(protocol.clone());
+        writer
+            .write_all(format!("{}é\n", "x".repeat(4095)).as_bytes())
+            .unwrap();
+        for _ in 0..30 {
+            writer.write_all(b"quoted\"\\value\n").unwrap();
+        }
+        drop(writer);
+        let bytes = protocol.borrow();
+        let mut input = bytes.as_slice();
+        let mut count = 0;
+        while let Some(frame) = read_frame(&mut input, META_LIMIT).unwrap() {
+            let ChildMessage::ApplicationLog { message, truncated } =
+                serde_json::from_slice(&frame).unwrap()
+            else {
+                panic!()
+            };
+            assert!(message.len() <= 4100);
+            assert_eq!(truncated, count == 0);
+            count += 1;
+        }
+        assert_eq!(count, 16);
+    }
 }

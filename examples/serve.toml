@@ -1,0 +1,22 @@
+# Run from the repository root:
+# scripta serve examples/web-app.scripta --config examples/serve.toml
+# Validate without starting the server:
+# scripta serve examples/web-app.scripta --config examples/serve.toml --check-config
+# Inspect effective settings (private directory paths are hidden):
+# scripta serve examples/web-app.scripta --config examples/serve.toml --print-config
+host = "127.0.0.1"
+port = 8080
+workers = 2
+queue = 32
+max-connections = 128
+max-body-bytes = 1048576
+max-response-bytes = 8388608
+timeout-ms = 10000
+connection-timeout-ms = 60000
+header-timeout-ms = 10000
+drain-timeout-ms = 11000
+
+# Omit storage paths to use private temporary directories.
+# Configured relative paths resolve beside this file; CLI paths resolve from cwd.
+# session-dir = "private-sessions"
+# upload-temp-dir = "private-uploads"
