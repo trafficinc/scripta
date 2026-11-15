@@ -228,6 +228,33 @@ pub fn sensitive_name(name: &str) -> bool {
     .iter()
     .any(|key| lower.contains(key))
 }
+// Qualified function references are code identifiers, not key/value delimiters.
+// Keep credential-shaped text conservative: only an explicit zero-argument call
+// marker, or a complete qualified identifier (e.g. a stack-frame name), qualifies.
+fn qualified_reference(value: &str, offset: usize, tail: &str) -> bool {
+    let mut rest = tail;
+    let mut qualified = false;
+    while let Some(next) = rest.strip_prefix("::") {
+        if !next.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            return false;
+        }
+        let length = next
+            .bytes()
+            .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            .count();
+        rest = &next[length..];
+        qualified = true;
+    }
+    qualified
+        && (rest
+            .strip_prefix("()")
+            .is_some_and(|after| after.is_empty() || after.starts_with(char::is_whitespace))
+            || rest.is_empty()
+                && value[..offset]
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"_:".contains(&byte)))
+}
+
 pub fn redact_text(value: &str, secrets: &[String]) -> String {
     let lower = value.to_ascii_lowercase();
     let shaped = [
@@ -246,6 +273,9 @@ pub fn redact_text(value: &str, secrets: &[String]) -> String {
     .any(|key| {
         lower.match_indices(key).any(|(offset, _)| {
             let tail = &lower[offset + key.len()..];
+            if qualified_reference(&lower, offset, tail) {
+                return false;
+            }
             let stripped =
                 tail.trim_start_matches(|c: char| c.is_whitespace() || c == '\'' || c == '"');
             stripped.starts_with(['=', ':'])
@@ -331,4 +361,40 @@ fn mask_source(source: &str) -> String {
         }
     }
     output
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::redact_text;
+    #[test]
+    fn qualified_function_names_remain_useful_without_exposing_credentials() {
+        for message in [
+            "TypeError: Password::hash() expects exactly one argument, got 0",
+            "TypeError: Password::verify() argument 1 requires string, got int",
+            "Password::needsRehash",
+            "App::Secret::check",
+        ] {
+            assert_eq!(redact_text(message, &[]), message);
+        }
+        for message in [
+            "password=hidden",
+            "Password: hidden",
+            "password hidden",
+            "token: hidden",
+            "authorization: Bearer hidden",
+            "password::hidden-value",
+            "log password::hidden",
+            "password::key=hidden",
+            "Password::hash() password=hidden",
+        ] {
+            assert_eq!(redact_text(message, &[]), "[REDACTED]", "{message}");
+        }
+        assert_eq!(
+            redact_text(
+                "Password::hash() returned known-private-value",
+                &["known-private-value".into()]
+            ),
+            "Password::hash() returned [REDACTED]"
+        );
+    }
 }

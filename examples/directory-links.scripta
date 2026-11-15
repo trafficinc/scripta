@@ -1,0 +1,17 @@
+<?scripta
+// Read-only listing. Pass a directory and optionally --follow-links.
+$path = Cli::arg(0);
+if ($path === null)
+    $path = ".";
+$rows = Dir::entries(Path::canonical($path));
+foreach ($rows as $row) {
+    echo $row["name"];
+    if ($row["isSymlink"] && Cli::has("follow-links")) {
+        try {
+            echo " -> " . Path::canonical($row["path"]);
+        } catch ($error) {
+            echo " [unresolved: " . $error . "]";
+        }
+    }
+    echo "\n";
+}

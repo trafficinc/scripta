@@ -82,12 +82,15 @@ pub(super) fn read(
     let mut result = Vec::new();
     for (name, value) in pairs {
         context.check_cancelled()?;
+        let value = crate::url::invoke("Url::decodeComponent", context, &[Value::String(value)])?;
+        let Value::String(decoded) = &value else {
+            unreachable!()
+        };
         crate::bytes::grow(
             context,
             &mut total,
-            3 * std::mem::size_of::<Value>() + name.len() + value.len(),
+            3 * std::mem::size_of::<Value>() + name.len() + decoded.len(),
         )?;
-        let value = crate::url::invoke("Url::decodeComponent", context, &[Value::String(value)])?;
         result.push(Value::List(vec![Value::String(name), value]));
     }
     Ok(Value::List(result))
@@ -212,6 +215,7 @@ fn render(name: &str, value: &str, options: &Options, delete: bool) -> NativeRes
     if (name.starts_with("__Http-") || name.starts_with("__Host-Http-")) && !options.http_only {
         return Err(failure("cookie prefix requires HttpOnly"));
     }
+    let value = if delete { "" } else { value };
     let mut result = format!("{name}={value}; Path={}", options.path);
     if let Some(domain) = &options.domain {
         result.push_str("; Domain=");

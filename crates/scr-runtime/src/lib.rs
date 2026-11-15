@@ -6,6 +6,8 @@ mod error;
 mod modules;
 mod native;
 mod ops;
+mod output;
+pub use output::{OutputAction, ScriptOutput};
 mod value;
 
 use environment::Environments;
@@ -51,6 +53,12 @@ pub struct RuntimeOptions {
     /// Live lexical scopes, including retained closure environments and globals.
     pub max_scopes: Option<usize>,
     pub max_source_bytes: usize,
+    /// Cumulative generated output, including bytes later cleaned from buffers.
+    pub max_output_bytes: Option<usize>,
+    /// Total pending application-buffer payload (default 8 MiB, hard ceiling 64 MiB).
+    pub max_output_buffer_bytes: usize,
+    /// Maximum nested application buffers (default 32, hard ceiling 128).
+    pub max_output_buffers: usize,
 }
 
 impl Default for RuntimeOptions {
@@ -63,6 +71,9 @@ impl Default for RuntimeOptions {
             max_value_bytes: None,
             max_scopes: None,
             max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
+            max_output_bytes: None,
+            max_output_buffer_bytes: 8 * 1024 * 1024,
+            max_output_buffers: 32,
         }
     }
 }
@@ -115,6 +126,11 @@ struct Place {
 }
 
 impl Runtime {
+    /// Opaque identity shared with native call contexts; contains no backend state.
+    pub fn native_identity(&self) -> Rc<()> {
+        self.identity.clone()
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -288,6 +304,21 @@ impl Runtime {
         program: &Program,
         output: &mut impl Write,
     ) -> std::result::Result<u8, RuntimeError> {
+        let mut output = output::BufferedOutput::new(output, &self.options)
+            .map_err(|e| *self.error(e.to_string(), Span::default()))?;
+        let result = self.execute_inner(program, &mut output);
+        if result.is_ok() {
+            output
+                .finish()
+                .map_err(|e| *self.error(e.to_string(), Span::default()))?;
+        }
+        result
+    }
+    fn execute_inner(
+        &mut self,
+        program: &Program,
+        output: &mut impl ScriptOutput,
+    ) -> std::result::Result<u8, RuntimeError> {
         self.collect_garbage();
         self.steps = 0;
         if self
@@ -403,17 +434,21 @@ impl Runtime {
             }
         })
     }
-    fn condition(&mut self, expr: &Expr, output: &mut impl Write) -> Result<bool> {
+    fn condition(&mut self, expr: &Expr, output: &mut impl ScriptOutput) -> Result<bool> {
         let value = self.evaluate(expr, output)?;
         self.operation(ops::boolean(value), expr.span)
     }
-    fn statements(&mut self, statements: &[Statement], output: &mut impl Write) -> Result<()> {
+    fn statements(
+        &mut self,
+        statements: &[Statement],
+        output: &mut impl ScriptOutput,
+    ) -> Result<()> {
         for statement in statements {
             self.statement(statement, output)?;
         }
         Ok(())
     }
-    fn block(&mut self, block: &Block, output: &mut impl Write) -> Result<()> {
+    fn block(&mut self, block: &Block, output: &mut impl ScriptOutput) -> Result<()> {
         let previous = self.enter_scope(self.environments.current, block.span)?;
         let result = self.statements(&block.statements, output);
         self.environments.leave(previous);
@@ -422,7 +457,7 @@ impl Runtime {
     fn expressions(
         &mut self,
         expressions: &[Expr],
-        output: &mut impl Write,
+        output: &mut impl ScriptOutput,
     ) -> Result<Option<Value>> {
         let mut value = None;
         for expression in expressions {
@@ -431,7 +466,7 @@ impl Runtime {
         Ok(value)
     }
 
-    fn statement(&mut self, statement: &Statement, output: &mut impl Write) -> Result<()> {
+    fn statement(&mut self, statement: &Statement, output: &mut impl ScriptOutput) -> Result<()> {
         self.checkpoint(statement.span)?;
         match &statement.kind {
             StatementKind::Require { path, once, alias } => {
@@ -667,7 +702,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn evaluate(&mut self, expr: &Expr, output: &mut impl Write) -> Result<Value> {
+    fn evaluate(&mut self, expr: &Expr, output: &mut impl ScriptOutput) -> Result<Value> {
         match &expr.kind {
             ExprKind::Literal(literal) => {
                 let value = match literal {
@@ -865,7 +900,7 @@ impl Runtime {
         callee: Value,
         args: &[Expr],
         span: Span,
-        output: &mut impl Write,
+        output: &mut impl ScriptOutput,
     ) -> Result<Value> {
         let Value::Callable(callable) = callee else {
             return self.fail("call requires a callable value", span);
@@ -894,6 +929,7 @@ impl Runtime {
                     environment: &mut settings.environment,
                     permissions: &settings.permissions,
                     cancellation: self.options.interrupt_flag.clone(),
+                    runtime_identity: Some(self.identity.clone()),
                     call_span: span,
                     max_value_bytes: self.options.max_value_bytes,
                     output,
@@ -1049,7 +1085,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn place(&mut self, target: &Expr, output: &mut impl Write) -> Result<Place> {
+    fn place(&mut self, target: &Expr, output: &mut impl ScriptOutput) -> Result<Place> {
         match &target.kind {
             ExprKind::Grouped(inner) => self.place(inner, output),
             ExprKind::Variable(name) => Ok(Place {
@@ -1176,7 +1212,7 @@ impl Runtime {
         op: AssignmentOp,
         rhs: &Expr,
         retain: bool,
-        output: &mut impl Write,
+        output: &mut impl ScriptOutput,
     ) -> Result<Value> {
         let place = self.place(target, output)?;
         if place.append && op != AssignmentOp::Assign {

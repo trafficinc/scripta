@@ -7,6 +7,14 @@ package or source checkout; sample input directories must already exist.
 | Script | Example command | Behavior |
 | --- | --- | --- |
 | hello.scripta | `scripta examples/hello.scripta` | Prints Hello, Scripta! |
+| socket-echo.scripta | `scripta examples/socket-echo.scripta 9000` | One-connection TCP binary echo server using readiness polling; port 0 selects an ephemeral loopback port. |
+| web-transfers.scripta | `scripta serve examples/web-transfers.scripta` | Receives raw binary uploads through a request stream and serves a safe attachment download. |
+| binary-streams.scripta | `scripta examples/binary-streams.scripta INPUT OUTPUT` | Copies binary data in bounded chunks to an exclusively created file. |
+| http-stream-upload.scripta | `scripta examples/http-stream-upload.scripta URL INPUT` | Streams a file into an HTTP POST and counts response bytes without buffering the body. |
+| web-streaming.scripta | `scripta serve examples/web-streaming.scripta` | Streams a few text progress updates using nested application buffering and explicit transport flushing. |
+| web-uploads.scripta | `scripta serve examples/web-uploads.scripta` | Browser multipart form; escapes metadata and saves to an explicit non-overwriting destination. |
+| password-hashing.scripta | `scripta examples/password-hashing.scripta` | Hashes a public demo value with Argon2id and reports verification/rehash status without printing the input or hash. |
+| html-escaping.scripta | `scripta examples/html-escaping.scripta` | Generates HTML using escaped text and a quoted title attribute; optional first argument supplies the name. |
 | variables.scripta | `scripta examples/variables.scripta` | Explicit values, concatenation and conversion. |
 | loops.scripta | `scripta examples/loops.scripta` | Prints 1, 2, 3 on separate lines. |
 | functions.scripta | `scripta examples/functions.scripta` | Typed function arguments/returns; greeting and addition. |
@@ -60,3 +68,11 @@ not invoke public endpoints, Git, Python, Node.js, or PHP.
 counter. Run it with `scripta serve examples/web-app.scripta`; it requires a web
 request context rather than ordinary CLI execution. The SQLite counter creates
 `web-demo.sqlite` in the working directory. See [web hosting](../docs/web-servers.md).
+
+`directory-links.scripta DIRECTORY [--follow-links]` lists entry snapshots and
+optionally resolves links under the runtime's filesystem read/root policies.
+
+`web-sessions.scripta` demonstrates session visit counts, ID rotation, logout,
+preference cookies, and early session close. For local HTTP, run
+`scripta serve examples/web-sessions.scripta --session-cookie-secure false`.
+Keep the Secure session-cookie default for public HTTPS deployments.

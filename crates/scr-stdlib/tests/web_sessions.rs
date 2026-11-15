@@ -6,6 +6,15 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
+fn host_runtime() -> Runtime {
+    let mut options = RuntimeOptions::default();
+    options
+        .context
+        .permissions
+        .allowed
+        .insert("web.session".into());
+    Runtime::with_options(options)
+}
 struct Store {
     directory: tempfile::TempDir,
     config: session::Config,
@@ -47,7 +56,7 @@ impl Store {
     }
 }
 fn execute(config: session::Config, cookie: Option<&str>, source: &str) -> Result<Reply, String> {
-    let mut runtime = Runtime::new();
+    let mut runtime = host_runtime();
     scr_stdlib::register(&mut runtime).unwrap();
     let headers = cookie
         .map(|v| vec![("cookie".into(), format!("SCRIPTA_SESSION={v}"))])
@@ -193,6 +202,7 @@ fn regeneration_and_destroy_revoke_old_ids_and_work_at_store_capacity() {
             .iter()
             .any(|(k, v)| k == "set-cookie" && v.contains("Max-Age=0"))
     );
+    assert_eq!(destroyed.id(), "");
     let replacement = store
         .execute(
             Some(&second),
@@ -286,7 +296,7 @@ fn locks_are_cancellable_and_released_when_request_state_drops() {
     let store = Store::new();
     let id = store.execute(None, "Session::start();").unwrap().id();
     let headers = vec![("cookie".into(), format!("SCRIPTA_SESSION={id}"))];
-    let mut first = Runtime::new();
+    let mut first = host_runtime();
     let response = web::register(
         &mut first,
         web::Request {
@@ -308,10 +318,16 @@ fn locks_are_cancellable_and_released_when_request_state_drops() {
     let flag = Arc::new(AtomicBool::new(false));
     let interrupt = flag.clone();
     let waiting = std::thread::spawn(move || {
-        let mut runtime = Runtime::with_options(RuntimeOptions {
+        let mut options = RuntimeOptions {
             interrupt_flag: Some(interrupt),
             ..Default::default()
-        });
+        };
+        options
+            .context
+            .permissions
+            .allowed
+            .insert("web.session".into());
+        let mut runtime = Runtime::with_options(options);
         let headers = vec![("cookie".into(), format!("SCRIPTA_SESSION={id2}"))];
         let response = web::register(
             &mut runtime,
@@ -412,9 +428,9 @@ fn session_logical_and_encoded_limits_preserve_records_at_the_boundary() {
 #[test]
 fn supported_nesting_roundtrips_and_excess_nesting_fails_before_mutation() {
     let store = Store::new();
-    let first=store.execute(None,"Session::start();$v=null;for($i=0;$i<31;$i++){$v=[\"x\"=>$v];}Session::set(\"deep\",$v);").unwrap().id();
-    assert_eq!(store.execute(Some(&first),"Session::start();$v=null;for($i=0;$i<31;$i++){$v=[\"x\"=>$v];}echo str(Session::get(\"deep\")===$v);").unwrap().body,b"true");
-    assert!(store.execute(Some(&first),"Session::start();$v=null;for($i=0;$i<33;$i++){$v=[\"x\"=>$v];}Session::set(\"deep\",$v);").unwrap_err().contains("nesting"));
+    let first=store.execute(None,"Session::start();$v=null;for($i=0;$i<31;$i=$i+1){$v=[\"x\"=>$v];}Session::set(\"deep\",$v);").unwrap().id();
+    assert_eq!(store.execute(Some(&first),"Session::start();$v=null;for($i=0;$i<31;$i=$i+1){$v=[\"x\"=>$v];}echo str(Session::get(\"deep\")===$v);").unwrap().body,b"true");
+    assert!(store.execute(Some(&first),"Session::start();$v=null;for($i=0;$i<33;$i=$i+1){$v=[\"x\"=>$v];}Session::set(\"deep\",$v);").unwrap_err().contains("nesting"));
 }
 #[cfg(unix)]
 #[test]
@@ -435,4 +451,54 @@ fn existing_public_session_directories_and_hard_links_are_rejected() {
             .unwrap_err()
             .contains("unlinked elsewhere")
     );
+}
+
+#[test]
+fn session_capability_is_required_even_when_a_host_registers_the_module() {
+    let store = Store::new();
+    let mut runtime = Runtime::new();
+    let response = web::register(
+        &mut runtime,
+        web::Request {
+            method: "GET".into(),
+            path: "/".into(),
+            query_string: "".into(),
+            body: vec![],
+            headers: vec![],
+        },
+        32768,
+    )
+    .unwrap();
+    let _session = session::register(&mut runtime, store.config.clone(), &[], response).unwrap();
+    let error = runtime
+        .execute_source("<?scripta Session::start();", &mut vec![])
+        .unwrap_err();
+    assert!(error.message.contains("PermissionError"));
+    assert!(error.message.contains("web.session"));
+    assert_eq!(fs::read_dir(store.directory.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn readonly_session_records_fail_without_replacement_or_data_loss() {
+    let store = Store::new();
+    let id = store
+        .execute(
+            None,
+            "Session::start();Session::set(\"secret\",\"preserve\");",
+        )
+        .unwrap()
+        .id();
+    let path = store.directory.path().join(format!("{id}.data"));
+    let before = fs::read(&path).unwrap();
+    let permissions = fs::metadata(&path).unwrap().permissions();
+    let mut readonly = permissions.clone();
+    readonly.set_readonly(true);
+    fs::set_permissions(&path, readonly).unwrap();
+    let result = store.execute(
+        Some(&id),
+        "Session::start();Session::set(\"secret\",\"changed\");",
+    );
+    assert!(result.unwrap_err().contains("writable"));
+    assert_eq!(fs::read(&path).unwrap(), before);
+    fs::set_permissions(path, permissions).unwrap();
 }

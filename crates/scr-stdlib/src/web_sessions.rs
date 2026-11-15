@@ -79,11 +79,12 @@ fn storage(_: io::Error) -> NativeError {
     error("session storage operation failed")
 }
 fn now() -> NativeResult<u64> {
-    Ok(SystemTime::now()
+    let elapsed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| error("system clock precedes Unix epoch"))?
-        .as_secs())
+        .map_err(|_| error("system clock precedes Unix epoch"))?;
+    u64::try_from(elapsed.as_millis()).map_err(|_| error("session timestamp exceeds storage range"))
 }
+
 fn valid_id(id: &str) -> bool {
     id.len() == 64
         && id
@@ -112,6 +113,9 @@ fn check_file(path: &Path) -> NativeResult<()> {
     let metadata = fs::symlink_metadata(path).map_err(storage)?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return Err(error("session storage entries must be regular files"));
+    }
+    if metadata.permissions().readonly() {
+        return Err(error("session storage files must be writable"));
     }
     #[cfg(unix)]
     {
@@ -511,9 +515,12 @@ impl State {
         }
     }
     fn start(&mut self, context: &RuntimeContext<'_>) -> NativeResult<()> {
+        if self.response.borrow().headers_committed() {
+            return Err(error("session cannot start after response headers commit"));
+        }
         if self.destroyed || self.closed {
             return Err(error(
-                "a destroyed session cannot restart in the same request",
+                "a closed or destroyed session cannot restart in the same request",
             ));
         }
         if self.started {
@@ -560,6 +567,12 @@ impl State {
 #[derive(Clone)]
 pub struct Session(Rc<RefCell<State>>);
 impl Session {
+    /// Save an active session and forbid opening/restarting sessions after transmission.
+    pub fn seal(&self) -> NativeResult<()> {
+        self.finish()?;
+        self.0.borrow_mut().closed = true;
+        Ok(())
+    }
     pub fn finish(&self) -> NativeResult<()> {
         let mut state = self.0.borrow_mut();
         if !state.started || state.closed {
@@ -571,7 +584,7 @@ impl Session {
                 .as_ref()
                 .is_some_and(|flag| flag.load(Ordering::Relaxed))
             {
-                Err(error("session commit interrupted"))
+                Err(NativeError::new("Interrupted", "execution interrupted"))
             } else {
                 Ok(())
             }
@@ -590,7 +603,7 @@ impl Session {
         let expires = if state.destroyed {
             0
         } else {
-            now()?.saturating_add(state.config.ttl.as_secs())
+            now()?.saturating_add(state.config.ttl.as_millis() as u64)
         };
         atomic_record(
             &state.config,
@@ -618,6 +631,8 @@ pub fn register(
     headers: &[(String, String)],
     response: Rc<RefCell<Response>>,
 ) -> NativeResult<Session> {
+    let mut config = config;
+    config.prepare()?;
     // Invalid/ambiguous session cookies are rejected only when start() is used;
     // ordinary endpoints can still handle malformed cookies themselves.
     let cookies = cookies::request_cookies(headers);
@@ -677,6 +692,7 @@ pub fn register(
             format!("Session::{name}"),
             NativeFunction::new(signature, move |context, args| {
                 context.check_cancelled()?;
+                context.permissions.require("web.session")?;
                 let state_ref = state.clone();
                 let mut state = state.borrow_mut();
                 if name == "start" {

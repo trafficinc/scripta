@@ -1,0 +1,29 @@
+<?scripta
+// A bounded, one-connection TCP echo server. Port 0 selects an available local port.
+$port = 9000;
+if (Cli::arg(0) !== null) {
+    $port = int(Cli::arg(0));
+}
+$server = Socket::listen("127.0.0.1", $port, ["blocking" => false, "timeoutMs" => 5000]);
+echo Json::encode(Socket::localAddress($server)) . "\n";
+flush();
+$client = null;
+try {
+    $ready = Socket::poll([$server], [], 5000);
+    if (len($ready["readable"]) === 0) {
+        exit(2);
+    }
+    $client = Socket::accept($server);
+    Socket::setBlocking($client, true);
+    while (($data = Socket::read($client, 65536)) !== null) {
+        $offset = 0;
+        while ($offset < len($data)) {
+            $offset += Socket::write($client, Bytes::slice($data, $offset));
+        }
+    }
+} finally {
+    if ($client !== null) {
+        Socket::close($client);
+    }
+    Socket::close($server);
+}

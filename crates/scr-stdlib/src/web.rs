@@ -8,6 +8,8 @@ use std::{cell::RefCell, rc::Rc};
 mod cookies;
 #[path = "web_sessions.rs"]
 pub mod session;
+#[path = "web_uploads.rs"]
+pub mod uploads;
 pub use cookies::request_cookies;
 use ureq::http::{HeaderName, HeaderValue, Uri};
 
@@ -27,6 +29,7 @@ pub struct Response {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     max_header_bytes: usize,
+    committed: bool,
 }
 fn error(message: &str) -> NativeError {
     NativeError::new("WebError", message)
@@ -36,11 +39,21 @@ fn text(bytes: &[u8]) -> NativeResult<&str> {
         .map_err(|_| NativeError::new("EncodingError", "request body is not UTF-8"))
 }
 #[derive(Debug)]
-struct RequestObject(Rc<Request>);
+struct RequestObject {
+    owner: Rc<()>,
+    request: Rc<Request>,
+    multipart: Option<Rc<uploads::State>>,
+    inputs: Rc<crate::streams::InputScope>,
+}
+impl Drop for RequestObject {
+    fn drop(&mut self) {
+        self.inputs.close();
+    }
+}
 impl std::ops::Deref for RequestObject {
     type Target = Request;
     fn deref(&self) -> &Request {
-        &self.0
+        &self.request
     }
 }
 impl NativeObject for RequestObject {
@@ -48,16 +61,21 @@ impl NativeObject for RequestObject {
         "WebRequest"
     }
     fn payload_bytes(&self) -> usize {
-        self.method
-            .len()
-            .saturating_add(self.path.len())
-            .saturating_add(self.query_string.len())
-            .saturating_add(self.body.len())
+        self.multipart
+            .as_ref()
+            .map_or(0, |m| m.payload_bytes())
             .saturating_add(
-                self.headers
-                    .iter()
-                    .map(|(k, v)| k.len() + v.len() + 2 * std::mem::size_of::<String>())
-                    .sum::<usize>(),
+                self.method
+                    .len()
+                    .saturating_add(self.path.len())
+                    .saturating_add(self.query_string.len())
+                    .saturating_add(self.body.len())
+                    .saturating_add(
+                        self.headers
+                            .iter()
+                            .map(|(k, v)| k.len() + v.len() + 2 * std::mem::size_of::<String>())
+                            .sum::<usize>(),
+                    ),
             )
     }
     fn get_property(&self, name: &str) -> Result<Value, String> {
@@ -65,6 +83,14 @@ impl NativeObject for RequestObject {
             "method" => return Ok(Value::String(self.method.clone())),
             "path" => return Ok(Value::String(self.path.clone())),
             "queryString" => return Ok(Value::String(self.query_string.clone())),
+            "bodySize" => {
+                return Ok(Value::Int(
+                    self.multipart
+                        .as_ref()
+                        .map_or(self.body.len() as u64, |m| m.body_size())
+                        as i64,
+                ));
+            }
             _ => {}
         }
         let name = name.to_owned();
@@ -72,19 +98,33 @@ impl NativeObject for RequestObject {
             "header" | "cookie" => (vec![NativeType::String], NativeType::Any),
             "cookies" => (vec![], NativeType::List),
             "headers" => (vec![NativeType::String], NativeType::List),
-            "query" | "form" => (vec![], NativeType::List),
+            "query" | "form" | "uploads" => (vec![], NativeType::List),
             "json" => (vec![], NativeType::Any),
             "text" => (vec![], NativeType::String),
             "bytes" => (vec![], NativeType::Bytes),
+            "bodyStream" => (vec![], NativeType::Object("ByteStream")),
             _ => return Err(format!("unknown WebRequest property {name}")),
         };
-        let request = self.0.clone();
+        let owner = self.owner.clone();
+        let request = self.request.clone();
+        let multipart = self.multipart.clone();
+        let inputs = self.inputs.clone();
         Ok(Value::native_function(
             format!("WebRequest::{name}"),
             NativeFunction::new(
                 NativeSignature::new(parameters, returns),
                 move |context, args| {
                     context.check_cancelled()?;
+                    if !context
+                        .runtime_identity
+                        .as_ref()
+                        .is_some_and(|id| Rc::ptr_eq(id, &owner))
+                    {
+                        return Err(error("request belongs to another runtime"));
+                    }
+                    if let Some(multipart) = &multipart {
+                        multipart.check(context)?;
+                    }
                     let headers = &request.headers;
                     let body = &request.body;
                     let query = &request.query_string;
@@ -107,6 +147,38 @@ impl NativeObject for RequestObject {
                             })
                         }
                         "query" => crate::url::parse(context, query, true),
+                        "uploads" => multipart
+                            .as_ref()
+                            .map_or_else(|| Ok(Value::List(vec![])), |m| m.files(context)),
+                        "bodyStream" => {
+                            if let Some(m) = &multipart {
+                                m.body_stream(context)
+                            } else {
+                                let reader = MemoryBody {
+                                    request: request.clone(),
+                                    offset: 0,
+                                };
+                                crate::streams::request_input(
+                                    context,
+                                    Box::new(reader),
+                                    request.body.len() as u64,
+                                    inputs.clone(),
+                                    request.body.len(),
+                                )
+                            }
+                        }
+                        "bytes" if multipart.is_some() => Ok(Value::Bytes(
+                            multipart.as_ref().unwrap().body(context)?.into(),
+                        )),
+                        "text" if multipart.is_some() => {
+                            let body = multipart.as_ref().unwrap().body(context)?;
+                            Ok(Value::String(String::from_utf8(body).map_err(|_| {
+                                NativeError::new("EncodingError", "request body is not UTF-8")
+                            })?))
+                        }
+                        "form" if multipart.as_ref().is_some_and(|m| m.is_multipart()) => {
+                            multipart.as_ref().unwrap().fields(context)
+                        }
                         "bytes" => {
                             crate::bytes::payload(context, body.len())?;
                             Ok(Value::Bytes(body.clone().into()))
@@ -130,22 +202,29 @@ impl NativeObject for RequestObject {
                                 .unwrap_or("")
                                 .trim()
                                 .to_ascii_lowercase();
+                            if name == "form" && media != "application/x-www-form-urlencoded" {
+                                return Err(error(
+                                    "form() requires application/x-www-form-urlencoded",
+                                ));
+                            }
+                            if name == "json"
+                                && media != "application/json"
+                                && !(media.starts_with("application/") && media.ends_with("+json"))
+                            {
+                                return Err(error(
+                                    "json() requires an application JSON Content-Type",
+                                ));
+                            }
+                            let storage;
+                            let body = if let Some(m) = &multipart {
+                                storage = m.body(context)?;
+                                storage.as_slice()
+                            } else {
+                                body
+                            };
                             if name == "form" {
-                                if media != "application/x-www-form-urlencoded" {
-                                    return Err(error(
-                                        "form() requires application/x-www-form-urlencoded",
-                                    ));
-                                }
                                 crate::url::parse(context, text(body)?, true)
                             } else {
-                                if media != "application/json"
-                                    && !(media.starts_with("application/")
-                                        && media.ends_with("+json"))
-                                {
-                                    return Err(error(
-                                        "json() requires an application JSON Content-Type",
-                                    ));
-                                }
                                 crate::json::decode(text(body)?)
                             }
                         }
@@ -156,8 +235,37 @@ impl NativeObject for RequestObject {
         ))
     }
 }
+struct MemoryBody {
+    request: Rc<Request>,
+    offset: usize,
+}
+impl std::io::Read for MemoryBody {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let n = buffer.len().min(self.request.body.len() - self.offset);
+        buffer[..n].copy_from_slice(&self.request.body[self.offset..self.offset + n]);
+        self.offset += n;
+        Ok(n)
+    }
+}
 impl Response {
+    /// Freeze metadata immediately before the host's first transmission.
+    pub fn commit(&mut self) -> NativeResult<()> {
+        self.ensure_mutable()?;
+        self.committed = true;
+        Ok(())
+    }
+    pub fn headers_committed(&self) -> bool {
+        self.committed
+    }
+    fn ensure_mutable(&self) -> NativeResult<()> {
+        if self.committed {
+            Err(error("response headers have already been committed"))
+        } else {
+            Ok(())
+        }
+    }
     fn header(&mut self, name: &str, value: &str, append: bool) -> NativeResult<()> {
+        self.ensure_mutable()?;
         let name = HeaderName::from_bytes(name.as_bytes())
             .map_err(|_| error("invalid response header name"))?
             .as_str()
@@ -208,13 +316,62 @@ pub fn register(
     request: Request,
     max_header_bytes: usize,
 ) -> NativeResult<Rc<RefCell<Response>>> {
+    register_inner(runtime, request, max_header_bytes, None)
+}
+
+/// Register a trusted host-provided multipart request and its request lifetime guard.
+pub fn register_multipart(
+    runtime: &mut Runtime,
+    request: Request,
+    data: uploads::Multipart,
+    policy: crate::FilesystemPolicy,
+    stage: uploads::Stage,
+    max_header_bytes: usize,
+) -> NativeResult<(Rc<RefCell<Response>>, uploads::RequestResources)> {
+    let (state, guard) = uploads::State::new(runtime, data, policy, stage)?;
+    let response = register_inner(runtime, request, max_header_bytes, Some(state))?;
+    Ok((response, guard))
+}
+fn register_inner(
+    runtime: &mut Runtime,
+    request: Request,
+    max_header_bytes: usize,
+    multipart: Option<Rc<uploads::State>>,
+) -> NativeResult<Rc<RefCell<Response>>> {
     let response = Rc::new(RefCell::new(Response {
         status: 200,
         headers: vec![],
         max_header_bytes,
+        committed: false,
     }));
+    let download_state = response.clone();
+    let head = request.method == "HEAD";
+    runtime.register("Web::download",NativeFunction::new(NativeSignature::new(vec![NativeType::Object("ByteStream"),NativeType::String],NativeType::Int),move |context,args| {
+        context.check_cancelled()?;crate::bytes::budget(context,size_of::<Value>())?;
+        let Value::String(filename)=&args[1] else {unreachable!()};
+        if filename.is_empty() || filename.len()>255 || filename.chars().any(|c|c.is_control() || matches!(c,'/'|'\\')) {return Err(error("download filename must be a basename without controls, at most 255 UTF-8 bytes"))}
+        if context.output.generated_bytes()!=Some(0) || context.output.control(scr_runtime::OutputAction::Level)?!=Value::Int(0) {return Err(error("download must precede body output and requires no active application buffers"))}
+        let size=crate::streams::download_size(context,&args[0])?;
+        if !head && context.output.remaining_bytes().is_some_and(|n|size>n as u64) {return Err(crate::bytes::resource("download exceeds remaining response output budget"))}
+        let encoded=crate::url::invoke("Url::encodeComponent",context,&[Value::String(filename.clone())])?;
+        let Value::String(encoded)=encoded else {unreachable!()};
+        let fallback=if filename.is_ascii() {filename.replace('"',"_")}else{"download".into()};
+        let mut candidate=download_state.borrow().clone();
+        candidate.header("Content-Type","application/octet-stream",false)?;
+        candidate.header("Content-Disposition",&format!("attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"),false)?;
+        candidate.header("X-Content-Type-Options","nosniff",false)?;
+        candidate.header("Accept-Ranges","none",false)?;
+        candidate.status=200;
+        *download_state.borrow_mut()=candidate;
+        if head {context.output.flush()?;Ok(Value::Int(0))}else{crate::streams::download(context,&args[0],size)}
+    }))?;
     cookies::register(runtime, response.clone())?;
-    let request: Rc<dyn NativeObject> = Rc::new(RequestObject(Rc::new(request)));
+    let request: Rc<dyn NativeObject> = Rc::new(RequestObject {
+        owner: runtime.native_identity(),
+        request: Rc::new(request),
+        multipart,
+        inputs: crate::streams::InputScope::new(),
+    });
     runtime.register(
         "Web::request",
         NativeFunction::new(
@@ -238,7 +395,9 @@ pub fn register(
                 if !(200..=599).contains(&code) {
                     return Err(error("response status must be between 200 and 599"));
                 }
-                state.borrow_mut().status = code as u16;
+                let mut state = state.borrow_mut();
+                state.ensure_mutable()?;
+                state.status = code as u16;
                 Ok(Value::Null)
             },
         ),

@@ -1,0 +1,23 @@
+<?scripta
+$url = Cli::arg(0);
+$input = Cli::arg(1);
+if ($url === null || $input === null) {
+    echo "Usage: scripta http-stream-upload.scripta URL INPUT\n";
+    exit(2);
+}
+$source = Stream::open($input, "r");
+$response = null;
+try {
+    // The file is consumed incrementally; redirects never replay the body.
+    $response = Stream::request("POST", $url, $source, ["maxRedirects" => 0, "maxBodyBytes" => 1048576]);
+    $received = 0;
+    while (($chunk = Stream::read($response, 4096)) !== null) {
+        $received += len($chunk);
+    }
+    echo Json::encode(["status" => $response->status, "responseBytes" => $received]) . "\n";
+} finally {
+    if ($response !== null) {
+        Stream::close($response);
+    }
+    Stream::close($source);
+}

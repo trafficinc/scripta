@@ -593,3 +593,762 @@ fn session_idle_expiry_and_quota_are_enforced_by_host_options() {
         0
     );
 }
+
+#[test]
+fn shipped_session_example_counts_rotates_and_logs_out_with_real_requests() {
+    let source = fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/web-sessions.scripta"
+    ))
+    .unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    let server = Server::start(&source, &["--session-cookie-secure", "false"]);
+    let first = server.session_request("/", None);
+    assert_eq!(first.0, 200);
+    let id = response_session_id(&first.1);
+    let next = server.session_request("/", Some(&id));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&next.2).unwrap()["visits"],
+        2
+    );
+    let post = |path: &str, id: &str, body: &str| {
+        parse(&server.raw(format!("POST {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nCookie: SCRIPTA_SESSION={id}\r\nContent-Length: {}\r\n\r\n{body}",body.len()).as_bytes()))
+    };
+    let preference = post("/theme", &id, r#"{"theme":"light"}"#);
+    assert_eq!(preference.0, 200);
+    assert!(preference.1.contains("theme=light"));
+    let rotated = post("/rotate", &id, "");
+    assert_eq!(rotated.0, 303);
+    let rotated_id = response_session_id(&rotated.1);
+    assert_ne!(rotated_id, id);
+    let current = server.session_request("/", Some(&rotated_id));
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&current.2).unwrap()["visits"],
+        3
+    );
+    let logged_out = post("/logout", &rotated_id, "");
+    assert_eq!(logged_out.0, 303);
+    assert!(logged_out.1.contains("SCRIPTA_SESSION=; Path=/; Max-Age=0"));
+    assert!(logged_out.1.contains("theme=; Path=/; Max-Age=0"));
+    let restarted = server.session_request("/", Some(&rotated_id));
+    assert_ne!(response_session_id(&restarted.1), rotated_id);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&restarted.2).unwrap()["visits"],
+        1
+    );
+}
+
+#[test]
+fn password_verification_can_authenticate_a_web_session_without_extra_capabilities() {
+    let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/passwords/php-argon2id.json"
+    ))
+    .unwrap();
+    let hash = fixtures["fixtures"][0]["hash"].as_str().unwrap();
+    let source=r#"<?scripta
+$r=Web::request();$form=$r->json();$valid=Password::verify($form["password"],"__FIXTURE_HASH__");
+if ($valid) {Session::start();Session::regenerate();Session::set("userId",42);} else {Web::status(401);}
+Web::header("Content-Type","application/json");echo Json::encode(["verified"=>$valid]);
+"#.replace("__FIXTURE_HASH__",hash);
+    let server = Server::start(&source, &[]);
+    let correct = server.request(
+        "POST",
+        "/login",
+        br#"{"password":"public-fixture-password"}"#,
+        "application/json",
+    );
+    assert_eq!(correct.0, 200);
+    assert_eq!(correct.2, br#"{"verified":true}"#);
+    assert_eq!(response_session_id(&correct.1).len(), 64);
+    let wrong = server.request(
+        "POST",
+        "/login",
+        br#"{"password":"wrong"}"#,
+        "application/json",
+    );
+    assert_eq!(wrong.0, 401);
+    assert_eq!(wrong.2, br#"{"verified":false}"#);
+    assert!(!wrong.1.to_lowercase().contains("set-cookie:"));
+}
+
+type FormPart<'a> = (&'a str, Option<&'a str>, Option<&'a str>, &'a [u8]);
+fn multipart(parts: &[FormPart<'_>]) -> Vec<u8> {
+    let mut body = vec![];
+    for (name, filename, media, value) in parts {
+        body.extend_from_slice(
+            format!("--upload-boundary\r\nContent-Disposition: form-data; name=\"{name}\"")
+                .as_bytes(),
+        );
+        if let Some(filename) = filename {
+            body.extend_from_slice(format!("; filename=\"{filename}\"").as_bytes())
+        }
+        body.extend_from_slice(b"\r\n");
+        if let Some(media) = media {
+            body.extend_from_slice(format!("Content-Type: {media}\r\n").as_bytes())
+        }
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(value);
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(b"--upload-boundary--\r\n");
+    body
+}
+const MULTIPART: &str = "multipart/form-data; boundary=upload-boundary";
+fn uploads_clean(server: &Server) {
+    let root = server.directory.path().join("spools");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if fs::read_dir(&root).unwrap().next().is_none() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "upload spool leaked: {:?}",
+            fs::read_dir(root)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect::<Vec<_>>()
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+#[test]
+fn multipart_uploads_preserve_binary_duplicates_metadata_and_explicit_destinations() {
+    let server = Server::start(
+        r#"<?scripta
+$r=Web::request();$files=$r->uploads();
+if ($r->path === "/raw") {Web::write($r->bytes());exit 0;}
+if ($r->path === "/text") {echo $r->text();exit 0;}
+if ($r->path === "/save") {$files[0]->moveTo("chosen.bin");echo Json::encode($files[0]->moved);exit 0;}
+$items=[];foreach ($files as $file) {$items=List::push($items,[$file->fieldName,$file->filename,$file->mediaType,$file->size,$file->moved]);}
+echo Json::encode(["fields"=>$r->form(),"files"=>$items]);"#,
+        &["--upload-temp-dir", "spools"],
+    );
+    let body = multipart(&[
+        ("title", None, None, "café".as_bytes()),
+        ("f", Some("../../é.bin"), Some("image/png"), b"\x00\xffabc"),
+        ("title", None, None, b"second"),
+        ("f", Some("empty.bin"), None, b""),
+        ("f", Some(""), Some("application/octet-stream"), b""),
+    ]);
+    let response = server.request("POST", "/", &body, MULTIPART);
+    assert_eq!(response.0, 200);
+    let data: serde_json::Value = serde_json::from_slice(&response.2).unwrap();
+    assert_eq!(
+        data,
+        serde_json::json!({"fields":[["title","café"],["title","second"]],"files":[["f","../../é.bin","image/png",5,false],["f","empty.bin",null,0,false]]})
+    );
+    assert_eq!(server.request("POST", "/raw", &body, MULTIPART).2, body);
+    assert_eq!(server.request("POST", "/text", &body, MULTIPART).0, 500);
+    assert_eq!(server.request("POST", "/save", &body, MULTIPART).2, b"true");
+    assert_eq!(
+        fs::read(server.directory.path().join("chosen.bin")).unwrap(),
+        b"\0\xffabc"
+    );
+    assert_eq!(server.request("POST", "/save", &body, MULTIPART).0, 500);
+    assert_eq!(
+        fs::read(server.directory.path().join("chosen.bin")).unwrap(),
+        b"\0\xffabc"
+    );
+    uploads_clean(&server);
+    assert!(!server.directory.path().join("é.bin").exists());
+    assert!(!fs::read_dir(server.directory.path()).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".scripta-upload-")
+    }));
+}
+#[test]
+fn multipart_rejects_malformed_encodings_headers_boundaries_and_nested_forms() {
+    let server = Server::start("<?scripta echo \"ok\";", &["--upload-temp-dir", "spools"]);
+    for (body, kind, expected) in [
+        (b"broken".to_vec(), MULTIPART, 400),
+        (multipart(&[("a", None, None, b"\xff")]), MULTIPART, 400),
+        (multipart(&[("a", Some(""), None, b"x")]), MULTIPART, 400),
+        (
+            multipart(&[("a", None, Some("multipart/mixed; boundary=x"), b"nested")]),
+            MULTIPART,
+            415,
+        ),
+        (
+            multipart(&[("a", None, Some("text/plain; charset=latin1"), b"x")]),
+            MULTIPART,
+            415,
+        ),
+        (
+            multipart(&[("a", None, None, b"x")]),
+            "multipart/form-data",
+            400,
+        ),
+        (
+            multipart(&[("a", None, None, b"x")]),
+            "multipart/mixed; boundary=x",
+            415,
+        ),
+        (
+            multipart(&[("a", None, None, b"x")]),
+            "multipart/form-data; boundary=\"bad;boundary\"",
+            400,
+        ),
+    ] {
+        assert_eq!(server.request("POST", "/", &body, kind).0, expected);
+        uploads_clean(&server)
+    }
+    let mut body = multipart(&[("a", Some("x"), None, b"content")]);
+    body.truncate(body.len() - 25);
+    assert_eq!(server.request("POST", "/", &body, MULTIPART).0, 400);
+    uploads_clean(&server);
+    let header = format!(
+        "--upload-boundary\r\nContent-Disposition: form-data; name=\"a\"\r\nX-Pad: {}",
+        "x".repeat(60000)
+    );
+    assert_eq!(
+        server.request("POST", "/", header.as_bytes(), MULTIPART).0,
+        413
+    );
+    uploads_clean(&server);
+}
+#[test]
+fn multipart_exact_limits_and_limit_plus_one_and_disk_recovery() {
+    let field = multipart(&[("a", None, None, b"1234")]);
+    let file = multipart(&[("f", Some("x"), None, b"1234")]);
+    for (options, accepted, rejected) in [
+        (
+            vec!["--upload-max-file-bytes", "4"],
+            file.clone(),
+            multipart(&[("f", Some("x"), None, b"12345")]),
+        ),
+        (
+            vec!["--upload-max-files", "1"],
+            file.clone(),
+            multipart(&[("f", Some("x"), None, b""), ("f", Some("y"), None, b"")]),
+        ),
+        (
+            vec!["--upload-max-fields", "1"],
+            field.clone(),
+            multipart(&[("a", None, None, b""), ("b", None, None, b"")]),
+        ),
+        (
+            vec!["--upload-max-field-bytes", "4"],
+            field.clone(),
+            multipart(&[("a", None, None, b"12345")]),
+        ),
+        (
+            vec!["--upload-max-fields-bytes", "5"],
+            field.clone(),
+            multipart(&[("a", None, None, b"12345")]),
+        ),
+    ] {
+        let mut options = options;
+        options.extend(["--upload-temp-dir", "spools"]);
+        let server = Server::start("<?scripta echo \"ok\";", &options);
+        assert_eq!(server.request("POST", "/", &accepted, MULTIPART).0, 200);
+        assert_eq!(server.request("POST", "/", &rejected, MULTIPART).0, 413);
+        uploads_clean(&server);
+        assert_eq!(server.request("POST", "/", &accepted, MULTIPART).0, 200);
+        uploads_clean(&server);
+    }
+    let limit = (file.len() + 4).to_string();
+    let server = Server::start(
+        "<?scripta echo \"ok\";",
+        &[
+            "--upload-temp-dir",
+            "spools",
+            "--upload-max-disk-bytes",
+            &limit,
+        ],
+    );
+    assert_eq!(server.request("POST", "/", &file, MULTIPART).0, 200);
+    uploads_clean(&server);
+    let too_big = multipart(&[("f", Some("x"), None, b"12345")]);
+    assert_eq!(server.request("POST", "/", &too_big, MULTIPART).0, 503);
+    uploads_clean(&server);
+    assert_eq!(server.request("POST", "/", &file, MULTIPART).0, 200);
+}
+#[test]
+fn multipart_large_files_are_spooled_and_worker_timeout_cleans_all_storage() {
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();$f=$r->uploads();if ($r->path === "/hang") {Date::sleep(5000);}echo str($f[0]->size);"#,
+        &[
+            "--upload-temp-dir",
+            "spools",
+            "--timeout-ms",
+            "300",
+            "--max-body-bytes",
+            "4194304",
+        ],
+    );
+    let bytes = vec![0xa5; 2 * 1024 * 1024];
+    let body = multipart(&[("f", Some("large.bin"), None, &bytes)]);
+    assert_eq!(server.request("POST", "/", &body, MULTIPART).2, b"2097152");
+    uploads_clean(&server);
+    assert_eq!(server.request("POST", "/hang", &body, MULTIPART).0, 504);
+    uploads_clean(&server);
+    assert_eq!(server.request("POST", "/", &body, MULTIPART).0, 200);
+    uploads_clean(&server);
+    // Disconnect during a partial body must release its raw spool and queue slot.
+    let mut stream = TcpStream::connect(server.address).unwrap();
+    stream.write_all(format!("POST / HTTP/1.1\r\nHost: localhost\r\nContent-Type: {MULTIPART}\r\nContent-Length: 100000\r\n\r\npartial").as_bytes()).unwrap();
+    drop(stream);
+    thread::sleep(Duration::from_millis(50));
+    uploads_clean(&server);
+}
+
+#[test]
+fn shipped_upload_example_runs_a_browser_form_and_escapes_submitted_metadata() {
+    let source = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/web-uploads.scripta"),
+    )
+    .unwrap();
+    let server = Server::start(&source, &["--upload-temp-dir", "spools"]);
+    let get = server.request("GET", "/", b"", "text/plain");
+    assert_eq!(get.0, 200);
+    assert!(String::from_utf8_lossy(&get.2).contains("enctype=\"multipart/form-data\""));
+    let body = multipart(&[
+        ("note", None, None, b"<script>"),
+        ("file", Some("<image>.bin"), None, b"\xff\0"),
+    ]);
+    let post = server.request("POST", "/", &body, MULTIPART);
+    assert_eq!(post.0, 200);
+    let html = String::from_utf8(post.2).unwrap();
+    assert!(html.contains("&lt;script&gt;"));
+    assert!(html.contains("&lt;image&gt;.bin"));
+    assert_eq!(
+        fs::read(server.directory.path().join("received-upload.bin")).unwrap(),
+        b"\xff\0"
+    );
+    uploads_clean(&server);
+}
+#[test]
+fn upload_stage_disk_limit_preserves_destination_and_recovers() {
+    let body = multipart(&[("f", Some("file"), None, b"1234")]);
+    let limit = (body.len() + 4).to_string();
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();if ($r->path === "/save") {$files=$r->uploads();$files[0]->moveTo("result");}echo "ok";"#,
+        &[
+            "--upload-temp-dir",
+            "spools",
+            "--upload-max-disk-bytes",
+            &limit,
+        ],
+    );
+    assert_eq!(server.request("POST", "/save", &body, MULTIPART).0, 500);
+    uploads_clean(&server);
+    assert!(!server.directory.path().join("result").exists());
+    assert!(!fs::read_dir(server.directory.path()).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".scripta-upload-")
+    }));
+    assert_eq!(server.request("POST", "/", &body, MULTIPART).0, 200);
+    uploads_clean(&server);
+}
+
+#[test]
+fn multipart_normalized_header_limit_is_exact() {
+    let body = multipart(&[("a", None, None, b"x")]);
+    let normalized = "content-disposition".len() + "form-data; name=\"a\"".len() + 4;
+    for (limit, status) in [(normalized, 200), (normalized - 1, 413)] {
+        let limit = limit.to_string();
+        let server = Server::start(
+            "<?scripta echo \"ok\";",
+            &[
+                "--upload-temp-dir",
+                "spools",
+                "--upload-max-header-bytes",
+                &limit,
+            ],
+        );
+        assert_eq!(server.request("POST", "/", &body, MULTIPART).0, status);
+        uploads_clean(&server);
+    }
+}
+
+struct StreamingResponse {
+    reader: std::io::BufReader<TcpStream>,
+    headers: String,
+}
+impl StreamingResponse {
+    fn start(server: &Server, path: &str) -> Self {
+        Self::request(server, "GET", path, b"", "text/plain")
+    }
+    fn request(server: &Server, method: &str, path: &str, body: &[u8], content_type: &str) -> Self {
+        use std::io::BufRead;
+        let mut stream = TcpStream::connect(server.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(4)))
+            .unwrap();
+        stream
+            .write_all(
+                format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n",body.len())
+                    .as_bytes(),
+            )
+            .unwrap();
+        stream.write_all(body).unwrap();
+        let mut reader = std::io::BufReader::new(stream);
+        let mut headers = String::new();
+        loop {
+            let mut line = String::new();
+            assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+            headers.push_str(&line)
+        }
+        Self { reader, headers }
+    }
+    fn chunk(&mut self) -> Vec<u8> {
+        use std::io::BufRead;
+        let mut line = String::new();
+        assert_ne!(self.reader.read_line(&mut line).unwrap(), 0);
+        let size = usize::from_str_radix(line.trim(), 16).unwrap();
+        let mut result = vec![0; size];
+        self.reader.read_exact(&mut result).unwrap();
+        let mut crlf = [0; 2];
+        self.reader.read_exact(&mut crlf).unwrap();
+        assert_eq!(crlf, b"\r\n"[0..2]);
+        result
+    }
+}
+#[test]
+fn flush_delivers_before_execution_finishes_and_ob_flush_only_drains_a_buffer() {
+    let server = Server::start(
+        r#"<?scripta
+Web::header("Content-Type","application/octet-stream");
+ob_start();echo "first";ob_flush();flush();
+while (!File::exists("continue")) {Date::sleep(5);}
+echo "second";ob_end_flush();flush();"#,
+        &[],
+    );
+    let mut response = StreamingResponse::start(&server, "/");
+    assert!(response.headers.starts_with("HTTP/1.1 200"));
+    assert!(
+        response
+            .headers
+            .to_ascii_lowercase()
+            .contains("transfer-encoding: chunked")
+    );
+    assert_eq!(response.chunk(), b"first");
+    assert!(!server.directory.path().join("continue").exists());
+    fs::write(server.directory.path().join("continue"), b"yes").unwrap();
+    assert_eq!(response.chunk(), b"second");
+    assert!(response.chunk().is_empty());
+}
+#[test]
+fn transport_flush_commits_empty_headers_and_keeps_nested_application_output_pending() {
+    let server = Server::start(
+        r#"<?scripta ob_start();echo "outer";ob_start();echo "inner";flush();
+while (!File::exists("continue")) {Date::sleep(5);}
+ob_end_flush();ob_end_flush();"#,
+        &[],
+    );
+    let mut response = StreamingResponse::start(&server, "/");
+    assert!(response.headers.starts_with("HTTP/1.1 200"));
+    fs::write(server.directory.path().join("continue"), b"yes").unwrap();
+    assert_eq!(response.chunk(), b"outerinner");
+    assert!(response.chunk().is_empty());
+}
+#[test]
+fn streaming_session_is_saved_and_unlocked_and_header_mutations_are_rejected() {
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();
+if ($r->path === "/read") {Session::start();echo str(Session::get("n"));exit 0;}
+Session::start();Session::set("n",42);echo "first";flush();
+while (!File::exists("continue")) {Date::sleep(5);}
+$blocked=0;try {Session::set("n",99);} catch ($e) {$blocked+=1;}
+try {Session::start();} catch ($e) {$blocked+=1;}
+try {Web::header("X-Late","bad");} catch ($e) {$blocked+=1;}
+try {Web::status(201);} catch ($e) {$blocked+=1;}
+try {Web::redirect("/elsewhere");} catch ($e) {$blocked+=1;}
+try {Web::cookie("late","bad");} catch ($e) {$blocked+=1;}
+try {Web::deleteCookie("late");} catch ($e) {$blocked+=1;}
+echo str($blocked);"#,
+        &["--workers", "2"],
+    );
+    let mut response = StreamingResponse::start(&server, "/");
+    assert_eq!(response.chunk(), b"first");
+    let id = response_session_id(&response.headers);
+    assert_eq!(server.session_request("/read", Some(&id)).2, b"42");
+    fs::write(server.directory.path().join("continue"), b"yes").unwrap();
+    assert_eq!(response.chunk(), b"7");
+    assert!(response.chunk().is_empty());
+}
+#[test]
+fn flush_without_active_session_prevents_late_session_creation() {
+    let server = Server::start(
+        r#"<?scripta flush();try {Session::start();} catch ($e) {echo "closed";}"#,
+        &[],
+    );
+    let mut response = StreamingResponse::start(&server, "/");
+    assert!(!response.headers.to_lowercase().contains("set-cookie:"));
+    assert_eq!(response.chunk(), b"closed");
+    assert!(response.chunk().is_empty());
+}
+#[test]
+fn streaming_errors_and_deadlines_end_the_body_without_replacing_the_status() {
+    for (ending, options) in [
+        ("throw \"failed\";", vec![]),
+        ("Date::sleep(5000);", vec!["--timeout-ms", "150"]),
+    ] {
+        let server = Server::start(
+            &format!("<?scripta Web::status(202);echo \"sent\";flush();{ending}"),
+            &options,
+        );
+        let mut response = StreamingResponse::start(&server, "/");
+        assert!(response.headers.starts_with("HTTP/1.1 202"));
+        assert_eq!(response.chunk(), b"sent");
+        let mut tail = vec![];
+        let _ = response.reader.read_to_end(&mut tail);
+        assert!(!tail.windows(3).any(|w| w == b"500"));
+        assert!(!tail.ends_with(b"0\r\n\r\n"));
+    }
+    let server = Server::start(
+        "<?scripta ob_start();echo \"private\";throw \"failed\";",
+        &[],
+    );
+    let failure = server.request("GET", "/", b"", "text/plain");
+    assert_eq!(failure.0, 500);
+    assert_eq!(failure.2, b"Internal Server Error\n");
+}
+#[test]
+fn cumulative_stream_output_limit_cannot_be_reset_by_flushing_or_cleaning() {
+    let server = Server::start(
+        "<?scripta echo \"1234\";flush();echo \"x\";",
+        &["--max-response-bytes", "4"],
+    );
+    let mut response = StreamingResponse::start(&server, "/");
+    assert_eq!(response.chunk(), b"1234");
+    let mut tail = vec![];
+    let _ = response.reader.read_to_end(&mut tail);
+    assert!(!tail.ends_with(b"0\r\n\r\n"));
+    let server = Server::start(
+        "<?scripta ob_start();echo \"1234\";ob_clean();echo \"x\";",
+        &["--max-response-bytes", "4"],
+    );
+    assert_eq!(server.request("GET", "/", b"", "text/plain").0, 500);
+}
+#[test]
+fn dropping_streaming_client_stops_native_work_and_releases_upload_spools() {
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();if ($r->path === "/ok") {echo "ok";exit 0;}echo "sent";flush();File::writeAtomic("running","yes");Date::sleep(5000);"#,
+        &["--upload-temp-dir", "spools", "--timeout-ms", "3000"],
+    );
+    let body = multipart(&[("file", Some("file.bin"), None, b"\0\xff")]);
+    let mut response = StreamingResponse::request(&server, "POST", "/", &body, MULTIPART);
+    assert_eq!(response.chunk(), b"sent");
+    assert!(
+        fs::read_dir(server.directory.path().join("spools"))
+            .unwrap()
+            .next()
+            .is_some()
+    );
+    drop(response);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let log = fs::read_to_string(server.directory.path().join("server.log")).unwrap();
+        if log.contains("replacing worker") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "disconnected worker not stopped: {log}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(server.request("GET", "/ok", b"", "text/plain").2, b"ok");
+    uploads_clean(&server);
+}
+#[test]
+fn slow_stream_reader_cannot_hold_the_only_worker_beyond_its_deadline() {
+    let chunk = "x".repeat(65536);
+    let source = format!(
+        "<?scripta $r=Web::request();if ($r->path === \"/ok\") {{echo \"ok\";exit 0;}} $chunk=\"{chunk}\";for ($i=0;$i<512;$i+=1) {{echo $chunk;flush();}}"
+    );
+    let server = Server::start(
+        &source,
+        &["--max-response-bytes", "33554432", "--timeout-ms", "300"],
+    );
+    let response = StreamingResponse::start(&server, "/");
+    // Keep the first connection open without draining its body. The replacement
+    // worker must serve another connection after the first request's deadline.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let log = fs::read_to_string(server.directory.path().join("server.log")).unwrap();
+        if log.contains("ending response and replacing worker") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "slow reader did not hit its request deadline"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(server.request("GET", "/ok", b"", "text/plain").2, b"ok");
+    drop(response);
+}
+#[test]
+fn shipped_streaming_example_delivers_every_progress_chunk() {
+    let source = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/web-streaming.scripta"),
+    )
+    .unwrap();
+    let server = Server::start(&source, &[]);
+    let mut response = StreamingResponse::start(&server, "/");
+    assert_eq!(response.chunk(), b"Starting\n");
+    for step in 1..=3 {
+        assert_eq!(response.chunk(), format!("Step {step}\n").as_bytes())
+    }
+    assert_eq!(response.chunk(), b"Finished\n");
+    assert!(response.chunk().is_empty());
+}
+#[test]
+fn streaming_binary_head_and_bodyless_statuses_preserve_http_semantics() {
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();if ($r->path === "/empty") {Web::status(204);}Web::header("Content-Type","application/octet-stream");ob_start();Web::write(Bytes::slice(Bytes::encodeUtf8("é"),1));ob_end_flush();flush();File::writeAtomic("finished","yes");"#,
+        &[],
+    );
+    let mut response = StreamingResponse::start(&server, "/");
+    assert_eq!(response.chunk(), [0xa9]);
+    assert!(response.chunk().is_empty());
+    let empty = server.request("GET", "/empty", b"", "text/plain");
+    assert_eq!(empty.0, 204);
+    assert!(empty.2.is_empty());
+    let head = server.request("HEAD", "/", b"", "text/plain");
+    assert_eq!(head.0, 200);
+    assert!(head.2.is_empty());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !server.directory.path().join("finished").exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+#[test]
+fn streamed_upload_can_save_through_the_same_worker_control_channel() {
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();$files=$r->uploads();echo "first";flush();$files[0]->moveTo("saved.bin");echo "saved";"#,
+        &["--upload-temp-dir", "spools"],
+    );
+    let body = multipart(&[("file", Some("../../untrusted.bin"), None, b"\xff\0")]);
+    let mut response = StreamingResponse::request(&server, "POST", "/", &body, MULTIPART);
+    assert_eq!(response.chunk(), b"first");
+    assert_eq!(response.chunk(), b"saved");
+    assert!(response.chunk().is_empty());
+    assert_eq!(
+        fs::read(server.directory.path().join("saved.bin")).unwrap(),
+        b"\xff\0"
+    );
+    uploads_clean(&server);
+}
+#[test]
+fn raw_request_streams_support_binary_apis_independent_cursors_and_host_cleanup() {
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();$input=$r->bodyStream();$out=Stream::open("saved.raw","x");$n=Stream::copy($input,$out,$r->bodySize);Stream::close($out);Stream::close($input);$second=$r->bodyStream();$first=Stream::read($second,1);Stream::close($second);echo Json::encode(["size"=>$r->bodySize,"copied"=>$n,"uploads"=>len($r->uploads()),"first"=>len($first)]);"#,
+        &["--upload-temp-dir", "spools", "--max-body-bytes", "262144"],
+    );
+    let body = vec![0xff; 131072];
+    let response = server.request("PUT", "/", &body, "application/octet-stream");
+    assert_eq!(response.0, 200);
+    let data: serde_json::Value = serde_json::from_slice(&response.2).unwrap();
+    assert_eq!(
+        data,
+        serde_json::json!({"size":131072,"copied":131072,"uploads":0,"first":1})
+    );
+    assert_eq!(
+        fs::read(server.directory.path().join("saved.raw")).unwrap(),
+        body
+    );
+    uploads_clean(&server);
+}
+#[test]
+fn attachment_downloads_use_safe_headers_binary_chunks_and_precommit_validation() {
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();$file=Stream::open("payload.bin");if ($r->path === "/bad") {Web::download($file,"bad\r\nInjected: yes");}else {Web::download($file,"résumé.bin");}Stream::close($file);exit 0;"#,
+        &[],
+    );
+    let data = vec![0xa5; 131072];
+    fs::write(server.directory.path().join("payload.bin"), &data).unwrap();
+    let mut response = StreamingResponse::start(&server, "/");
+    let headers = response.headers.to_lowercase();
+    assert!(headers.contains("content-type: application/octet-stream"));
+    assert!(headers.contains("x-content-type-options: nosniff"));
+    assert!(headers.contains("filename*=utf-8''r%c3%a9sum%c3%a9.bin"));
+    let mut received = vec![];
+    loop {
+        let chunk = response.chunk();
+        if chunk.is_empty() {
+            break;
+        }
+        received.extend(chunk)
+    }
+    assert_eq!(received, data);
+    let bad = server.request("GET", "/bad", b"", "text/plain");
+    assert_eq!(bad.0, 500);
+    assert!(!bad.1.to_lowercase().contains("injected:"));
+    assert_eq!(bad.2, b"Internal Server Error\n");
+    let head = server.request("HEAD", "/", b"", "text/plain");
+    assert_eq!(head.0, 200);
+    assert!(head.2.is_empty());
+}
+#[test]
+fn known_oversized_downloads_fail_cleanly_before_headers_commit() {
+    let server = Server::start(
+        "<?scripta $file=Stream::open(\"large\");Web::download($file,\"large.bin\");",
+        &["--max-response-bytes", "4"],
+    );
+    fs::write(server.directory.path().join("large"), b"12345").unwrap();
+    let response = server.request("GET", "/", b"", "text/plain");
+    assert_eq!(response.0, 500);
+    assert_eq!(response.2, b"Internal Server Error\n");
+    assert!(!response.1.to_lowercase().contains("content-disposition:"));
+}
+#[test]
+fn shipped_web_transfer_example_roundtrips_raw_binary_and_refuses_overwrite() {
+    let source = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/web-transfers.scripta"),
+    )
+    .unwrap();
+    let server = Server::start(&source, &["--upload-temp-dir", "spools"]);
+    let bytes = b"\0\xff\x01\x02";
+    let response = server.request("PUT", "/raw", bytes, "application/octet-stream");
+    assert_eq!(response.0, 201);
+    assert_eq!(
+        fs::read(server.directory.path().join("raw-upload.bin")).unwrap(),
+        bytes
+    );
+    uploads_clean(&server);
+    assert_eq!(
+        server
+            .request("PUT", "/raw", b"overwrite", "application/octet-stream")
+            .0,
+        500
+    );
+    assert_eq!(
+        fs::read(server.directory.path().join("raw-upload.bin")).unwrap(),
+        bytes
+    );
+    let mut download = StreamingResponse::start(&server, "/download");
+    assert_eq!(download.chunk(), bytes);
+    assert!(download.chunk().is_empty());
+}
+#[test]
+fn rejected_upload_never_runs_application_and_request_workers_cannot_bind_listeners() {
+    let server = Server::start(
+        "<?scripta File::writeAtomic(\"ran\",\"yes\");echo \"ok\";",
+        &[
+            "--upload-max-file-bytes",
+            "1",
+            "--upload-temp-dir",
+            "spools",
+        ],
+    );
+    let body = multipart(&[("file", Some("x"), None, b"12")]);
+    assert_eq!(server.request("POST", "/", &body, MULTIPART).0, 413);
+    assert!(!server.directory.path().join("ran").exists());
+    uploads_clean(&server);
+    let server = Server::start("<?scripta Socket::listen(\"127.0.0.1\",0);", &[]);
+    assert_eq!(server.request("GET", "/", b"", "text/plain").0, 500);
+}

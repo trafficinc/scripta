@@ -312,3 +312,105 @@ The supervisor terminates/replaces workers on deadline or protocol failure;
 worker input monitoring also exits when the parent pipe closes. Response metadata
 and output are request-local, so errors can discard partial bodies before HTTP
 headers are sent. See [web hosting](web-servers.md) for operational limits.
+
+Cookie helpers and request cookie parsing live beside the Web native objects.
+The host separately registers `scr_stdlib::web::session` with a dedicated local
+store configuration. Every worker receives the same store path/limits through
+its internal process arguments. Session state is request-owned; stable per-ID
+file locks serialize same-session work, while a short store lock protects record
+creation, reclamation, and atomic commits. Pending new records start revoked
+until committed, so abandoned work can be reclaimed immediately. OS randomness
+supplies IDs; typed tagged storage preserves Scripta values and map-key types.
+Records are saved after successful execution/output validation, or by explicit
+Session::close. Cookie/commit failures become generic HTTP errors before output.
+
+`Html::escape` is a pure standard-library native function, available to both CLI
+and web hosts through normal registration. It needs no parser/runtime/backend
+changes: a sizing pass validates the exact expanded string budget before
+allocation, and both passes check cancellation while preserving UTF-8 text.
+
+`Password` uses RustCrypto Argon2id through the standard native API with a trusted
+`StdlibOptions.password` policy. Complete PHC hashes are parsed and cost-bounded
+before allocation. The host reserves the workspace fallibly, uses RAII zeroization,
+and delegates digest comparison to RustCrypto's constant-time Output equality.
+Native computation remains synchronous; the web supervisor can terminate its
+worker at the request deadline. No crypto implementation/backend enters the core
+runtime. Diagnostics distinguish qualified function references from credential
+fields so Password:: calls retain useful errors without logging argument values.
+
+Multipart parsing lives in `scr-web`, using Multer over a bounded disk reader.
+The supervisor owns raw/extracted upload spools and charges a shared atomic disk
+budget before writes. Worker request metadata references private spool basenames;
+raw multipart bodies are not copied through IPC. `scr-stdlib::web::uploads` owns
+only request handles, checked by an opaque runtime identity and a host lifetime
+guard. The runtime exposes that identity through `RuntimeContext` without owning
+any HTTP/filesystem backend. Request files are read in bounded chunks and are
+materialized only by explicit `bytes()`/`text()` calls under value limits.
+
+Saving uploads uses typed staging-control frames on the existing worker channel.
+The worker checks the destination capability and filesystem roots, then asks the
+supervisor for a staging path beside the destination. The supervisor registers
+its cleanup guard before replying and charges its trusted file size. A worker
+copies/syncs and publishes without overwriting; the supervisor retains cleanup
+ownership until the worker finishes or is killed/reaped. This prevents orphaned
+save-staging files when a request deadline terminates a worker. These internal
+control messages do not introduce streaming responses or output flushing.
+
+Application output buffering is generic runtime I/O, independent of HTTP.
+`Runtime::execute` wraps the caller's `Write` in a per-execution buffer controller;
+echo, native output, required modules, and script calls share it. `ScriptOutput`
+extends `Write` with `OutputAction` control for standard-library native helpers.
+`RuntimeContext.output` exposes this interface; hosts still pass ordinary writers
+to execution. Pending bytes and nesting are bounded; cumulative generated-byte
+accounting includes cleaned data and never counts buffer transfers twice. Normal
+completion drains remaining application buffers; errors discard them. No HTTP
+backend is introduced into `scr-runtime`.
+
+The web worker's writer retains default response buffering. Its first explicit
+flush seals sessions, freezes metadata, and sends a typed response start. Body
+frames are bounded to 64 KiB and a one-slot supervisor-to-Hyper channel provides
+backpressure. Flush acknowledgements confirm supervisor handoff, not remote
+receipt. Completion closes the channel cleanly; failure sets a separate terminal
+flag, so an error survives even when the data channel is full and the HTTP body
+ends with a transport error. Receiver drop cancels the request; worker stop/reap
+still precedes upload-spool cleanup. Deadlines cover native/pipe/channel blocking.
+
+General streams live in `scr-stdlib::streams`, with safe standard-library file,
+TCP, and UDP backends and the existing Ureq/Rustls HTTP backend. The runtime
+contains only generic values/native interfaces; no network backend enters it.
+`ByteStream` and `DatagramSocket` use actual native downcasts, opaque runtime
+identity, shared closed state, and RAII descriptor/quota leases. A per-registration
+handle count bounds all new stream kinds together. Existing line-stream APIs
+remain separate and retain their established behavior.
+
+Reads/writes are binary and bounded; copy uses at most 64 KiB working chunks and
+finishes short writes. UDP has packet operations rather than a byte-stream facade,
+counts the complete received packet, and exposes truncation. File modes perform
+capability/root/kind/read-only checks before opening/truncating. HTTP responses
+retain owned limited readers, status/headers, and an absolute request deadline;
+request bodies are streamed from readable file handles without materialization
+or replay. GET redirects and TLS policy match the buffered HTTP client. Socket
+I/O polls cancellation under operation deadlines; blocking connect/HTTP/filesystem
+calls retain backend limitations and the web host's process-level outer deadline.
+
+The upload audit extends private spooling to every nonempty raw request body.
+The same bounded IPC descriptor carries whether multipart parsing occurred;
+JSON/form convenience methods preserve media-type checks before materialization.
+`bodyStream()` and `UploadedFile::stream()` construct read-only request-input
+backends, with weak state leases in an input scope. Ending a request closes those
+states even when a host retains a native value. The stream registration shares
+its config/quota through a thread-local weak index keyed by opaque runtime
+identity; dead entries are pruned and carry no backend ownership cycle.
+`Web::download` validates a readable file, response/buffer state, metadata, and
+known output size before sending attachment headers; its body follows the same
+bounded output channel as explicit flushing.
+
+`scr-stdlib::streams::sockets` owns low-level sockets and shares the stream registry,
+identity, quota leases, and TCP/UDP backends. Logical blocking operations use
+nonblocking OS descriptors plus Mio readiness with cancellation checkpoints.
+`Socket::poll` registers bounded temporary socket clones and returns unique ready
+handles in caller order. Socket2 provides safe creation/bind/listen and supported
+options, including explicit address-family and backlog policy. No unsafe code,
+privileged raw IP access, or protocol/event-loop backend is added to the runtime.
+Default CLI permissions include inbound bind/listen; web workers explicitly remove
+those capabilities. Listener accept reserves quota before dequeuing a client.

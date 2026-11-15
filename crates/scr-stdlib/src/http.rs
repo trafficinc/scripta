@@ -45,7 +45,7 @@ struct Response {
     binary: bool,
     duration_ms: f64,
 }
-fn header_bytes(headers: &Value) -> usize {
+pub(crate) fn header_bytes(headers: &Value) -> usize {
     let Value::Map(entries) = headers else {
         unreachable!()
     };
@@ -124,7 +124,7 @@ impl NativeObject for Response {
         })
     }
 }
-fn failure(error: ureq::Error) -> NativeError {
+pub(crate) fn failure(error: ureq::Error) -> NativeError {
     let kind = match &error {
         ureq::Error::Timeout(_) => "TimeoutError",
         ureq::Error::Tls(_) | ureq::Error::Rustls(_) | ureq::Error::TlsRequired => "TlsError",
@@ -558,4 +558,115 @@ fn download(
             error
         })?;
     Ok(result)
+}
+
+pub(crate) struct StreamResponse {
+    pub reader: Box<dyn Read>,
+    pub status: u16,
+    pub headers: Value,
+    pub limit: u64,
+    pub deadline: Instant,
+}
+/// Streaming uses the same verified TLS, URI/header validation and redirect
+/// policy as the buffered client. Source readers are deliberately not replayed.
+pub(crate) fn open_stream(
+    context: &RuntimeContext<'_>,
+    config: &HttpConfig,
+    method: &str,
+    url: &str,
+    value: &Value,
+    body: Option<&mut dyn Read>,
+) -> NativeResult<StreamResponse> {
+    context.permissions.require("http.request")?;
+    context.check_cancelled()?;
+    let options = options(Some(value), config)?;
+    let uri: http::Uri = url
+        .parse()
+        .map_err(|_| NativeError::type_error("invalid HTTP URL"))?;
+    if !matches!(uri.scheme_str(), Some("http" | "https"))
+        || uri.host().is_none()
+        || uri.authority().is_some_and(|a| a.as_str().contains('@'))
+    {
+        return Err(NativeError::type_error(
+            "URL must be absolute HTTP/HTTPS without embedded credentials",
+        ));
+    }
+    let method = http::Method::from_bytes(method.as_bytes())
+        .map_err(|_| NativeError::type_error("invalid HTTP method"))?;
+    if method == http::Method::CONNECT {
+        return Err(NativeError::type_error(
+            "HTTP CONNECT tunnels are not supported",
+        ));
+    }
+    if body.is_some() && options.redirects != 0 {
+        if let Value::Map(entries) = value {
+            if entries
+                .iter()
+                .any(|(k, _)| matches!(k,MapKey::String(k) if k=="maxRedirects"))
+            {
+                return Err(NativeError::type_error(
+                    "stream uploads require maxRedirects=0; their source is not replayable",
+                ));
+            }
+        }
+    }
+    let started = Instant::now();
+    let deadline = started + options.timeout;
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(options.timeout))
+        .max_redirects(if body.is_some() { 0 } else { options.redirects })
+        .max_redirects_will_error(true)
+        .https_only(uri.scheme_str() == Some("https"))
+        .allow_non_standard_methods(true)
+        .proxy(None)
+        .build()
+        .into();
+    let mut builder = http::Request::builder().method(method).uri(uri);
+    for (key, value) in options.headers {
+        builder = builder.header(key, value)
+    }
+    let result = if let Some(reader) = body {
+        agent.run(
+            builder
+                .body(ureq::SendBody::from_reader(reader))
+                .map_err(|_| NativeError::type_error("invalid HTTP request"))?,
+        )
+    } else {
+        agent.run(
+            builder
+                .body(())
+                .map_err(|_| NativeError::type_error("invalid HTTP request"))?,
+        )
+    };
+    context.check_cancelled()?;
+    let response = result.map_err(failure)?;
+    let status = response.status().as_u16();
+    let mut headers = vec![];
+    let mut cost = size_of::<Value>();
+    for key in response.headers().keys() {
+        let mut values = vec![];
+        grow(
+            context,
+            &mut cost,
+            size_of::<MapKey>() + key.as_str().len() + size_of::<Value>(),
+        )?;
+        for value in response.headers().get_all(key) {
+            let value = value.to_str().map_err(|_| {
+                NativeError::new("EncodingError", "HTTP response header is not ASCII text")
+            })?;
+            grow(context, &mut cost, size_of::<Value>() + value.len())?;
+            values.push(Value::String(value.into()));
+        }
+        headers.push((MapKey::String(key.as_str().into()), Value::List(values)));
+    }
+    grow(context, &mut cost, size_of::<Value>())?;
+    let (_, body) = response.into_parts();
+    Ok(StreamResponse {
+        reader: Box::new(body.into_with_config().limit(options.limit).reader()),
+        status,
+        headers: Value::Map(headers),
+        limit: options.limit,
+        deadline,
+    })
 }

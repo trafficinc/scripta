@@ -1,0 +1,44 @@
+<?scripta
+// Local demo: scripta serve examples/web-sessions.scripta --session-cookie-secure false
+// For public HTTPS, retain the server's Secure session-cookie default.
+$request = Web::request();
+if ($request->method === "POST" && $request->path === "/theme") {
+    Web::header("Content-Type", "application/json; charset=utf-8");
+    try {
+        $body = $request->json();
+        // This preference cookie is explicitly usable over local HTTP.
+        Web::cookie("theme", $body["theme"], ["secure" => false, "maxAge" => 3600]);
+        echo Json::encode(["saved" => true]) . "\n";
+    } catch (Error $error) {
+        Web::status(400);
+        echo Json::encode(["error" => "Expected JSON with a string theme field"]) . "\n";
+    }
+    exit 0;
+}
+if ($request->method === "POST" && $request->path === "/rotate") {
+    Session::start();
+    // Regenerate after successful authentication in a real login flow.
+    Session::regenerate();
+    Web::redirect("/", 303);
+    exit 0;
+}
+if ($request->method === "POST" && $request->path === "/logout") {
+    Session::start();
+    Session::destroy();
+    Web::deleteCookie("theme", ["secure" => false]);
+    Web::redirect("/", 303);
+    exit 0;
+}
+Web::header("Content-Type", "application/json; charset=utf-8");
+if ($request->method === "GET" && $request->path === "/") {
+    Session::start();
+    $visits = Session::get("visits", 0) + 1;
+    Session::set("visits", $visits);
+    $theme = $request->cookie("theme");
+    // Commit and release the session lock before unrelated slow work.
+    Session::close();
+    echo Json::encode(["visits" => $visits, "theme" => $theme]) . "\n";
+} else {
+    Web::status(404);
+    echo Json::encode(["error" => "Not found"]) . "\n";
+}

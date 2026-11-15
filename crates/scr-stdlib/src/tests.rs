@@ -136,6 +136,7 @@ fn sleep_validates_duration_permissions_and_cancellation() {
         input: &mut std::io::Cursor::new(Vec::<u8>::new()),
         output: &mut output,
         error: &mut error,
+        runtime_identity: None,
         cancellation: Some(flag.clone()),
         permissions: &options.permissions,
         call_span: Default::default(),

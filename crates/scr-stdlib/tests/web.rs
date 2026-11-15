@@ -466,3 +466,34 @@ fn cookie_validation_rejects_injection_prefix_violations_and_byte_limit_plus_one
     );
     assert_eq!(state.borrow().headers.len(), 2);
 }
+
+#[test]
+fn decoded_cookie_pairs_use_exact_result_budgets() {
+    let expected = 4 * std::mem::size_of::<Value>() + 2;
+    for (limit, success) in [(expected, true), (expected - 1, false)] {
+        let mut runtime = Runtime::with_options(RuntimeOptions {
+            max_value_bytes: Some(limit),
+            ..Default::default()
+        });
+        web::register(
+            &mut runtime,
+            Request {
+                method: "GET".into(),
+                path: "/".into(),
+                query_string: "".into(),
+                body: vec![],
+                headers: vec![("cookie".into(), "a=%61".into())],
+            },
+            32768,
+        )
+        .unwrap();
+        let result = runtime.execute_source(
+            "<?scripta $r=Web::request();$pairs=$r->cookies();",
+            &mut vec![],
+        );
+        assert_eq!(result.is_ok(), success, "{result:?}");
+        if !success {
+            assert!(runtime.get_global("pairs").is_none());
+        }
+    }
+}

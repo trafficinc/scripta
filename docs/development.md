@@ -302,3 +302,105 @@ and worker-process I/O, rather than a custom HTTP parser. New dependencies remai
 compatible with Rust 1.85. The subprocess fixtures bind localhost and require
 permission to spawn persistent workers. The web example must be executed through
 `scripta serve`, including HTTP requests; an ordinary CLI run has no Web context.
+
+Cookie/session changes additionally use `scr-stdlib --test web_sessions` and the
+session scenarios in `scr-cli --test web_server`: cross-worker locking, rotation,
+revocation, quota/expiry, persistent restart, and rollback/lock release after a
+worker deadline. Cookie parsing/encoding, attributes/prefixes, byte boundaries,
+private storage and cancellation are covered by native integration tests.
+`getrandom` supplies OS-backed session IDs; `serde` derives a private tagged
+storage format. Both were already locked dependencies; no custom random generator
+or credential serialization via debug strings is used.
+
+HTML escaping has focused integration coverage in `scr-stdlib --test html` for
+strict signatures, Unicode/entities, failed assignment, exact expanded-output
+budgets, and cancellation. A direct native unit test also checks cancellation
+without relying on evaluator checkpoints. The `html-escaping.scripta` example is
+executed with markup/quote-containing input by the CLI release-example target.
+
+Password hashing uses RustCrypto `argon2` 0.5.3 (declared MSRV 1.65), its PHC parser,
+and `zeroize` workspace cleanup. The locked `base64ct` version declares Rust 1.85,
+matching the workspace minimum. Argon2 implements the primitive; no local password
+hash or comparison algorithm is introduced. Host ceilings cover encoded costs,
+input lengths, memory and combined work, separate from logical value budgets.
+
+Focused checks: `cargo test -p scr-stdlib --test password` and
+`cargo test -p scr-stdlib --lib password`, with the native target/locked/offline
+flags used elsewhere. PHP-generated public fixtures live in
+`tests/fixtures/passwords/`; Cargo tests do not require PHP. The CLI example checks
+actual hashing/verification. Credential-redaction regression tests also cover
+qualified Password:: function names alongside real credential fields.
+
+Multipart uploads use Multer 3.1 (without JSON/default features) and MIME 0.3 in
+`scr-web`; Tokio's filesystem feature supplies bounded disk reads. Keeping the
+parser in the host avoids HTTP backends in the runtime and avoids maintaining a
+custom multipart grammar. Source review of Multer identified unbounded raw-header
+buffering, so the host wraps its reader with a header-intake budget and yields
+between 8 KiB chunks; normalized header limits are checked separately.
+Focused regressions are `cargo test -p scr-stdlib --test web_uploads`,
+`cargo test -p scr-stdlib --lib web::uploads`, `cargo test -p scr-web`, and
+`cargo test -p scr-cli --test web_server`. These cover private staging, disk quota
+recovery, exact byte budgets, cancelled copies, untrusted filenames, multipart
+validation, supervised timeouts, and the runnable browser upload example. Local
+HTTP/process tests need an environment that permits localhost sockets and child
+processes. New parser dependencies must continue to compile on Rust 1.85.
+
+
+## Output buffering and incremental web delivery
+
+Generic application buffers live in `scr-runtime::output`; the eleven public
+native helpers are registered by `scr-stdlib`. Pending-buffer bytes, nesting,
+and cumulative generated-byte limits are independent of individual value limits.
+The web worker seals sessions and commits metadata before its first transport
+flush. IPC body chunks are at most 64 KiB and use a one-slot response channel;
+terminal failure is tracked separately so a full channel cannot hide an error.
+Client body drop signals cancellation, and the request deadline covers blocked
+pipe/channel operations. No streaming backend or event loop lives in the core.
+
+Focused checks are `cargo test -p scr-runtime --lib output`,
+`cargo test -p scr-stdlib --test output`, `cargo test -p scr-web`, and
+`cargo test -p scr-cli --test web_server`. HTTP tests synchronize incremental
+responses using explicit client-controlled file barriers, rather than assuming
+that a sleep proves early delivery. They cover nested buffers, session sealing,
+late metadata rejection, binary bodies, empty/HEAD responses, output ceilings,
+slow readers, post-commit failures, and upload cleanup on client disconnect.
+The shipped `examples/web-streaming.scripta` is executed through real HTTP.
+
+
+## Binary streams
+
+`cargo test -p scr-stdlib --test binary_streams` exercises binary file modes,
+exclusive creation, capability/root/symlink/read-only checks, ownership/spoofing,
+exact budgets and EOF probes, handle quotas, copy validation, incremental HTTP
+responses, streamed request bodies, redirects, TLS rejection, TCP partial I/O,
+UDP empty/truncated packets, deadlines, and cancellation. Preserve the separate
+`--test streams` line-reader suite and `--test json_http_modules` client suite.
+Fixtures use temporary directories and localhost sockets, never public endpoints.
+The new implementation needs no additional dependencies and retains Rust 1.85.
+`release_examples` executes binary copying and HTTP streaming uploads through the
+CLI with controlled local input and verifies bytes/results. New outgoing stream
+capabilities are `network.connect` and `network.datagram`; hosts can remove them.
+Low-level bind/listen/accept, readiness, and socket options await the next milestone.
+
+
+## Socket and transfer validation
+
+`cargo test -p scr-stdlib --test sockets` covers listener/accept, nonblocking
+would-block versus EOF, advisory readiness, list order/deduplication, half-close,
+bound UDP replies/truncation, quotas, refused connections, address conflicts,
+foreign/spoofed handles, options, cancellation, and IPv6 loopback where available.
+Re-run `binary_streams` when changing the shared readiness implementation.
+Mio and Socket2 were already transitive dependencies; direct dependencies expose
+safe OS readiness and bind/listen/options APIs, with minimum Rust versions below
+1.85. Keep the no-unsafe workspace policy and explicit native-target validation.
+OS-specific option results remain platform dependent; no non-native check proves
+Windows/Linux socket correctness.
+
+Transfer tests include raw-body spooling, independent cursors, quota sharing,
+request expiry, metadata/safe attachment encoding, known-size output preflight,
+HEAD suppression, rejected-upload nonexecution, and content inspection without
+filesystem-read permission. `web_server` runs the complete raw-upload/download
+example over HTTP; `release_examples` runs the socket echo example with binary
+input and bounded local subprocess cleanup. No fixtures use public network
+services. PHP comparison links document deliberate API differences rather than
+claiming global PHP syntax/API compatibility.

@@ -30,6 +30,8 @@ fn success(output: Output) -> String {
 fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
     let names = [
         "hello.scripta",
+        "html-escaping.scripta",
+        "password-hashing.scripta",
         "variables.scripta",
         "loops.scripta",
         "functions.scripta",
@@ -40,6 +42,13 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
         "http-client.scripta",
         "http-timing.scripta",
         "web-app.scripta",
+        "web-sessions.scripta",
+        "web-uploads.scripta",
+        "web-streaming.scripta",
+        "binary-streams.scripta",
+        "http-stream-upload.scripta",
+        "socket-echo.scripta",
+        "web-transfers.scripta",
         "command-runner.scripta",
         "atomic-report.scripta",
         "data-handling.scripta",
@@ -486,9 +495,12 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ),
         (
             "Dir",
-            "exists create createAll files directories remove current change",
+            "exists create createAll files directories entries remove current change",
         ),
-        ("Path", "join filename extension parent normalize absolute"),
+        (
+            "Path",
+            "join filename extension parent normalize absolute canonical",
+        ),
         ("Process", "run spawn shell wait poll kill exists currentId"),
         ("Env", "get set has remove all"),
         ("Cli", "args arg has option isTerminal prompt readLine"),
@@ -500,7 +512,17 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Clock", "monotonicMs"),
         ("Log", "info warn error debug setFile"),
         ("Json", "encode decode pretty"),
+        ("Html", "escape"),
+        ("Password", "hash verify needsRehash"),
         ("Http", "get post request download"),
+        (
+            "Socket",
+            "connect listen accept bindDatagram read write receive sendTo shutdown close setBlocking setTimeout poll localAddress peerAddress setOption getOption",
+        ),
+        (
+            "Stream",
+            "open request read write flush close seek tell eof copy send receive",
+        ),
         (
             "Url",
             "encodeComponent decodeComponent buildQuery parseQuery",
@@ -524,7 +546,11 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             "create has get keys values remove merge replace combine flip search reverse diff intersect diffKeys intersectKeys column",
         ),
     ];
-    let mut count = 7;
+    let output_functions = "flush ob_start ob_flush ob_end_flush ob_clean ob_end_clean ob_get_contents ob_get_clean ob_get_flush ob_get_length ob_get_level";
+    for name in output_functions.split_whitespace() {
+        assert!(reference.contains(&format!("`{name}(")), "missing {name}");
+    }
+    let mut count = 7 + output_functions.split_whitespace().count();
     for (namespace, functions) in modules {
         for name in functions.split_whitespace() {
             assert!(
@@ -534,7 +560,24 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 161);
+    assert_eq!(count, 207);
+    for name in [
+        "start",
+        "id",
+        "get",
+        "has",
+        "set",
+        "remove",
+        "all",
+        "regenerate",
+        "destroy",
+        "close",
+    ] {
+        assert!(
+            reference.contains(&format!("Session::{name}")),
+            "missing Session::{name}"
+        );
+    }
     for name in [
         "request",
         "status",
@@ -542,6 +585,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         "addHeader",
         "redirect",
         "write",
+        "download",
     ] {
         assert!(
             reference.contains(&format!("Web::{name}")),
@@ -744,4 +788,185 @@ fn http_timing_example_reports_local_success_and_failed_attempts() {
         ),
         scr_runtime::Value::Bool(true)
     );
+}
+
+#[test]
+fn html_example_escapes_untrusted_text_and_quoted_attribute_values() {
+    let source = fs::read_to_string(example("html-escaping.scripta")).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    for (input, escaped) in [
+        ("", ""),
+        (
+            "\"><script>alert('x')</script> & 世界",
+            "&quot;&gt;&lt;script&gt;alert(&#039;x&#039;)&lt;/script&gt; &amp; 世界",
+        ),
+    ] {
+        let expected = format!(
+            "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>HTML escaping</title><p title=\"{escaped}\">Hello, {escaped}!</p></html>\n"
+        );
+        assert_eq!(
+            success(run("html-escaping.scripta", &[std::ffi::OsStr::new(input)])),
+            expected
+        );
+    }
+    assert!(
+        success(run("html-escaping.scripta", &[]))
+            .contains("Ada &lt;Admin&gt; &amp; &quot;friends&quot;")
+    );
+}
+
+#[test]
+fn password_example_hashes_and_verifies_without_exposing_the_password_or_hash() {
+    let source = fs::read_to_string(example("password-hashing.scripta")).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    assert_eq!(
+        success(run("password-hashing.scripta", &[])),
+        "{\"algorithm\":\"argon2id\",\"needsRehash\":false,\"verified\":true}\n"
+    );
+}
+
+#[test]
+fn binary_stream_example_copies_bytes_and_refuses_existing_output() {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("input é.bin");
+    let output = directory.path().join("output.bin");
+    fs::write(&input, [0, 255, 7]).unwrap();
+    assert_eq!(
+        success(run(
+            "binary-streams.scripta",
+            &[input.as_os_str(), output.as_os_str()]
+        )),
+        "{\"bytesCopied\":3}\n"
+    );
+    assert_eq!(fs::read(&output).unwrap(), [0, 255, 7]);
+    assert!(
+        !run(
+            "binary-streams.scripta",
+            &[input.as_os_str(), output.as_os_str()]
+        )
+        .status
+        .success()
+    );
+    assert_eq!(fs::read(&output).unwrap(), [0, 255, 7]);
+}
+#[test]
+fn streamed_http_upload_example_runs_against_a_controlled_local_server() {
+    use std::io::{BufRead, BufReader};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let worker = std::thread::spawn(move || {
+        listener.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut socket = loop {
+            if let Ok((socket, _)) = listener.accept() {
+                socket.set_nonblocking(false).unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                break BufReader::new(socket);
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(2))
+        };
+        let mut headers = String::new();
+        loop {
+            let mut line = String::new();
+            socket.read_line(&mut line).unwrap();
+            if line == "\r\n" {
+                break;
+            }
+            assert!(!line.is_empty());
+            headers.push_str(&line)
+        }
+        assert!(headers.starts_with("POST /upload "));
+        assert!(
+            headers
+                .to_lowercase()
+                .contains("transfer-encoding: chunked")
+        );
+        let mut bytes = vec![];
+        loop {
+            let mut line = String::new();
+            socket.read_line(&mut line).unwrap();
+            let n = usize::from_str_radix(line.trim(), 16).unwrap();
+            if n == 0 {
+                socket.read_exact(&mut [0; 2]).unwrap();
+                break;
+            }
+            let start = bytes.len();
+            bytes.resize(start + n, 0);
+            socket.read_exact(&mut bytes[start..]).unwrap();
+            socket.read_exact(&mut [0; 2]).unwrap();
+        }
+        assert_eq!(bytes, [0, 255, 7]);
+        socket
+            .get_mut()
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .unwrap();
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("input.bin");
+    fs::write(&input, [0, 255, 7]).unwrap();
+    let url = format!("http://{address}/upload");
+    let report = success(run(
+        "http-stream-upload.scripta",
+        &[url.as_ref(), input.as_os_str()],
+    ));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+        serde_json::json!({"status":200,"responseBytes":2})
+    );
+    worker.join().unwrap();
+}
+#[test]
+fn socket_echo_example_runs_with_binary_data_on_an_ephemeral_loopback_port() {
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let stdout = directory.path().join("stdout");
+    let stderr = directory.path().join("stderr");
+    let mut child = Child(
+        Command::new(env!("CARGO_BIN_EXE_scripta"))
+            .arg(example("socket-echo.scripta"))
+            .arg("0")
+            .stdout(fs::File::create(&stdout).unwrap())
+            .stderr(fs::File::create(&stderr).unwrap())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let address = loop {
+        let text = fs::read_to_string(&stdout).unwrap();
+        if text.ends_with('\n') {
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+            break format!("127.0.0.1:{}", value["port"].as_u64().unwrap());
+        }
+        assert!(
+            child.0.try_wait().unwrap().is_none(),
+            "{}",
+            fs::read_to_string(&stderr).unwrap()
+        );
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let mut peer = std::net::TcpStream::connect(address).unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    peer.write_all(&[0, 255, 7]).unwrap();
+    peer.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut bytes = vec![];
+    peer.read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, [0, 255, 7]);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert!(status.success(), "{}", fs::read_to_string(&stderr).unwrap());
 }

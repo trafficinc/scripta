@@ -100,7 +100,7 @@ impl Runtime {
         once: bool,
         alias: Option<&scr_ast::Binding>,
         span: Span,
-        output: &mut impl Write,
+        output: &mut impl ScriptOutput,
     ) -> Result<()> {
         let result = (|| -> NativeResult<PathBuf> {
             self.options

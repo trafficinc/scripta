@@ -234,6 +234,7 @@ mod tests {
             input: &mut input,
             output: &mut output,
             error: &mut error,
+            runtime_identity: None,
             cancellation: flag,
             permissions: &options.permissions,
             call_span: Default::default(),
