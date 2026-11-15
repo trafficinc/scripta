@@ -590,7 +590,13 @@ syntax, and runtime failures return 1, and command-line usage errors return 2.
 
 Runtime failures retain the failing source span and a structured stack trace.
 The CLI prints the diagnostic and call-site frames to stderr, innermost first.
-Output written before a runtime failure remains written. Lexing and parsing must
+Output delivered to the host writer before a runtime failure remains written.
+The standard library's `ob_*` helpers can retain output in nested per-execution
+application buffers; uncaught failures discard those pending bytes. Successful
+completion drains remaining buffers from inner to outer. `flush()` requests a
+host-writer flush without draining application buffers. These are native APIs,
+not syntax; see [output buffers](standard-library.md#output-buffers-and-flushing).
+ Lexing and parsing must
 succeed for the whole program before any execution occurs. `RuntimeOptions`, passed
 to `Runtime::with_options`, configures `recursion_limit` (default 64 active
 script/native invocations, excluding main). The recursive evaluator caps it at
@@ -767,7 +773,9 @@ for metadata, cancellation, concurrency, cleanup, and durability limits.
 `scripta serve entry.scripta` runs a fixed entry script for each HTTP request in a
 fresh runtime. The Web module supplies request data, status, headers, redirects,
 and binary output; `echo` supplies ordinary response body output. Syntax and
-strict type rules are unchanged. The host buffers bounded output and turns
-uncaught failures or nonzero exits into generic HTTP 500 responses; `exit 0`
+strict type rules are unchanged. The host buffers bounded output by default and
+turns uncaught failures or nonzero exits into generic HTTP 500 responses before
+headers commit. Explicit `flush()` seals sessions and commits headers; later
+failures terminate the streamed body without changing its status. `exit 0`
 finishes a normal response. Worker termination on deadline can bypass script
 cleanup. See [Web APIs](standard-library.md#web-requests) and [hosting](web-servers.md).

@@ -5,8 +5,8 @@ mod atomic_writes;
 #[path = "file_streams.rs"]
 mod streams;
 use scr_runtime::{
-    NativeError, NativeFunction, NativeObject, NativeResult, NativeSignature, NativeType, Runtime,
-    RuntimeContext, Value,
+    MapKey, NativeError, NativeFunction, NativeObject, NativeResult, NativeSignature, NativeType,
+    Runtime, RuntimeContext, Value,
 };
 use std::{
     fs::{self, File, Metadata, OpenOptions},
@@ -386,6 +386,71 @@ fn entries(context: &RuntimeContext<'_>, path: &Path, directories: bool) -> Nati
     ))
 }
 
+// Unlike the legacy listings, expose link entries without touching their targets.
+fn all_entries(context: &RuntimeContext<'_>, path: &Path) -> NativeResult<Value> {
+    metadata(path, true)?;
+    let keys = ["name", "path", "isDirectory", "isFile", "isSymlink"];
+    let fixed = std::mem::size_of::<Value>()
+        + keys
+            .iter()
+            .map(|key| std::mem::size_of::<MapKey>() + key.len() + std::mem::size_of::<Value>())
+            .sum::<usize>();
+    let mut bytes = std::mem::size_of::<Value>();
+    let mut rows = Vec::new();
+    for entry in fs::read_dir(path).map_err(|error| failure("list directory", path, error))? {
+        context.check_cancelled()?;
+        let entry = entry.map_err(|error| failure("read directory entry", path, error))?;
+        let target = entry.path();
+        let info = fs::symlink_metadata(&target)
+            .map_err(|error| failure("inspect directory entry", &target, error))?;
+        let name = paths::text(&entry.file_name())?;
+        let text = paths::text(target.as_os_str())?;
+        bytes = bytes
+            .checked_add(fixed)
+            .and_then(|n| n.checked_add(name.len()))
+            .and_then(|n| n.checked_add(text.len()))
+            .filter(|n| context.max_value_bytes.is_none_or(|limit| *n <= limit))
+            .ok_or_else(|| {
+                NativeError::new(
+                    "ResourceLimitError",
+                    "directory entries exceed execution value byte limit",
+                )
+            })?;
+        rows.try_reserve(1).map_err(|_| {
+            NativeError::new("ResourceLimitError", "directory entries allocation failed")
+        })?;
+        rows.push((
+            name,
+            text,
+            info.is_dir(),
+            info.is_file(),
+            info.file_type().is_symlink(),
+        ));
+    }
+    rows.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut result = Vec::new();
+    result.try_reserve_exact(rows.len()).map_err(|_| {
+        NativeError::new("ResourceLimitError", "directory entries allocation failed")
+    })?;
+    for (name, path, directory, file, link) in rows {
+        context.check_cancelled()?;
+        let values = [
+            Value::String(name),
+            Value::String(path),
+            Value::Bool(directory),
+            Value::Bool(file),
+            Value::Bool(link),
+        ];
+        result.push(Value::Map(
+            keys.iter()
+                .zip(values)
+                .map(|(key, value)| (MapKey::String((*key).into()), value))
+                .collect(),
+        ));
+    }
+    Ok(Value::List(result))
+}
+
 #[derive(Clone, Copy)]
 enum Operation {
     Exists,
@@ -404,6 +469,8 @@ enum Operation {
     CreateAll,
     Files,
     Directories,
+    Entries,
+    Canonical,
     Remove,
     Current,
     Change,
@@ -431,6 +498,8 @@ pub fn register(runtime: &mut Runtime, policy: FilesystemPolicy) -> NativeResult
         ("Dir::createAll", CreateAll, 1, Null),
         ("Dir::files", Files, 1, List),
         ("Dir::directories", Directories, 1, List),
+        ("Dir::entries", Entries, 1, List),
+        ("Path::canonical", Canonical, 1, Text),
         ("Dir::remove", Remove, 1, Null),
         ("Dir::current", Current, 0, Text),
         ("Dir::change", Change, 1, Null),
@@ -613,6 +682,14 @@ fn perform(
             Ok(Value::Null)
         }
         Files | Directories => entries(context, &path, matches!(operation, Directories)),
+        Entries => all_entries(context, &path),
+        Canonical => {
+            let canonical =
+                fs::canonicalize(&path).map_err(|error| failure("resolve path", &path, error))?;
+            // Recheck the actual destination before exposing it to the script.
+            policy.check(context, &canonical, false)?;
+            Ok(Value::String(paths::text(canonical.as_os_str())?))
+        }
         Remove => {
             metadata(&path, true)?;
             let canonical = fs::canonicalize(&path)

@@ -286,6 +286,14 @@ root policy; an extension must implement any additional host restrictions it
 needs. See [runtime context and errors](standard-library.md#runtime-context-and-errors)
 and [filesystem policies](standard-library.md#filesystem-and-paths).
 
+Request-owned native resources can compare `context.runtime_identity` with the
+opaque `Rc<()>` returned by `Runtime::native_identity()` using `Rc::ptr_eq`.
+A missing or different identity must deny access. Also retain a separate host
+lifetime guard when a resource must expire before the runtime is dropped, as
+multipart upload handles do. The identity carries no backend or permissions.
+Embedders constructing `RuntimeContext` directly must supply this field (`None`
+for contexts without a runtime owner).
+
 Long-running callbacks should call `context.check_cancelled()?` between bounded
 units of work. Blocking library calls also need their own deadlines or timeout
 support; the runtime cannot interrupt arbitrary Rust work. Propagate the reserved
@@ -342,3 +350,24 @@ compatible public runtime API. There is no stable shared-library ABI involved.
 Check each extension's platform support, native library/linking requirements,
 licenses, and release packaging inputs. Static inclusion in `scripta` does not
 necessarily mean every external system library is statically linked.
+
+`RuntimeContext.output` is a `ScriptOutput` (`Write` plus generic buffer control).
+Ordinary writes still use `write_all`; native extensions that emit bytes share the
+same application buffers as `echo`. Calling its `flush()` flushes the host writer
+without draining application buffers and can commit an HTTP response. Avoid
+incidental flushes when an API does not promise them. Hosts continue supplying an
+ordinary `Write` to runtime execution. Direct test contexts can use `Vec<u8>`;
+other direct context writers may implement `ScriptOutput` with default buffer
+control (which reports no runtime execution context). Buffer controllers live in
+the runtime, with pending/nesting/cumulative limits in `RuntimeOptions`.
+
+
+`StdlibOptions.streams` configures live stream handles, chunk sizes, cumulative
+transfer bytes, and network timeouts. New stream handles check the runtime's
+opaque identity as well as their actual native type before I/O. File streaming
+uses the existing filesystem policy; outgoing TCP/UDP use `network.connect` and
+`network.datagram`. These are cooperative host capabilities, not an OS sandbox.
+Underlying file/socket/HTTP readers and quota leases use RAII; host-retained
+handle values retain resources until closed/dropped. A host embedding synchronous
+native code must still supply an outer interruption strategy for blocking backend
+calls when its own deadline is stricter; the web host terminates worker processes.

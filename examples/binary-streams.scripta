@@ -1,0 +1,18 @@
+<?scripta
+$input = Cli::arg(0);
+$output = Cli::arg(1);
+if ($input === null || $output === null) {
+    echo "Usage: scripta binary-streams.scripta INPUT OUTPUT\n";
+    exit(2);
+}
+$source = Stream::open($input, "r");
+// Exclusive creation refuses to overwrite an existing destination.
+$destination = Stream::open($output, "x");
+try {
+    $copied = Stream::copy($source, $destination, 67108864);
+    Stream::flush($destination);
+    echo Json::encode(["bytesCopied" => $copied]) . "\n";
+} finally {
+    Stream::close($destination);
+    Stream::close($source);
+}

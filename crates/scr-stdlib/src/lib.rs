@@ -14,12 +14,16 @@ mod data_text;
 mod date;
 mod environment;
 pub mod filesystem;
+mod html;
 pub mod http;
 mod json;
 pub mod log;
 mod math;
+mod output;
+pub mod password;
 mod paths;
 pub mod process;
+pub mod streams;
 mod strings;
 mod system;
 mod url;
@@ -32,6 +36,8 @@ pub struct StdlibOptions {
     pub process: process::ProcessConfig,
     pub log: log::LogConfig,
     pub http: http::HttpConfig,
+    pub password: password::PasswordConfig,
+    pub streams: streams::StreamConfig,
 }
 
 pub fn register(runtime: &mut Runtime) -> NativeResult<()> {
@@ -108,14 +114,23 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
     )?;
     let module_policy = options.filesystem.clone().prepare()?;
     runtime.set_module_policy(move |path| module_policy.check_path(path, false));
+    output::register(runtime)?;
     bytes::register(runtime)?;
     data_text::register(runtime)?;
     csv::register(runtime, options.filesystem.clone())?;
     json::register(runtime)?;
     strings::register(runtime)?;
+    html::register(runtime)?;
+    password::register(runtime, options.password)?;
     url::register(runtime)?;
     math::register(runtime)?;
     collections::register(runtime)?;
+    streams::register(
+        runtime,
+        options.streams,
+        options.filesystem.clone(),
+        options.http.clone(),
+    )?;
     http::register(runtime, options.http, options.filesystem.clone())?;
     filesystem::register(runtime, options.filesystem.clone())?;
     system::register(runtime, options.filesystem.clone())?;

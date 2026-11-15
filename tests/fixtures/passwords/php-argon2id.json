@@ -1,0 +1,97 @@
+{
+    "generator": "PHP 8.4.20 password_hash(PASSWORD_ARGON2ID)",
+    "public_test_data": true,
+    "fixtures": [
+        {
+            "name": "ascii",
+            "password": "public-fixture-password",
+            "options": {
+                "memory_cost": 32,
+                "time_cost": 2,
+                "threads": 1
+            },
+            "hash": "$argon2id$v=19$m=32,t=2,p=1$USHI/RigKpl0ukVvcHgqcQ$9xd+XcxBUI4ZRf1YBY6cTJ+6QjrPrkNm7NAu6mJ9E5M",
+            "info": {
+                "algo": "argon2id",
+                "algoName": "argon2id",
+                "options": {
+                    "memory_cost": 32,
+                    "time_cost": 2,
+                    "threads": 1
+                }
+            }
+        },
+        {
+            "name": "unicode",
+            "password": "世界 café 🦀",
+            "options": {
+                "memory_cost": 64,
+                "time_cost": 3,
+                "threads": 2
+            },
+            "hash": "$argon2id$v=19$m=64,t=3,p=2$0miOm/kSGNpCsa1DEQmwyg$zUb0Lm0WJMC6IsauYKgW/JLVS9FbJPeYgp3P8M8kn0A",
+            "info": {
+                "algo": "argon2id",
+                "algoName": "argon2id",
+                "options": {
+                    "memory_cost": 64,
+                    "time_cost": 3,
+                    "threads": 2
+                }
+            }
+        },
+        {
+            "name": "empty",
+            "password": "",
+            "options": {
+                "memory_cost": 32,
+                "time_cost": 1,
+                "threads": 1
+            },
+            "hash": "$argon2id$v=19$m=32,t=1,p=1$WTzzhSPj5MgiDkDI78nmug$lq8U4AYnD4T8CsZB8pit96szEdhb6LLTTFm3i4vvOSU",
+            "info": {
+                "algo": "argon2id",
+                "algoName": "argon2id",
+                "options": {
+                    "memory_cost": 32,
+                    "time_cost": 1,
+                    "threads": 1
+                }
+            }
+        },
+        {
+            "name": "embedded-nul",
+            "password": "abc\u0000def",
+            "options": {
+                "memory_cost": 32,
+                "time_cost": 2,
+                "threads": 1
+            },
+            "hash": "$argon2id$v=19$m=32,t=2,p=1$2Bt+xI7IMceA1ZxVoANNMQ$c/khUWKRBNFi593VVscem8l/AV1qsAxTAdDuIxxbm8M",
+            "info": {
+                "algo": "argon2id",
+                "algoName": "argon2id",
+                "options": {
+                    "memory_cost": 32,
+                    "time_cost": 2,
+                    "threads": 1
+                }
+            }
+        },
+        {
+            "name": "php-default",
+            "password": "public-default-cost-fixture",
+            "options": [],
+            "hash": "$argon2id$v=19$m=65536,t=4,p=1$vOJ/rE/2wcfWTjQYLZ4ykw$T5BwC1TKRHIpiuzWBjWVUtI239shbfRURuKsujp2GGo",
+            "info": {
+                "algo": "argon2id",
+                "algoName": "argon2id",
+                "options": {
+                    "memory_cost": 65536,
+                    "time_cost": 4,
+                    "threads": 1
+                }
+            }
+        }
+    ]
+}

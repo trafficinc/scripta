@@ -41,13 +41,13 @@ Embedders opt in by calling `scr_stdlib::register(&mut runtime)?`. Registration
 returns `NativeResult<()>`; duplicate names produce `RegistryError` and preserve
 the existing registration. `echo` and `exit` remain language statements. Neither
 is registered as a native function; exit returns a code without terminating the
-embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Clock`, `Log`, `Json`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Csv`, and `Regex` are
+embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Clock`, `Log`, `Json`, `Html`, `Password`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Csv`, `Regex`, `Socket`, and `Stream` are
 registered by default.
 
 ## Release 0.1.0 export index
 
-This reference covers 157 core functions and four default CLI SQLite functions
-(161 in total), plus six request-context Web functions, native response/entry
+This reference covers 203 core functions and four default CLI SQLite functions
+(207 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -56,11 +56,16 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | --- | --- | --- |
 | Globals | `str`, `int`, `float`, `bool`, `type`, `len`, `sleep` | Conversion table above |
 | String | `String::trim`, `String::split`, `String::join`, `String::contains`, `String::startsWith`, `String::endsWith`, `String::replace`, `String::substring`, `String::lower`, `String::upper`, `String::format`, `String::graphemeLength`, `String::graphemeSubstring` | [Strings](#strings) |
+| Socket | `Socket::connect`, `Socket::listen`, `Socket::accept`, `Socket::bindDatagram`, `Socket::read`, `Socket::write`, `Socket::receive`, `Socket::sendTo`, `Socket::shutdown`, `Socket::close`, `Socket::setBlocking`, `Socket::setTimeout`, `Socket::poll`, `Socket::localAddress`, `Socket::peerAddress`, `Socket::setOption`, `Socket::getOption` | [Sockets](#low-level-sockets) |
+| Stream | `Stream::open`, `Stream::request`, `Stream::read`, `Stream::write`, `Stream::flush`, `Stream::close`, `Stream::seek`, `Stream::tell`, `Stream::eof`, `Stream::copy`, `Stream::send`, `Stream::receive` | [General streams](#general-streams) |
+| Output | `flush`, `ob_start`, `ob_flush`, `ob_end_flush`, `ob_clean`, `ob_end_clean`, `ob_get_contents`, `ob_get_clean`, `ob_get_flush`, `ob_get_length`, `ob_get_level` | [Output buffers](#output-buffers-and-flushing) |
+| Password | `Password::hash`, `Password::verify`, `Password::needsRehash` | [Passwords](#passwords) |
+| Html | `Html::escape` | [HTML escaping](#html-escaping) |
 | Math | `Math::abs`, `Math::min`, `Math::max`, `Math::floor`, `Math::ceil`, `Math::round` | [Math](#math) |
 | List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort`, end operations, generation, search, aggregation, comparisons, `List::column` | [Collections](#collections) |
 | Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove`, merge/replace, combine/flip, search/reverse, comparisons, `Map::column` | [Collections](#collections) |
 | File | `File::exists`, `File::read`, `File::readBytes`, `File::writeBytes`, `File::appendBytes`, `File::write`, `File::writeAtomic`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close` | [Filesystem](#filesystem-and-paths) |
-| Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
+| Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::entries`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
 | Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute` | [Paths](#filesystem-and-paths) |
 | Process | `Process::run`, `Process::spawn`, `Process::shell`, `Process::wait`, `Process::poll`, `Process::kill`, `Process::exists`, `Process::currentId` | [Processes](#processes) |
 | Env | `Env::get`, `Env::set`, `Env::has`, `Env::remove`, `Env::all` | [Environment](#environment) |
@@ -73,14 +78,15 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Bytes | `Bytes::encodeUtf8`, `Bytes::decodeUtf8`, `Bytes::slice` | [Binary values](#binary-values) |
 | Csv | `Csv::parse`, `Csv::encode`, `Csv::open`, `Csv::readRow`, `Csv::close` | [CSV](#csv) |
 | Regex | `Regex::isMatch`, `Regex::findAll`, `Regex::replace` | [Regex](#regex) |
-| Web (request context only) | `Web::request`, `Web::status`, `Web::header`, `Web::addHeader`, `Web::redirect`, `Web::write` | [Web requests](#web-requests) |
+| Web (request context only) | `Web::request`, `Web::status`, `Web::header`, `Web::addHeader`, `Web::redirect`, `Web::write`, `Web::cookie`, `Web::deleteCookie` | [Web requests](#web-requests) |
+| Session (request context only) | `Session::start`, `Session::id`, `Session::get`, `Session::has`, `Session::set`, `Session::remove`, `Session::all`, `Session::regenerate`, `Session::destroy`, `Session::close` | [Sessions](#sessions) |
 | Http | `Http::get`, `Http::post`, `Http::request`, `Http::download` | [HTTP](#http) |
 | Url | `Url::encodeComponent`, `Url::decodeComponent`, `Url::buildQuery`, `Url::parseQuery` | [URL and form encoding](#url-and-form-encoding) |
 | Form | `Form::encode`, `Form::decode` | [URL and form encoding](#url-and-form-encoding) |
 | Sqlite (CLI default) | `Sqlite::open`, `Sqlite::execute`, `Sqlite::query`, `Sqlite::close` | [SQLite](sqlite.md) |
 
 `DirEntry`, `ProcessResult`, `ProcessHandle`, `MemoryUsage`, `DiskUsage`,
-`HttpResponse`, `CsvReader`, and `FileStream` are read-only native objects whose properties
+`HttpResponse`, `CsvReader`, `FileStream`, `ByteStream`, `DatagramSocket`, and `SocketListener` are read-only native objects whose properties
 and methods are listed in their module sections. Convert selected properties into ordinary maps before
 JSON encoding. `require` and `require_once` are statements, not native functions;
 see [local script loading](language-spec.md#local-script-loading). The built-in
@@ -260,6 +266,133 @@ try {
     Csv::close($reader);
 }
 ```
+
+## Passwords
+
+| Function | Behavior |
+| --- | --- |
+| `Password::hash(password: string): string` | Hash using Argon2id v19, a fresh 16-byte OS-random salt, and a 32-byte digest. Returns the complete PHC-format string. |
+| `Password::verify(password: string, hash: string): bool` | Verify an Argon2id v19 hash using its bounded encoded parameters. Wrong passwords and malformed/unsupported hashes return false. |
+| `Password::needsRehash(hash: string): bool` | True for malformed/unsupported hashes, or supported hashes whose costs, salt length, or digest length differ from the current generation policy. No password hashing is performed. |
+
+Inputs are strictly strings. Passwords use their exact UTF-8 bytes, including
+embedded NUL; there is no normalization, trimming, coercion, or truncation. Empty
+passwords are accepted by the primitive; application password policy is separate.
+Store the entire returned string, which contains the algorithm, version, costs,
+salt, and digest. Salts are automatic and cannot be supplied by scripts.
+
+The default generation policy is 19456 KiB (19 MiB) of working memory, two passes,
+and one lane. It follows the [OWASP Argon2id minimum configuration](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#argon2id).
+The Rust host can configure `StdlibOptions.password: password::PasswordConfig`;
+CLI and web hosts use its defaults. Scripts cannot override or raise the policy.
+
+| Host field | Default | Meaning / absolute host bounds |
+| --- | --- | --- |
+| `memory_kib` | `19456` | Generation memory, satisfying Argon2 constraints and host ceilings. |
+| `iterations` | `2` | Generation passes, within host ceilings. |
+| `parallelism` | `1` | Generation lanes; not a multiplier of total memory or a promise of OS threads. |
+| `max_memory_kib` | `65536` | Per-call verification memory ceiling; 8–262144 KiB. |
+| `max_iterations` | `10` | Per-call pass ceiling; 1–32. |
+| `max_parallelism` | `4` | Per-call lane ceiling; 1–16. |
+| `max_work_kib` | `262144` | Ceiling on memory KiB times passes; 1–8388608 KiB-passes. |
+| `max_password_bytes` | `1024` | UTF-8 input byte ceiling; configurable from 1 to 1048576. |
+| `max_hash_bytes` | `512` | Encoded hash byte ceiling; at most 4096 and large enough for configured generation output. |
+
+All ceilings apply to generation too. Invalid host settings fail registration
+with `PasswordError`. Generation parameters must also satisfy Argon2's minimum
+memory/lane/pass constraints. Low-cost settings used in tests are not production
+recommendations. Parameter changes are trusted host decisions, not request data.
+
+Verification accepts complete Argon2id v19 PHC hashes with exactly `m`, `t`, and
+`p` parameters, a decoded salt of 8–48 bytes, and a digest of 16–64 bytes.
+Parameter order does not affect the policy comparison. Bcrypt, Argon2i/d, older
+versions, pepper/key-id/associated-data extensions, and incomplete hashes are
+unsupported. PHP Argon2id hashes are interoperable within the host ceilings;
+this does not imply compatibility with PHP's default bcrypt algorithm.
+
+Password/hash byte-ceiling violations and parsed costs above policy raise
+`PasswordError` rather than returning false. Limits are checked before working
+memory allocation or expensive computation. A parsed cost violation takes
+precedence over later salt/parameter validation. Other backend/OS-random failures
+also raise generic `PasswordError`, without including input values. Signature
+errors remain `TypeError`. Failed assignments preserve the prior destination.
+
+`needsRehash` compares against the exact generation policy, not a strength score;
+a different, higher-cost hash can also return true. Only rehash after successful
+verification, with an intentionally chosen host policy:
+
+```scr
+<?scripta
+if (Password::verify($password, $storedHash)) {
+    if (Password::needsRehash($storedHash)) {
+        $replacementHash = Password::hash($password);
+        // Save the complete replacement hash using a parameterized database query.
+    }
+}
+```
+
+The final digest comparison uses RustCrypto's constant-time `Output` comparison.
+The entire API call is not constant-time across different algorithms, malformed
+inputs, or costs, and it does not implement a complete authentication workflow.
+See the [runnable example](../examples/password-hashing.scripta).
+
+Hash output and bool results respect logical value budgets; generation preflights
+the exact output size before obtaining randomness or allocating working memory.
+Working memory uses a separately bounded, fallibly reserved allocation and is
+zeroized on normal completion/unwinding. This is not a process heap cap or a
+promise to erase all copies of script password strings. No automation capability
+is required; these functions perform computation and use OS entropy internally.
+No public secure-random or token-comparison API is added here.
+
+Cancellation is checked before work, during buffer initialization, and after the
+backend returns. The Argon2 computation itself cannot be cooperatively interrupted.
+Web request deadlines can terminate its isolated worker; CLI/embedding callers may
+wait for the bounded computation to finish before interruption is reported.
+Concurrent calls/workers multiply the per-call memory allowance: four default
+web workers hashing concurrently use about 76 MiB of Argon2 workspace, while four
+verifications at the default ceiling can use up to 256 MiB, plus other runtime
+memory. Choose worker counts and host policies for the deployment's memory budget.
+Instruction/checkpoint budgets do not count Argon2's internal operations.
+
+## HTML escaping
+
+`Html::escape(text: string): string` escapes plain UTF-8 text for HTML text nodes
+and ordinary quoted attribute values, such as `title`. It takes exactly one
+string; other types require explicit conversion and invalid signatures raise
+`TypeError`. It performs no I/O and requires no capabilities.
+
+| Input character | Output |
+| --- | --- |
+| `&` | `&amp;` |
+| `<` | `&lt;` |
+| `>` | `&gt;` |
+| `"` | `&quot;` |
+| `'` | `&#039;` |
+
+All other Unicode scalars, whitespace, and control characters are unchanged; the
+function does not normalize text or validate arbitrary HTML. Empty input returns
+an empty string. Existing entities are escaped again: `&amp;` becomes `&amp;amp;`.
+Generated entities are not processed a second time within the same call. Keep
+plain text in storage and escape once when inserting it into HTML.
+
+```scr
+<?scripta
+$name = "Ada <Admin> & \"friends\"";
+$escaped = Html::escape($name);
+echo "<p title=\"" . $escaped . "\">Hello, " . $escaped . "!</p>\n";
+```
+
+Use quotation marks around dynamic attribute values. This function does not
+encode JavaScript, CSS, URL components, or SQL; event-handler/style attributes
+and URL-valued attributes need their own validation/encoding. It does not sanitize
+user-supplied HTML markup. See [URL encoding](#url-and-form-encoding) for URL
+components and the [runnable example](../examples/html-escaping.scripta).
+
+The implementation preflights the exact UTF-8 output bytes, including the logical
+Value slot, before reserving the result. Overflow/allocation failures and byte
+ceilings raise `ResourceLimitError`. Both sizing and output passes check
+cancellation, including empty input and completion; failures preserve the previous
+assignment destination. No HTML is escaped automatically by `echo`.
 
 ## Math
 
@@ -488,7 +621,7 @@ contains:
 | `output` | The same writer passed to `Runtime::execute`, shared with echo and prompts. |
 | `error` | Defaults to process stderr; override with `Runtime::set_error_stream`. |
 | `cancellation` | The atomic cancellation flag from runtime options; `check_cancelled()` returns an interruption error. |
-| `permissions` | Automation capabilities are allowed by default: sleep, filesystem read/write, environment read/write, process execute/inspect, system.inspect, log.write, http.request, cli.read, and cli.prompt. `process.shell` remains opt-in. |
+| `permissions` | Automation capabilities are allowed by default: sleep, filesystem read/write, environment read/write, process execute/inspect, system.inspect, log.write, http.request, network.connect, network.datagram, network.bind, network.listen, cli.read, and cli.prompt. `process.shell` remains opt-in. |
 | `call_span` | Original script span of the native call. |
 | `max_value_bytes` | Optional host logical-value budget; file reads enforce it while buffering, and String helpers check result sizes before allocating output. |
 
@@ -621,13 +754,16 @@ Try [atomic-report.scripta](../examples/atomic-report.scripta): preview with
 | `Dir::createAll(path): null` | Creates missing parents; an existing directory succeeds. Files and final symlinks are rejected. |
 | `Dir::files(path): list` | Shallow list of regular-file `DirEntry` snapshots, sorted by UTF-8 name in case-sensitive lexical order. |
 | `Dir::directories(path): list` | Shallow list of directory snapshots in the same order. |
+| `Dir::entries(path): list` | Shallow, sorted list of maps with `name`, absolute `path`, `isDirectory`, `isFile`, and `isSymlink`. Includes dangling links and special files without resolving targets. Uses the execution value-byte limit before growing the result. |
 | `Dir::remove(path): null` | Removes only an empty directory. Rejects root, current directory, and its ancestors. There is no recursive-delete argument or API. |
 | `Dir::current(): string` | Canonical absolute runtime working directory. |
 | `Dir::change(path): null` | Requires an existing directory and saves its canonical absolute path in this runtime. |
 
-Listings exclude symlinks and special files and never recurse. All filesystem
-operations reject a final symlink except existence checks (false) and lexical
-extension extraction. Intermediate symlink directories use OS resolution; the
+`Dir::files` and `Dir::directories` exclude symlinks and special files; no listing
+recurses. `Dir::entries` explicitly exposes links (including Windows junctions)
+as link snapshots; type flags describe the link itself, not its target.
+Existing file/directory operations continue to reject final symlinks except
+existence checks (false) and lexical extension extraction. Intermediate symlink directories use OS resolution; the
 optional root policy checks their canonical destinations. Errors reading metadata,
 permissions, or directory entries propagate instead of silently skipping entries.
 If a selected entry's name/path cannot be represented in UTF-8 (including unpaired
@@ -640,8 +776,17 @@ null for directories), `modified` (Unix seconds), and `isDirectory` (bool).
 Properties are metadata snapshots; later filesystem changes do not update them.
 Direct, compound, and indexed property assignments raise `PropertyError`.
 
+`Path::canonical` is the explicit filesystem-resolving exception to the lexical
+Path helpers: it requires `filesystem.read`, follows links to an existing target,
+and returns its canonical absolute path without changing the runtime directory.
+It enforces host root policies on the destination. Dangling links raise
+`FileNotFoundError`; resolution/permission/encoding errors propagate. This does
+not change existing read/write symlink rules or their concurrent-path-race limits.
+Try [directory-links.scripta](../examples/directory-links.scripta) with a fixture directory.
+
 | Path method | Behavior |
 | --- | --- |
+| `Path::canonical(path): string` | Resolve an existing filesystem path, following links under read/root policies. |
 | `Path::join(...strings): string` | Joins zero or more native path components. An absolute later component replaces the previous path, following Rust path rules. Zero arguments returns empty string. |
 | `Path::filename(path): string` | Final filename component, or empty string if none. |
 | `Path::extension(path): string` | Last extension without dot. `.hidden` has no extension; `a.tar.gz` gives `gz`. |
@@ -1278,7 +1423,7 @@ implicit scalar conversion rules. `Form::decode` preserves pairs instead of
 
 ## Web requests
 
-The `scripta serve` host explicitly registers six additional `Web` functions per
+The `scripta serve` host explicitly registers nine `Web` and ten `Session` functions per
 request. They are absent from ordinary CLI execution and from the default export
 count above. Embedders can use `scr_stdlib::web::register` with a bounded request
 and response-header ceiling. See [web hosting](web-servers.md) for the server,
@@ -1291,9 +1436,13 @@ worker lifecycle, resource ceilings, and reverse-proxy configuration.
 | `Web::header(name: string, value: string): null` | Replaces all headers with this case-insensitive name. Does not change status automatically. |
 | `Web::addHeader(name: string, value: string): null` | Appends a header, preserving repeated values such as `Set-Cookie`. |
 | `Web::redirect(location: string, status: int = 302): null` | Replaces `Location` and sets 301, 302, 303, 307, or 308. Does not stop execution; follow with `exit 0`. |
+| `Web::cookie(name: string, value: string, options = []): null` | Appends a validated Set-Cookie header; UTF-8 values are percent-encoded. |
+| `Web::deleteCookie(name: string, options = []): null` | Appends a deletion cookie for the chosen path/domain. |
+| `Web::download(source: ByteStream, filename: string): int` | Streams a readable file from its current position as an attachment. Returns bytes written (zero for HEAD). Requires no prior body output or active application buffers. See [file transfers](#upload-and-download-contract). |
 | `Web::write(value: string or bytes): null` | Appends UTF-8 or arbitrary bytes to the bounded response body. `echo` also writes the body, with its usual strict types. |
 
-`WebRequest` exposes `method`, `path`, and `queryString` string properties. `path`
+`WebRequest` exposes `method`, `path`, and `queryString` string properties, plus
+`bodySize: int` (the measured raw body byte length). `path`
 retains percent encoding and excludes the query; use explicit URL decoding when
 needed. It has these methods:
 
@@ -1301,11 +1450,15 @@ needed. It has these methods:
 | --- | --- |
 | `header(name: string): string or null` | First matching value, case-insensitive; null when absent. |
 | `headers(name: string): list` | All matching string values in received order, or an empty list. |
+| `cookie(name: string): string or null` | First matching case-sensitive cookie name, percent-decoded as UTF-8, or null. Literal `+` stays `+`. |
+| `cookies(): list` | All decoded `[name, value]` string pairs, retaining duplicates and order across Cookie fields. |
 | `query(): list` | Decoded `[key, value]` string pairs, preserving duplicates and order. Uses form-style `+` as space. |
+| `bodyStream(): ByteStream` | Fresh read-only raw-body stream with an independent cursor. No ambient filesystem-read capability is needed. |
 | `bytes(): bytes` | Raw, fully received bounded body. |
 | `text(): string` | Body as strict UTF-8; invalid encoding raises `EncodingError`. |
 | `json(): any` | JSON body using existing `Json::decode` semantics. Requires exactly one Content-Type with `application/json` or `application/*+json`. |
-| `form(): list` | URL-encoded `[key, value]` pairs. Requires exactly one `application/x-www-form-urlencoded` Content-Type. |
+| `form(): list` | Text `[name, value]` pairs from URL-encoded or host-parsed multipart forms, retaining duplicates and received order. |
+| `uploads(): list` | Request-owned `UploadedFile` objects in received file order; empty for other body types. |
 
 Query/form decoding uses the strict existing form codec: malformed percent
 escapes and invalid UTF-8 raise `EncodingError`; duplicate names remain separate
@@ -1313,7 +1466,53 @@ pairs, numeric-looking keys remain strings, and no bracket/nested-key expansion
 occurs. Malformed JSON raises `JsonError`. Content-Type parameters are accepted;
 body text must still be UTF-8. Missing/ambiguous or unsupported media types raise
 `WebError`. Calling these helpers does not consume the body; repeated calls work.
-Multipart uploads and automatic cookie/session parsing are not implemented.
+For `multipart/form-data`, the HTTP host parses the complete bounded request
+before invoking the script. Text fields must contain UTF-8; their names remain
+literal strings (no PHP bracket expansion). File contents stay binary. Submitted
+names/filenames use UTF-8 disposition parameters as parsed by Multer; filenames
+are opaque, with no percent decoding, path normalization, or MIME verification.
+RFC 5987 `filename*` parameters are not interpreted; clients must use the
+RFC 7578 `filename` parameter. Transfer encodings, nested multipart text fields,
+and non-UTF-8 text charsets are rejected. An empty submitted filename and empty
+body means “no selection” and is omitted from `uploads()`; a named zero-byte file
+is retained. Empty selections still count toward the file limit. A nonempty body
+with an empty filename is rejected. Text fields and files retain their respective
+arrival order; the API does not reconstruct an interleaved stream of both kinds.
+
+`UploadedFile` exposes read-only `fieldName: string`, `filename: string`,
+`mediaType: string or null`, `size: int`, and `moved: bool`. Filename and advertised
+media type are **untrusted metadata**, never destination paths or content checks.
+`stream(): ByteStream` opens a read-only stream for inspection/forwarding before
+saving, without revealing a path or requiring `filesystem.read`. Each cursor is
+independent and shares the registered stream quota. New streams after a successful
+move are rejected; previously opened streams remain request-owned until close or
+request completion.
+`moveTo(destination: string): null` requires an explicit application-chosen path,
+`filesystem.write`, and the host filesystem policy. It rejects every existing
+destination, including symlinks, directories, and read-only files. There is no
+overwrite option. No general filesystem read capability is needed to save a
+request's upload. A bounded, cancellation-aware copy to a private staging file
+beside the destination supports cross-filesystem saves; publication then refuses
+to replace an existing destination. Failure leaves the destination and the
+handle's `moved` flag unchanged. Success marks all aliases of the handle consumed;
+a second save raises `UploadError`. Saves are immediate filesystem effects and
+remain after a later script error, just like ordinary filesystem writes.
+
+Upload handles and captured upload methods belong to one runtime/request and
+expire at request completion. `UploadError` rejects use from another runtime or
+after expiry. Temporary paths are not properties of the objects. Raw multipart
+`bytes()`/`text()` still return the original body, read on demand from the spool,
+and preflight the full returned value against `max_value_bytes`; invalid UTF-8
+raises `EncodingError`. Other multipart helpers copy only bounded metadata/text.
+The logical value budget counts metadata and collection slots, rather than the
+external file payload, as with filesystem resources. The host separately limits
+temporary disk and total incoming bytes; see [web server limits](web-servers.md).
+
+Rust hosts can use `web::register_multipart`, trusted `web::uploads::Multipart`
+descriptors, a `FilesystemPolicy`, and a supervisor-owned staging callback. Keep
+the returned `RequestResources` guard until execution ends, then drop it before
+removing storage. Ordinary `web::register` has no multipart parser backend; the
+`scr-web` host supplies the descriptors. Cookie and session behavior follows below.
 
 Invalid statuses, redirect destinations, headers, or response-header ceilings
 raise `WebError` without changing the previous response metadata. Header names
@@ -1324,14 +1523,24 @@ URLs without credentials; scheme-relative URLs and backslashes are rejected.
 Applications must still validate user-controlled destinations to prevent unwanted
 external redirects. Prefer 303 for redirecting a successful POST to a GET page.
 
-Output is buffered until execution finishes. Headers can therefore be changed
-after `echo` within that buffer. Uncaught errors, nonzero exits, and output overflow
-produce a generic 500 with the partial application body discarded. All body output
-shares one limit. Normal responses default to `text/html; charset=utf-8`; set an
-explicit Content-Type for JSON, text, or bytes. HEAD and no-body status behavior
-are enforced by the host. These are response-local APIs; they grant no filesystem,
-process, or outgoing-network permissions. Native work checks cancellation, and
-returned values obey the runtime's logical value limits.
+Web output is buffered until execution finishes unless `flush()` explicitly
+requests transmission. Application buffers are independent: `ob_flush()` drains
+the top application buffer into its parent, without committing HTTP headers.
+Before the first transport flush, headers may change after `echo`; uncaught
+errors, nonzero exits, and output overflow discard pending output and return a
+generic 500. The first `flush()` saves/closes the session and commits response
+metadata, even with no pending body. Later status/header/cookie/redirect changes
+raise `WebError`; later session operations raise `SessionError`. Once committed,
+failures terminate the body and are logged; the response cannot become a 500.
+Clients may receive a truncated chunked response. Saved session changes remain.
+
+All generated body bytes share a cumulative limit, including output later
+cleaned from an application buffer. Normal responses default to
+`text/html; charset=utf-8`; set an explicit Content-Type for JSON, text, or bytes.
+HEAD and no-body statuses are enforced by the host. These response-local APIs
+grant no filesystem, process, or outgoing-network permissions. Native work checks
+cancellation; returned values obey runtime value limits. See
+[output buffering](#output-buffers-and-flushing) and [host behavior](web-servers.md).
 
 ```scr
 <?scripta
@@ -1343,6 +1552,142 @@ if ($request->path === "/old") {
 Web::header("Content-Type", "application/json; charset=utf-8");
 echo Json::encode(["method" => $request->method, "query" => $request->query()]);
 ```
+
+## Cookies
+
+`Web::cookie` and `Web::deleteCookie` use a strict options map (an empty list is
+also accepted). Defaults are `path: "/"`, host-only (no `domain`), `secure: true`,
+`httpOnly: true`, and `sameSite: "Lax"`. Omit lifetime options for a browser-session
+cookie. Available options:
+
+| Option | Type / bounds |
+| --- | --- |
+| `path` | ASCII absolute path, at most 1024 bytes, without controls, semicolons, or backslashes. |
+| `domain` | ASCII DNS-style domain, at most 253 bytes; leading dots are removed and letters lowercased. Omit for host-only cookies. |
+| `secure` | Bool; set false explicitly for cookies used over local plain HTTP. |
+| `httpOnly` | Bool; false allows browser JavaScript to read this cookie. |
+| `sameSite` | String Lax, Strict, or None (case-insensitive); None requires Secure. |
+| `maxAge` | Int seconds, 0–34560000; Max-Age takes precedence over Expires in browsers. |
+| `expires` | Int Unix seconds, 0–253402300799, formatted as a GMT HTTP date. |
+
+Cookie names follow HTTP token rules and are limited to 256 ASCII bytes. Values
+use the component codec, including percent encoding spaces, delimiters, and UTF-8;
+there is no implicit conversion. Incoming values are percent-decoded once, with
+literal plus signs preserved. Invalid percent escapes or UTF-8 raise
+`EncodingError`. Malformed Cookie syntax raises `CookieError`. At most 256 received
+cookie pairs and 4096 bytes per generated Set-Cookie field are allowed, in addition
+to overall request/response header ceilings. Duplicate names remain separate;
+`cookie(name)` returns the first. Cookies are untrusted client input.
+
+Each call appends its own Set-Cookie field. Browser scope/replacement rules apply;
+setting a response cookie does not modify the current request object. Deletion
+sends an empty value, Max-Age=0, and a past Expires value; use the same path/domain
+as the original cookie. Header/cookie failures leave earlier response headers
+unchanged. Unknown options or invalid values/prefix rules raise `CookieError`;
+normal signature errors remain `TypeError`. Secure/Host/Http cookie prefixes are
+validated, including Secure, HttpOnly, Path=/, and no-Domain requirements where
+applicable. Invalid generic response-header budgets raise `WebError`.
+
+```scr
+<?scripta
+$request = Web::request();
+$theme = $request->cookie("theme");
+Web::cookie("theme", "dark", ["maxAge" => 3600]);
+Web::deleteCookie("obsolete", ["path" => "/"]);
+```
+
+The Secure default assumes HTTPS at the browser, even when a reverse proxy talks
+plain HTTP to Scripta. The host's session-cookie flag below affects session
+cookies only; ordinary `Web::cookie` options remain explicit.
+
+## Sessions
+
+Sessions require the `web.session` capability, granted by the web host and absent
+from ordinary runtime defaults. Embedders must grant it explicitly when registering
+the Session module and prepare its dedicated storage configuration. This scoped
+capability is independent of generic filesystem roots/read/write capabilities.
+Sessions are server-side and shared by all workers through the host's dedicated
+local directory. They require explicit `Session::start()`; endpoints that never
+start a session do not allocate records or emit a session cookie. Only the
+`SCRIPTA_SESSION` cookie supplies an ID; query/form fields are never session IDs.
+That cookie name is reserved for the session runtime. Do not set it manually.
+
+| Function | Behavior |
+| --- | --- |
+| `Session::start(): null` | Resume a known, unexpired session or generate a new random one. Idempotent while open. |
+| `Session::id(): string` | Current opaque 64-character lowercase hexadecimal ID. |
+| `Session::get(key: string, default: any = null): any` | Stored value, including stored null; default only when the key is absent. |
+| `Session::has(key: string): bool` | Distinguishes an absent key from a stored null. |
+| `Session::set(key: string, value: any): null` | Set/replace a value without moving an existing key's insertion position. |
+| `Session::remove(key: string): bool` | Remove a key; return whether it existed. |
+| `Session::all(): map` | Snapshot of all session fields in insertion order. |
+| `Session::regenerate(): null` | Generate a fresh ID, preserving data; revoke the previous ID on commit. At most once per request. Call after successful authentication. |
+| `Session::destroy(): null` | Stage deletion of server data and expiration of the session cookie. Further session access in this request fails. |
+| `Session::close(): null` | Commit immediately and release the record lock. Further session access fails. Later request errors do not undo this explicit early commit. |
+
+All operations other than start require an open, non-destroyed session. String
+keys stay strings. Values may contain null, bool, int, finite float, UTF-8 string,
+bytes, lists, and maps with typed integer/string keys. Storage preserves strict
+number types, byte contents, typed keys, and insertion order. Resources and
+callables are rejected. Nesting is limited to 32 levels including the session
+root; both encoded storage bytes and logical value/collection bytes must fit the
+host's per-session ceiling. Validation and failed set/remove operations preserve
+the previous session values. Returned values obey normal runtime value budgets.
+
+IDs contain 256 random bits from the OS random source. Unknown/invalid-format,
+expired, or revoked IDs cannot select/create an attacker-chosen session: a new ID
+is generated instead. Duplicate session cookies or malformed Cookie syntax cause
+`SessionError` on start. Regeneration invalidates the old token on a successful
+commit; destroying writes an empty revoked record and expires the cookie.
+
+A per-session lock serializes concurrent requests from the same session to avoid
+lost updates. Other sessions execute independently except for short directory
+maintenance/commit locks. Lock waits check cancellation and have a 30-second
+ceiling; the host request deadline can terminate a blocked worker sooner. The OS
+releases its locks on exit, including abrupt worker death. Use close before slow
+unrelated work if you no longer need session access.
+
+Without close, the host commits only after script exit 0 and successful bounded
+body generation. Uncaught script errors, nonzero exits, and output overflow before
+that point discard changes. Storage is replaced atomically, and persistence
+failure turns the response into a generic 500 before headers/body are sent.
+Network failure or a deadline during the final commit/transmission can leave a
+completed commit without a delivered response; HTTP delivery and disk storage
+are not one transaction. Regeneration/commit errors do not expose a new token in
+the generic error response.
+
+Session responses use `Cache-Control: no-store`. The session cookie is host-only,
+Path=/, HttpOnly, SameSite=Lax, and Secure by default, with Max-Age matching the
+idle lifetime. Successful commits refresh the server expiry and browser lifetime. Persistent
+expiry uses Unix milliseconds; host date/time adjustments affect expiry.
+Session storage defaults to a private temporary directory, 30-minute idle expiry,
+10000 records, and 64 KiB per session. Explicit host options can select persistent
+storage and adjust limits; see [hosting options](web-servers.md#sessions-and-cookies).
+A rotation can temporarily reserve one extra record; expired/revoked/uncommitted
+records and abandoned staging files are reclaimed when creating new records.
+Expired records are never accepted while awaiting reclamation.
+
+```scr
+<?scripta
+Session::start();
+$visits = Session::get("visits", 0) + 1;
+Session::set("visits", $visits);
+Session::close();
+Web::header("Content-Type", "application/json; charset=utf-8");
+echo Json::encode(["visits" => $visits]);
+```
+
+The file backend is for trusted applications on one host using local storage;
+records are private plaintext, not encrypted. Persistent directories must be
+outside the public document root, dedicated to one application, and accessible
+only to its service account. Unix directories/files must be private, symlink
+entries are rejected, and hard links are rejected on Unix. Windows relies on the
+OS account's directory ACLs; configure private ACLs for persistent storage. This
+does not grant scripts arbitrary filesystem access beyond existing policies.
+Independent hosts without the same store do not share sessions; distributed
+session backends are not implemented. Sessions do not supply authentication, authorization, or CSRF protection.
+Use the [Password module](#passwords) for password hashing and verification. See the runnable
+[session example](../examples/web-sessions.scripta).
 
 ## HTTP
 
@@ -1483,3 +1828,323 @@ Diagnostics mask literal/comment excerpts and redact known credential values;
 ContextOptions.redacted_values adds host-provided values. Script catch values and
 explicit echo output retain their ordinary semantics. No implicit network logging
 or background daemon is installed by library registration.
+
+## Output buffers and flushing
+
+These eleven native functions are available in CLI scripts and web requests.
+They do not add syntax. Output buffers are binary: retrieval returns `bytes`,
+with `Bytes::decodeUtf8` available for explicit strict text decoding.
+
+| Function | Behavior |
+| --- | --- |
+| `ob_start(): null` | Push an empty application buffer. |
+| `ob_flush(): null` | Drain the top buffer into its parent (or host writer), leaving it active and empty. |
+| `ob_end_flush(): null` | Drain and remove the top buffer. |
+| `ob_clean(): null` | Discard the top buffer's bytes, keeping it active. |
+| `ob_end_clean(): null` | Discard and remove the top buffer. |
+| `ob_get_contents(): bytes or null` | Copy the top buffer; null when no buffer exists. |
+| `ob_get_clean(): bytes` | Copy then discard/remove the top buffer. |
+| `ob_get_flush(): bytes` | Copy then drain/remove the top buffer. |
+| `ob_get_length(): int or null` | Top buffer's byte length, or null without a buffer. |
+| `ob_get_level(): int` | Number of active application buffers. |
+| `flush(): null` | Request a flush of the underlying host writer. Does not drain application buffers. |
+
+Drain/clean operations requiring a buffer raise `OutputError` when none is
+active. Signatures take no arguments; callbacks, transformations, implicit
+flushing, and threshold/chunk-size options are not supported. Retrieval checks
+its complete result budget before copying or removing/draining a buffer; failed
+result-budget or result-allocation checks preserve the buffer and assignment
+destination. A writer failure during drain can already have emitted partial data
+and prevents successful finalization. Embedded hosts set
+`RuntimeOptions.max_output_buffer_bytes` (default 8 MiB, hard ceiling 64 MiB)
+and `max_output_buffers` (default 32, hard ceiling 128). Pending bytes are counted
+across all levels. Cleaning releases storage; draining does not count the same
+bytes as new output. `max_output_bytes` optionally caps cumulative generated
+bytes, including bytes subsequently discarded. The CLI leaves that cumulative
+limit unset; `scripta serve` sets it to `--max-response-bytes` and caps pending
+application buffers at the smaller of that limit and 8 MiB.
+
+Buffers are local to one execution, shared by functions and required modules.
+On normal completion (including `exit`), remaining buffers drain from inner to
+outer without requesting a transport flush. Uncaught exceptions, cancellation,
+and fatal execution limits discard remaining application buffers. Output already
+sent to a host writer cannot be rolled back. Writer failures and pending/total
+output-limit failures remain sticky even if native errors are caught; they prevent
+successful finalization. Nesting/no-active-buffer errors can be caught normally.
+Output flushing uses the caller's writer and does not flush the diagnostic stream.
+
+For web responses, `ob_flush()` alone does not send the HTTP response. Use:
+
+```scr
+<?scripta
+Web::header("Content-Type", "text/plain; charset=utf-8");
+ob_start();
+echo "Starting\n";
+ob_flush();
+flush();
+// Headers and sessions are now closed to further changes.
+echo "Finished\n";
+ob_end_flush();
+```
+
+Web transport uses bounded body chunks with backpressure and the request deadline.
+A successful `flush()` means the host accepted the pending chunks; proxy,
+compression, TCP, and browser buffering may delay visible output. It does not
+acknowledge that a remote client consumed the bytes. See
+[the streaming example](../examples/web-streaming.scripta).
+
+## General streams
+
+`Stream` supplies binary I/O without changing the existing `FileStream` line
+reader, `File::openLines`, `File::readLine`, or `File::close` APIs. New handles are
+`ByteStream` (file, HTTP response, connected TCP) or `DatagramSocket` (connected
+UDP). Handles are read-only native objects with `closed`, `readable`, `writable`,
+`seekable`, `status` (HTTP status or null), and `headers` (HTTP header map or empty
+map). Mode properties describe the configured mode even after close.
+
+| Function | Contract |
+| --- | --- |
+| `Stream::open(uri: string, mode: string optional, options = []): ByteStream or DatagramSocket` | Opens a file, HTTP response body, or connected transport. Default mode is `r` for files/HTTP, `rw` for TCP/UDP. |
+| `Stream::request(method: string, url: string, source: ByteStream, options = []): ByteStream` | Sends an incrementally consumed **readable file or request-input stream** as an HTTP request body, returning a readable HTTP response stream. Source is not closed on success. |
+| `Stream::read(stream: ByteStream, length: int): bytes or null` | Reads up to the requested count; short reads are valid. Positive reads return null only at EOF. Zero length returns empty bytes without consuming input or changing EOF. |
+| `Stream::write(stream: ByteStream, data: bytes): int` | Writes up to one bounded chunk; returns the actual count, possibly short. Call again for unwritten bytes. Strings require `Bytes::encodeUtf8`. |
+| `Stream::flush(stream): null` | Flushes a writable file/TCP handle; UDP is a no-op. Read-only HTTP/input handles reject it. Does not flush script output buffers or guarantee durable disk storage. |
+| `Stream::close(stream): null` | Closes shared handle state. Idempotent for an owned handle; aliases also become closed. Requires ownership, but no I/O capability for cleanup. |
+| `Stream::seek(stream: ByteStream, offset: int, origin: string = "start"): int` | File-only seek; `start` uses nonnegative offsets, `current`/`end` accept signed offsets. Returns the new position and clears EOF. |
+| `Stream::tell(stream: ByteStream): int` | File-only current position; does not change EOF. |
+| `Stream::eof(stream: ByteStream): bool` | True after a positive read observes EOF. A short nonempty read does not establish EOF. |
+| `Stream::copy(source: ByteStream, destination: ByteStream, maxBytes: int): int` | Copies up to a bounded count using at most 64 KiB chunks, completing short writes. Rejects the same handle. Validates count against both handles' remaining transfer budgets before I/O. |
+| `Stream::send(socket: DatagramSocket, data: bytes): int` | Sends exactly one UDP datagram, including a zero-length packet. |
+| `Stream::receive(socket: DatagramSocket, length: int): map` | Receives exactly one packet and returns `data: bytes`, `address: string` (source IP), `port: int`, and `truncated: bool`. Keeps at most length bytes and discards the remainder of that packet. Empty packets remain ordinary results. |
+
+### Wrappers and file modes
+
+Bare paths use the native platform's path rules and the runtime working
+directory. `file:///absolute/path` explicitly percent-decodes a UTF-8 local path;
+use `file:///C:/path` on Windows. Literal plus stays plus. File wrapper URLs have
+no authority, query, or fragment; remote/UNC file URLs are unsupported. Bare
+native UNC paths retain the existing filesystem path rules. Unrecognized
+`scheme://` wrappers raise `StreamError`. HTTP/TCP/UDP wrappers use lowercase
+scheme spellings. TCP/UDP endpoints require **literal IP addresses and ports
+1–65535**, for example `tcp://127.0.0.1:9000` or `udp://[::1]:9000`; hostname
+resolution is not implicit. See [low-level sockets](#low-level-sockets) for
+listeners, binds, readiness, and supported socket configuration. Connected UDP binds an ephemeral wildcard local port.
+
+| File mode | Read | Write | Opening behavior |
+| --- | --- | --- | --- |
+| `r` | Yes | No | Existing file; no mutation. |
+| `r+` | Yes | Yes | Existing file; preserves contents. |
+| `w`, `w+` | Only `w+` | Yes | Create or truncate after validation. |
+| `a`, `a+` | Only `a+` | Yes | Create if absent; every write appends even after seek. |
+| `x`, `x+` | Only `x+` | Yes | Exclusive creation; refuses any existing destination. |
+
+Files must be regular and cannot be final symlinks. Write modes reject read-only
+files even if the OS account could bypass their read-only flag. Read/write modes
+require both filesystem capabilities and the corresponding `FilesystemPolicy`
+flags/roots at open. Later operations check their capabilities; the opened
+descriptor retains its original authority if its path is renamed. Validation and
+result-size checks run before file creation/truncation. Successful opening in `w`
+mode is itself a truncation; subsequent failure does not undo it. Writes and copy
+are incremental effects, with no atomic rollback after partial I/O. Use `x` to
+refuse overwrite and `File::writeAtomic` for the separate UTF-8 atomic replacement
+contract. `seek` does not reset transfer accounting. Filesystem blocking calls
+cannot be forcibly interrupted by an in-process runtime.
+
+### HTTP and transport policy
+
+HTTP/HTTPS `open` accepts only `r`, performs a GET, and returns after headers
+without materializing the response body. Status errors remain readable responses,
+as with `Http::request`. Response `headers` preserve repeated values as lists.
+`Stream::request` supports request methods except CONNECT and consumes a readable
+file source from its current offset. Request-owned raw-body/upload input streams are also accepted; they contain
+already-received data. Network response/TCP handles cannot be used
+as upload sources, so pulling one connection cannot bypass
+another request's timeout. Failed uploads may consume or close the source and
+can have remote effects. Upload bodies are not replayed: redirects are disabled
+for uploads, `maxRedirects` must be zero if supplied, and a 3xx response is returned
+for application handling. GET response streams keep the existing bounded
+redirect policy, verified Rustls TLS, HTTPS downgrade prevention, managed framing,
+credential-free absolute URL validation, and disabled implicit proxies. There is
+no option to disable certificate verification.
+
+Files require `filesystem.read`/`filesystem.write`; HTTP requires `http.request`.
+TCP requires `network.connect`. UDP requires both `network.connect` and
+`network.datagram`. These outgoing capabilities are enabled in the default
+trusted-automation permission set and can be removed by an embedding host. This
+is not an OS sandbox. UDP is not a byte stream: generic read/write/copy/seek APIs
+reject it. UDP send payloads and requested receive lengths are at most 65507 bytes;
+receive uses a bounded 64 KiB working buffer to measure the full incoming packet,
+charges all received bytes (including discarded bytes), and reports truncation.
+There is no UDP EOF; empty packets and timeouts are distinct.
+
+### Limits, deadlines, and lifecycle
+
+Options are a map or empty list. `maxBytes` can only lower the handle's host
+transfer ceiling. Each handle counts bytes read **plus** bytes written, including
+repeated reads after seeks and full received datagrams. Exactly at the read
+ceiling, a subsequent positive read probes at most one byte: EOF succeeds, while
+extra data closes the stream with `StreamLimitError`. Failed reads never assign
+partial results. Write requests exceeding the remaining budget fail before I/O.
+Copy conservatively requires its maximum count to fit both remaining budgets,
+even if EOF could occur sooner. Transfers between two handles count against each
+handle separately. Zero-length operations still validate ownership and mode.
+
+`timeoutMs` applies to network streams only and may only lower the host timeout.
+File opens reject it. HTTP options also accept the existing validated `headers`,
+`maxBodyBytes`, and `maxRedirects`; body/framing/response-type options are not
+accepted. HTTP response ceilings can only be lowered, and the smaller of the
+stream and HTTP host limits applies. An HTTP deadline starts when the request
+starts and continues through later body reads, including time spent between
+script calls. Socket deadlines apply per operation. Socket read/write/receive
+waits poll cancellation at intervals up to 50 ms. TCP connection setup and HTTP
+backend/DNS/TLS waits remain bounded backend operations; cancellation is checked
+before/after calls and between body chunks. Web worker supervision supplies an
+outer process deadline for blocked native work.
+
+`StdlibOptions.streams: StreamConfig` defaults to 64 live handles, 65536 bytes per
+chunk, 67108864 transfer bytes per handle, and 30 seconds per network operation.
+Host ceilings are 1024 handles, 1 MiB per chunk, 1 GiB transfer bytes, and one hour.
+The HTTP host's default 8 MiB response ceiling still applies. Pending response
+bytes are not retained in the native object; its logical payload reports metadata.
+`read` preflights the **requested maximum result**, even when a shorter read might
+fit. UDP similarly preflights payload/map slots plus a maximum-length IPv6 address.
+This is a logical value budget, not a process heap cap.
+
+Handles require their actual native type and original runtime identity; spoofed
+or foreign handles are rejected. Close is shared and idempotent. I/O errors,
+timeouts, transfer overrun during read, and in-operation cancellation close the
+handle to avoid resuming an ambiguous transfer. Type/range/budget/permission
+validation errors leave it usable. Dropping the last handle reference closes the
+descriptor and releases the live-handle slot. Normal runtime teardown releases
+script-owned handles; host-retained values stay owned by the host until dropped.
+Fatal cancellation can bypass script `finally`, so cleanup uses Rust RAII.
+
+See [binary copying](../examples/binary-streams.scripta) and
+[streamed HTTP uploads](../examples/http-stream-upload.scripta).
+
+## Upload and download contract
+
+The host automatically parses multipart metadata into `$request->uploads()`;
+applications do not register temporary paths. `UploadedFile` handles are bound to
+the originating request/runtime and cannot be constructed from a script path.
+`moveTo()` checks that handle, its lifetime, and destination policy before copying
+through supervisor-owned staging and publishing without overwrite. Temporary
+input is removed on normal completion or after a failed/timed-out worker is
+stopped. Submitted filenames and media hints remain untrusted. Use `stream()`
+to inspect binary signatures or application formats before saving; the API does
+not claim a client's MIME string is verified content.
+
+| PHP capability | Scripta equivalent / policy |
+| --- | --- |
+| `$_FILES` original name, MIME hint, size | `UploadedFile.filename`, `.mediaType`, `.size`, plus `.fieldName`; repeated names remain ordered handles. |
+| `$_FILES` temporary path | Private host storage, deliberately absent from script properties. Use `.stream()` to inspect contents. |
+| `$_FILES` per-file upload error | Malformed/oversized/unsupported requests are rejected before application execution (400/413/415); aggregate spool exhaustion returns 503. No partially accepted upload handles are presented. Empty browser selections are omitted. |
+| `move_uploaded_file()` | `$upload->moveTo($applicationDestination)`, requiring the original live native handle and refusing overwrite. |
+| `php://input` | `$request->bodyStream()` for bounded binary reads/copies; `$request->bytes()`/`text()` materialize the full body only under value limits. |
+
+PHP documents its upload metadata, client-supplied MIME hints, temporary-file
+cleanup, and move verification in the [upload manual](https://www.php.net/manual/en/features.file-upload.post-method.php)
+and [move_uploaded_file reference](https://www.php.net/manual/en/function.move-uploaded-file.php).
+Its [input wrapper reference](https://www.php.net/manual/en/wrappers.php.php)
+describes `php://input`, including multipart configuration caveats. Scripta uses
+explicit request objects rather than introducing superglobals or PHP wrapper
+spellings. Raw bytes remain available for both ordinary and multipart requests.
+
+The supervisor spools nonempty raw bodies before dispatch rather than copying
+large binary payloads through worker IPC. Request streams read the fully received
+spool in bounded chunks; scripts do not execute concurrently with an unfinished
+client upload. All bodies retain the request byte/time limits and share the host
+spool disk budget. Empty bodies need no spool. Raw input is not an `UploadedFile`;
+applications choose a destination explicitly using a writable stream and normal
+filesystem policy. Every input cursor shares the configured stream-handle quota.
+Request completion closes input descriptors and releases their quota, even when
+Rust hosts retain a stream value. Expired or foreign request streams reject I/O.
+
+`Web::download` requires an actual readable file stream, a basename of 1–255
+UTF-8 bytes without path separators/control characters, and an unused response
+body with no active output buffer. It preflights the known remaining file size
+against source-transfer and output budgets before committing headers. It supplies
+`application/octet-stream`, `Content-Disposition: attachment` with a quoted ASCII
+fallback and encoded UTF-8 `filename*`, `X-Content-Type-Options: nosniff`, and
+`Accept-Ranges: none`. Source filesystem permissions were checked at open and are
+checked again for reads. Sessions close before the first transmission. Transfer
+uses bounded chunks and flush acknowledgements/backpressure; failures after
+commit terminate the response. Call `exit 0` afterward to avoid appending other
+application output. The source remains caller-owned and should be closed in
+`finally`. HEAD sends metadata without reading the payload. This is a whole-file
+transfer from the current position; range/resumable responses are not advertised.
+Concurrent source-file mutation is not a snapshot or locking guarantee.
+
+See the [raw-upload/download example](../examples/web-transfers.scripta), the
+[multipart form example](../examples/web-uploads.scripta), and outgoing
+[`Http::download`](#http), which retains exclusive staged publication and cleanup
+rather than overwriting an existing destination.
+
+## Low-level sockets
+
+Socket operations share `ByteStream`/`DatagramSocket` handles, identity checks,
+closed state, cumulative byte limits, and the registered `StreamConfig` handle
+quota. `SocketListener` is a separate read-only handle type. Existing connected
+`Stream::open("tcp://...")`/UDP adapters use the same safe readiness backend.
+Only IPv4/IPv6 literal addresses are supported; ports are checked integers.
+There are no privileged raw IP, Unix-domain, WebSocket, or application event-loop
+APIs. Applications can build protocols and scheduling in script code.
+
+| Function | Contract |
+| --- | --- |
+| `Socket::connect(address: string, port: int, options = []): ByteStream` | Connects TCP to a literal IP and port 1–65535. Handshake is a bounded blocking backend call, then I/O honors the logical blocking mode. |
+| `Socket::listen(address: string, port: int, options = []): SocketListener` | Binds and listens in one operation; port 0 chooses an ephemeral port. |
+| `Socket::accept(listener: SocketListener): ByteStream` | Accepts at most one connection. Reserves a handle slot before removing a connection from the queue. Accepted sockets inherit logical blocking mode, timeout, and transfer ceiling. |
+| `Socket::bindDatagram(address: string, port: int, options = []): DatagramSocket` | Binds unconnected UDP; port 0 is allowed. |
+| `Socket::read(socket: ByteStream, length: int): bytes or null` | TCP read with the same binary/short-read/EOF rules as `Stream::read`. |
+| `Socket::write(socket: ByteStream, data: bytes): int` | TCP write returning actual bytes written; finish short writes explicitly. |
+| `Socket::receive(socket: DatagramSocket, length: int): map` | One UDP packet, preserving empty packets and reporting sender/truncation; same result as `Stream::receive`. |
+| `Socket::sendTo(socket: DatagramSocket, data: bytes, address: string, port: int): int` | One packet to a literal peer from an unconnected bound UDP socket. Connected UDP uses `Stream::send`. |
+| `Socket::shutdown(socket: ByteStream, direction: string): null` | TCP half/full shutdown: `read`, `write`, or `both`. Does not close the handle or release its slot. |
+| `Socket::close(socket): null` | Shared, idempotent close for TCP/UDP/listeners; no I/O capability needed for cleanup. |
+| `Socket::setBlocking(socket, blocking: bool): null` | Sets logical blocking behavior, shared by aliases. |
+| `Socket::setTimeout(socket, milliseconds: int): null` | Sets a positive operation timeout within the host ceiling. |
+| `Socket::poll(read: list, write: list, milliseconds: int): map` | Returns `readable`/`writable` lists of ready handles; unique results preserve each input list's order. Zero timeout probes immediately; EOF/error readiness is included. Requires at least one socket. |
+| `Socket::localAddress(socket): map` | `address` and `port` of the bound endpoint. |
+| `Socket::peerAddress(socket): map` | Connected TCP/UDP peer; errors for listeners and unconnected UDP. |
+| `Socket::setOption(socket, name: string, value): null` | Supported runtime options below; strict types. |
+| `Socket::getOption(socket, name: string): bool or int` | Returns the OS-reported option, which may differ from the requested buffer size. |
+
+Open options accept `timeoutMs`/`maxBytes` as lower host ceilings and
+`blocking: bool` (default true). Connect also accepts `noDelay: bool` (false).
+Listen accepts `backlog: int` (1–4096, default 128), `reuseAddress: bool` (false),
+and `ipv6Only: bool` (true, IPv6 only). Bind-datagram accepts the latter two.
+Options not applicable to that operation/family are rejected before binding.
+`reuseAddress: true` is explicitly unsupported on Windows because reuse semantics
+differ; other option availability/errors follow the OS. Runtime `noDelay` and
+`keepAlive` require TCP and bool values. `receiveBufferBytes`/`sendBufferBytes`
+accept ints 1024–4194304; OS rounding/limits are reported by `getOption`.
+Creation-only options cannot be changed through `setOption`.
+
+Blocking read/write/accept/receive waits use Mio OS readiness and check
+cancellation at intervals up to 50 ms. Nonblocking operations raise
+`WouldBlockError` when not ready, leaving handles open; they do not return EOF or
+an empty UDP packet. Poll bounds list lengths to the host handle ceiling, checks
+result budgets before waiting, and observes cancellation. Readiness is advisory:
+retry I/O and handle `WouldBlockError` after a poll. File/HTTP/request-input handles
+cannot be polled or passed through `Socket` I/O functions.
+
+TCP client access requires `network.connect`. Listen/accept and accepted TCP
+connections require `network.listen`. Bound UDP requires `network.bind` plus
+`network.datagram`; sending to a new peer additionally requires `network.connect`.
+Default trusted CLI automation grants these capabilities. The web request worker
+removes `network.listen` and `network.bind`; embedders choose their own permission
+sets. These are cooperative capabilities, not an OS sandbox. Backlog and combined
+live-handle limits bound pending/accepted resources; each accept creates one
+handle. Long-running servers should also choose execution limits appropriate to
+the host. No unlimited accept batch or unbounded user-space queue is provided.
+
+Stream data errors follow the stream lifecycle rules (fatal I/O/timeouts close,
+`WouldBlockError` does not). Listener accept timeout/errors preserve the listener,
+and option/address/shutdown failures leave the handle available for cleanup.
+UDP send-to errors report packet failure without a successful byte count. Closing
+the last reference/normal runtime teardown releases descriptors through RAII.
+Mio supplies safe cross-platform OS polling; Socket2 supplies safe bind/listen and
+options. Both existing dependency versions support Rust 1.85; no unsafe Rust is
+introduced in the workspace. OS-specific behavior still requires native platform
+validation. See the [one-connection echo server](../examples/socket-echo.scripta).

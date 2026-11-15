@@ -21,7 +21,7 @@ fn register(runtime: &mut scr_runtime::Runtime) -> scr_runtime::NativeResult<()>
 }
 pub(crate) fn worker(arguments: Vec<OsString>) -> ExitCode {
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-        if arguments.len() != 7 {
+        if arguments.len() != 8 {
             return Err("invalid internal worker arguments".into());
         }
         let output = arguments[1]
@@ -52,6 +52,7 @@ pub(crate) fn worker(arguments: Vec<OsString>) -> ExitCode {
             output,
             crate::entry::limits()?,
             sessions,
+            arguments[7].clone().into(),
             register,
         )
     })();
@@ -99,6 +100,10 @@ fn config(arguments: Vec<OsString>) -> Result<scr_web::Config, Box<dyn std::erro
         let value = arguments
             .next()
             .ok_or_else(|| format!("missing value for {key}"))?;
+        if key == "--upload-temp-dir" {
+            config.uploads.directory = value.into();
+            continue;
+        }
         if key == "--session-dir" {
             config.sessions.directory = value.into();
             if config.sessions.directory.as_os_str().is_empty() {
@@ -108,6 +113,13 @@ fn config(arguments: Vec<OsString>) -> Result<scr_web::Config, Box<dyn std::erro
         }
         let value = value.to_str().ok_or("option value must be UTF-8")?;
         match key {
+            "--upload-max-file-bytes" => config.uploads.max_file_bytes = value.parse()?,
+            "--upload-max-files" => config.uploads.max_files = value.parse()?,
+            "--upload-max-fields" => config.uploads.max_fields = value.parse()?,
+            "--upload-max-field-bytes" => config.uploads.max_field_bytes = value.parse()?,
+            "--upload-max-fields-bytes" => config.uploads.max_fields_bytes = value.parse()?,
+            "--upload-max-header-bytes" => config.uploads.max_header_bytes = value.parse()?,
+            "--upload-max-disk-bytes" => config.uploads.max_disk_bytes = value.parse()?,
             "--session-ttl-seconds" => config.sessions.ttl = Duration::from_secs(value.parse()?),
             "--session-max-records" => config.sessions.max_sessions = value.parse()?,
             "--session-max-bytes" => config.sessions.max_bytes = value.parse()?,

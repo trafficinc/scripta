@@ -568,3 +568,144 @@ fn windows_readonly_file_errors_preserve_contents() {
     assert!(result.unwrap_err().message.starts_with("PermissionError:"));
     assert_eq!(fs::read_to_string(path).unwrap(), "original");
 }
+
+#[test]
+fn all_entries_are_sorted_snapshots_and_canonical_is_read_only() {
+    let temp = Temp::new();
+    fs::create_dir(temp.0.join("z directory")).unwrap();
+    fs::write(temp.0.join("a café"), "data").unwrap();
+    let mut runtime = temp.runtime();
+    run(
+        &mut runtime,
+        r#"$rows = Dir::entries('.');
+        $name = $rows[0]['name']; $file = $rows[0]['isFile'];
+        $dir = $rows[1]['isDirectory']; $link = $rows[1]['isSymlink'];
+        $before = Dir::current(); $canonical = Path::canonical('z directory/..');
+        $after = Dir::current();"#,
+    )
+    .unwrap();
+    assert_eq!(string(&runtime, "name"), "a café");
+    assert_eq!(runtime.get_global("file"), Some(&Value::Bool(true)));
+    assert_eq!(runtime.get_global("dir"), Some(&Value::Bool(true)));
+    assert_eq!(runtime.get_global("link"), Some(&Value::Bool(false)));
+    assert_eq!(string(&runtime, "before"), string(&runtime, "after"));
+    assert_eq!(string(&runtime, "canonical"), temp.0.to_str().unwrap());
+    error(
+        &mut runtime,
+        "Path::canonical('missing');",
+        "FileNotFoundError",
+    );
+    let mut denied = temp.with_policy(FilesystemPolicy {
+        read: false,
+        ..Default::default()
+    });
+    error(&mut denied, "Dir::entries('.');", "PermissionError");
+    error(&mut denied, "Path::canonical('.');", "PermissionError");
+}
+
+#[cfg(unix)]
+#[test]
+fn link_entries_do_not_follow_targets_and_canonical_obeys_roots() {
+    use std::os::unix::fs::symlink;
+    let temp = Temp::new();
+    let outside = Temp::new();
+    fs::create_dir(temp.0.join("real")).unwrap();
+    symlink("real", temp.0.join("alias")).unwrap();
+    symlink("missing", temp.0.join("dangling")).unwrap();
+    symlink(".", temp.0.join("cycle")).unwrap();
+    symlink(&outside.0, temp.0.join("escape")).unwrap();
+    let mut runtime = temp.with_policy(FilesystemPolicy {
+        roots: Some(vec![temp.0.clone()]),
+        ..Default::default()
+    });
+    run(
+        &mut runtime,
+        r#"$rows = Dir::entries('.');
+        $alias = $rows[0]['isSymlink']; $dangling = $rows[2]['isSymlink'];
+        $root = Path::canonical('cycle'); $real = Path::canonical('alias');"#,
+    )
+    .unwrap();
+    assert_eq!(runtime.get_global("alias"), Some(&Value::Bool(true)));
+    assert_eq!(runtime.get_global("dangling"), Some(&Value::Bool(true)));
+    assert_eq!(string(&runtime, "root"), temp.0.to_str().unwrap());
+    assert_eq!(
+        string(&runtime, "real"),
+        temp.0.join("real").to_str().unwrap()
+    );
+    error(
+        &mut runtime,
+        "Path::canonical('escape');",
+        "PermissionError",
+    );
+    error(
+        &mut runtime,
+        "Path::canonical('dangling');",
+        "FileNotFoundError",
+    );
+    error(&mut runtime, "Dir::entries('alias');", "FilesystemError");
+}
+
+#[test]
+fn all_entries_enforces_exact_logical_output_budget() {
+    let temp = Temp::new();
+    fs::write(temp.0.join("entry"), "data").unwrap();
+    let name = "entry";
+    let path = temp.0.join(name);
+    let keys = ["name", "path", "isDirectory", "isFile", "isSymlink"];
+    let needed = 2 * std::mem::size_of::<Value>()
+        + name.len()
+        + path.to_str().unwrap().len()
+        + keys
+            .iter()
+            .map(|key| {
+                std::mem::size_of::<scr_runtime::MapKey>()
+                    + key.len()
+                    + std::mem::size_of::<Value>()
+            })
+            .sum::<usize>();
+    for (limit, succeeds) in [(needed, true), (needed - 1, false)] {
+        let mut runtime = Runtime::with_options(RuntimeOptions {
+            max_value_bytes: Some(limit),
+            context: ContextOptions {
+                working_directory: temp.0.clone(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        scr_stdlib::register_with_filesystem_policy(&mut runtime, FilesystemPolicy::default())
+            .unwrap();
+        if succeeds {
+            run(&mut runtime, "Dir::entries(Dir::current());").unwrap();
+        } else {
+            error(
+                &mut runtime,
+                "Dir::entries(Dir::current());",
+                "ResourceLimitError",
+            );
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn directory_junctions_are_visible_and_resolve_to_their_target() {
+    let temp = Temp::new();
+    fs::create_dir(temp.0.join("target")).unwrap();
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(temp.0.join("junction"))
+        .arg(temp.0.join("target"))
+        .status()
+        .unwrap();
+    assert!(status.success(), "junction fixture creation failed");
+    let mut runtime = temp.runtime();
+    run(&mut runtime, "$rows = Dir::entries('.'); $link = $rows[0]['isSymlink']; $target = Path::canonical('junction');").unwrap();
+    assert_eq!(runtime.get_global("link"), Some(&Value::Bool(true)));
+    assert_eq!(
+        string(&runtime, "target"),
+        fs::canonicalize(temp.0.join("target"))
+            .unwrap()
+            .to_str()
+            .unwrap()
+    );
+}

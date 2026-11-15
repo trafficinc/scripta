@@ -555,7 +555,7 @@ examples and have not been deployment-tested in this checkout.
 
 ## Standard library
 
-The [complete reference](docs/standard-library.md) documents all **161 default CLI functions** and six request-context Web functions,
+The [complete reference](docs/standard-library.md) documents all **207 default CLI functions** and 19 request-context Web/Session functions,
 return values, native objects, limits, and errors.
 
 | Modules | Use |
@@ -566,9 +566,13 @@ return values, native objects, limits, and errors.
 | `System` | Platform, CPU sampling, system memory, disk usage, and host details. |
 | `Date`, `Log` | UTC timestamps, parsing, sleep, and redacted local JSON logs. |
 | `Clock` | Monotonic elapsed-time measurement with fractional milliseconds, independent of calendar time. |
-| `Web` (request context) | Incoming HTTP requests, response status/headers, redirects, and bounded text/binary output. |
+| `Socket` | TCP listeners/clients, UDP endpoints, half-close, options, and OS readiness polling. |
+| `Stream` | Bounded binary file and HTTP streams, connected TCP, and UDP datagrams. |
+| `Web`, `Session` (request context) | Incoming requests, responses, redirects, multipart forms/uploads, cookies, and bounded server-side sessions shared across workers. |
 | `Json`, `Http` | JSON conversion, binary HTTP/HTTPS requests, and downloads directly to disk. |
 | `Sqlite` | Bundled local databases, parameterized SQL, transactions, and bounded query results. |
+| `Password` | Argon2id hashing, verification, and rehash detection with bounded native work. |
+| `Html` | Escape UTF-8 text for HTML text nodes and quoted attribute values. |
 | `Url`, `Form` | UTF-8 percent/query encoding and form bodies. |
 | `Bytes`, `Csv`, `Regex` | Explicit UTF-8 conversion, byte slicing, CSV records and streams, and simple Rust-backed regex. |
 | `String` | Grapheme length/slicing for emoji and combining text; trim, split/join, search, replace, take substrings, convert case, and format scalar values with `{}`. |
