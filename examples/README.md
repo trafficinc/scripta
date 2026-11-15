@@ -76,3 +76,24 @@ optionally resolves links under the runtime's filesystem read/root policies.
 preference cookies, and early session close. For local HTTP, run
 `scripta serve examples/web-sessions.scripta --session-cookie-secure false`.
 Keep the Secure session-cookie default for public HTTPS deployments.
+
+`serve.toml` is an optional server configuration example. Run
+`scripta serve examples/web-app.scripta --config examples/serve.toml` from the
+repository root. Add `--check-config` to validate without listening or
+`--print-config` to inspect redacted effective settings. CLI options override the
+file. See [server configuration](../docs/web-servers.md#server-configuration).
+
+`web-proxy.scripta`, `proxy-serve.toml`, and `Caddyfile.proxy` demonstrate resolved
+client/origin metadata and redirects behind an explicitly trusted proxy. Replace
+`app.example.com` in both configurations before deployment. Run
+`scripta serve examples/web-proxy.scripta --config examples/proxy-serve.toml`;
+see [proxy trust](../docs/web-servers.md#trusted-proxy-metadata-and-allowed-hosts)
+for the companion Caddy command, allowlist rules, and forwarded-header contract.
+
+`observe-serve.toml` enables JSON host logs and a separate loopback health listener
+while serving `web-proxy.scripta`. Start with
+`scripta serve examples/web-proxy.scripta --config examples/observe-serve.toml`,
+then request the application on port 8080 and `/livez`, `/readyz`, or `/metrics`
+on port 9090. These management paths never execute application code. See
+[logs and health checks](../docs/web-servers.md#logs-and-health-checks) for privacy,
+resource limits, and the current readiness/recovery limitations.

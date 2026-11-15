@@ -371,3 +371,16 @@ Underlying file/socket/HTTP readers and quota leases use RAII; host-retained
 handle values retain resources until closed/dropped. A host embedding synchronous
 native code must still supply an outer interruption strategy for blocking backend
 calls when its own deadline is stricter; the web host terminates worker processes.
+
+When embedding the request-scoped Web module, populate `web::Request.connection`
+with trusted `web::ConnectionInfo` metadata, or use `Default::default()` for unknown
+connection fields. The standard library exposes this as read-only request
+properties and does not parse forwarded headers to infer identity. HTTP hosts
+must apply their own explicit proxy trust and allowed-host policy before
+registration; `scripta serve` implements that in `scr-web`.
+
+Request hosts may also set `web::Request.request_id: Some(id)` to expose a
+read-only `WebRequest.requestId`; use `None` if unknown. Its bytes contribute to
+the request payload budget. `scripta serve` generates bounded IDs itself and
+correlates worker diagnostics in the supervisor; it never trusts an incoming
+request-ID header. Custom hosts own their ID and diagnostic privacy policies.

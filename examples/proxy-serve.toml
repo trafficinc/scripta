@@ -1,0 +1,7 @@
+# Start from the repository root; put the Caddy configuration in front for HTTPS.
+# scripta serve examples/web-proxy.scripta --config examples/proxy-serve.toml
+# Trust only the actual local proxy, and restrict backend access at the OS level.
+host = "127.0.0.1"
+port = 8080
+trusted-proxies = ["127.0.0.1/32"]
+allowed-hosts = ["app.example.com"]

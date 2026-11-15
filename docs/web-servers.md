@@ -46,6 +46,65 @@ implicit static file serving, or directory listing. Keep source, databases,
 credentials, and logs outside any directory your front-end server publishes.
 Configure the front-end server to serve a separate public directory for assets.
 
+## Server configuration
+
+Pass an optional TOML file after the entry script. No file is loaded implicitly:
+
+```sh
+scripta serve examples/web-app.scripta --config examples/serve.toml
+scripta serve examples/web-app.scripta --config examples/serve.toml --check-config
+scripta serve examples/web-app.scripta --config examples/serve.toml --print-config
+```
+
+Explicit CLI settings override file settings, which override defaults, regardless
+of where `--config` appears among the options. The entry script remains the first
+argument. Duplicate CLI options, duplicate TOML keys, unknown file keys, invalid
+types, and invalid effective limits are errors. File syntax/types are checked
+even when a CLI setting overrides the field. Files must be UTF-8 TOML, at most
+65536 bytes. No new dependency is needed for this format.
+
+File keys are the value-taking serve option names without `--`, using the same
+units and bounds. All are optional. Use TOML integers for counts/bytes/timeouts,
+a boolean for `session-cookie-secure`, strings for `host`, `session-dir`, and
+`upload-temp-dir`, `log-format`, and `health-address`, and arrays of strings for
+`trusted-proxies` and `allowed-hosts`. For example:
+
+```toml
+host = "127.0.0.1"
+port = 8080
+workers = 2
+queue = 32
+timeout-ms = 10000
+connection-timeout-ms = 60000
+header-timeout-ms = 10000
+drain-timeout-ms = 11000
+session-cookie-secure = true
+```
+
+Relative storage paths in a file resolve beside that file. CLI storage paths and
+the entry-script path resolve from the current working directory. Neither changes
+the application's working directory. Empty explicit storage paths are rejected;
+omit them to use private temporary stores. Missing upload directories require an
+existing parent; missing session ancestors may be created at startup.
+
+`--check-config` validates entry-script syntax, effective limits, and storage path
+shape/privacy without binding sockets, starting workers, executing the script, or
+creating storage. `--print-config` performs the same checks and prints effective
+settings as TOML. These modes are mutually exclusive. Private storage paths are
+replaced with `<configured>` or `<temporary>`; entry source, environment contents,
+and session records are not printed. The informational `[runtime]` table shows
+recognized effective runtime limits as decimal strings. Inspection output is not
+an input configuration file: its `[runtime]` table and directory placeholders must
+not be passed back as settings.
+
+The existing `SCR_MAX_STEPS`, `SCR_MAX_VALUE_BYTES`, `SCR_MAX_SCOPES`, and
+`SCR_MAX_SOURCE_BYTES` environment settings continue to configure runtime limits;
+they are not server-file keys or overridden by server flags. Unset web defaults
+remain one million checkpoints, 16 MiB per value, 4096 scopes, and the CLI's default
+source-byte ceiling. Validation does not prove that a port is available, directories
+are writable, workers can start, or application dependencies/runtime types are
+valid. Startup still prepares and rechecks storage before serving requests.
+
 ## Runtime and limits
 
 The HTTP host uses Hyper and Tokio. Persistent worker **processes** each parse the
@@ -70,14 +129,19 @@ service replacement for consistent multi-file deployments.
 | `--max-body-bytes` | `1048576` | 0–67108864, checked for both fixed and chunked bodies. |
 | `--max-response-bytes` | `8388608` | 1–67108864 application body bytes, including `echo` and `Web::write`. |
 | `--timeout-ms` | `10000` | 1–3600000, covering body reception, queue wait, worker recovery and execution. |
+| `--connection-timeout-ms` | `60000` | 1–3600000, total accepted connection lifetime, including response writes and idle keep-alive. |
+| `--header-timeout-ms` | `10000` | 1–3600000, time allowed to receive request headers; connection lifetime can end sooner. |
+| `--drain-timeout-ms` | `11000` | 1–3600000, one shared shutdown budget for draining connections and workers. |
 
 Additional fixed limits: request URI 8192 encoded bytes, header buffering 32 KiB,
-100 headers, response headers 32 KiB/100 entries, header-read timeout 10 seconds,
-and maximum connection lifetime 60 seconds (including response writes). A longer
-request timeout does not extend that connection lifetime. HTTP/1.1 keep-alive is
-supported within that lifetime. Request trailers, CONNECT, upgrades, WebSockets,
-and streaming responses are not supported. Non-ASCII header values are rejected
-on input; request bodies can contain arbitrary bytes.
+100 headers, and response headers 32 KiB/100 entries. Header-read timeout defaults
+to 10 seconds and maximum connection lifetime to 60 seconds (including response
+writes); both are configurable above. A longer request timeout does not extend
+the connection lifetime. These independent ceilings may be configured in any
+order: whichever applicable deadline arrives first ends the work. HTTP/1.1
+keep-alive and streaming responses are supported within these deadlines. Request
+trailers, CONNECT, upgrades, and WebSockets are not supported. Non-ASCII header
+values are rejected on input; request bodies can contain arbitrary bytes.
 
 The server reserves queue capacity before buffering bodies. Overload returns
 `503`, oversized bodies `413`, malformed requests `400`, worker transport failures
@@ -99,17 +163,131 @@ Response output is buffered before transmission unless the script calls `flush()
 Before that first transmission, uncaught errors, nonzero script
 exit, or output overflow discard application output and return a generic `500`.
 Error responses may exceed a deliberately tiny application output ceiling by a
-small fixed amount. Detailed diagnostics and status/duration access logs go to
-stderr, without request bodies or query strings. For streamed responses, the
-status/duration log records header readiness, rather than full body completion. `exit 0` finishes a valid response.
+small fixed amount. Bounded host events go to stderr, with separate
+header-readiness and response-body completion records. Default host events omit
+request contents and error/source text; see [logs and health checks](#logs-and-health-checks)
+for correlation, diagnostics, and delivery semantics. `exit 0` finishes a valid response.
 HEAD suppresses the transmitted body; statuses 204, 205, and 304 also send no body.
 Application code should recognize HEAD when it wants it to follow a GET route.
 
 Ctrl+C / termination signals stop new connections and allow a bounded drain of
-existing work before terminating remaining workers. Keep-alive connections can
-consume that drain interval. The parent is intended to run under an OS service
+existing work within `--drain-timeout-ms` before terminating remaining workers.
+The drain budget defaults to 11 seconds independently of `--timeout-ms`; increase
+it explicitly when longer in-flight requests should be allowed to finish.
+Keep-alive connections can consume that drain interval. The parent is intended to run under an OS service
 manager for restart after host failure. Worker stdin monitoring makes workers exit
 when their parent pipe closes, including while a request is blocked.
+
+## Logs and health checks
+
+Text host logs remain the default. Set `--log-format json` (or
+`log-format = "json"` in TOML) for JSON lines on stderr. Events include server
+startup/drain/stop, worker startup/failure, request diagnostics, connection errors,
+response headers, and response completion. JSON events include a numeric Unix
+`timestampMs`; response records include `durationMs` since request dispatch.
+Invalid configuration/startup errors from the CLI can still use its ordinary text
+error format. `serve` syntax failures omit source excerpts; use `scripta check`
+locally when detailed source diagnostics are needed.
+
+Every application request that reaches HTTP dispatch gets a bounded generated
+ID, exposed as read-only `$request->requestId` and returned in `X-Request-ID`,
+including host-generated rejection/error responses. Incoming request IDs are
+ignored, even from trusted proxies, and application response headers cannot
+replace the generated ID. IDs use a process/startup prefix and monotonic counter;
+they are correlation identifiers, not secret tokens or authentication credentials.
+Malformed HTTP rejected before dispatch has no request ID. The counter cannot
+wrap and reuse IDs; exhaustion rejects further dispatch with 503.
+
+`response_headers` records the selected status when the response is handed to
+Hyper. `response_finished` records body bytes handed to Hyper, duration, and an
+outcome: `complete`, `failed`, or `interrupted`. Streaming EOF completes the body;
+a body error fails it; dropping an unfinished response interrupts it. A complete
+500 response still has outcome `complete` because its HTTP body finished.
+HEAD/bodyless responses report zero body bytes. Body completion is not proof of
+socket delivery or browser receipt: a connection can fail after a full body was
+handed off. Such failures have separate connection events. Body counts exclude
+HTTP framing/TLS overhead and suppressed HEAD bytes. A HEAD/bodyless application
+may continue executing after its HTTP body completes; later worker diagnostics
+retain the same request ID.
+
+Supervisor and worker diagnostic events share `requestId`; worker events also
+carry numeric `workerPid` where available. Worker errors expose bounded diagnostic
+codes/categories and source-relative byte spans, without arbitrary messages,
+stack/source excerpts, or paths. Default host events never copy request paths,
+queries, headers, cookies, session IDs, bodies, or environment contents. This also
+prevents untrusted values from injecting extra log lines. There is no raw worker
+stderr passthrough to the host log.
+
+Explicit application `Log::*` stderr records are a separate policy: their existing
+standard-library redaction still applies, and they are wrapped as correlated,
+escaped `application_log` events. Each request can forward at most 16 records,
+each retaining at most 4096 input bytes; UTF-8 truncation can use a replacement
+character and sets `truncated`. Additional records are discarded. Applications
+remain responsible for avoiding sensitive data in deliberately written log
+messages. `Log::file` destinations remain application-managed files and do not
+acquire host correlation automatically. Logging uses bounded synchronous writes
+rather than an unbounded background queue; request deadlines still cover workers
+blocked while forwarding logs. A blocked host stderr sink can delay the supervisor.
+
+### Private management listener
+
+Health checks are disabled by default. Opt in with
+`--health-address 127.0.0.1:9090` or `health-address = "127.0.0.1:9090"` in TOML.
+Only explicit loopback IP addresses are accepted, including `[::1]:9090`; port 0
+selects a free port reported by the startup `health_listening` event (or the text
+health-listening line). The value `off` disables a file-configured listener.
+An exact nonzero address/port conflict with the application listener is rejected
+in configuration validation. Startup still checks actual bind availability.
+
+This is a separate listener: it never reserves application URL paths, executes
+scripts, uses application worker/queue slots, or trusts forwarded identities.
+GET and HEAD are supported; other methods return 405, bodies/query strings return
+400, and unknown paths return 404. Responses are JSON with `Cache-Control:
+no-store`. Do not expose this listener through a public reverse proxy. Loopback
+binding restricts network reachability, not access by other local processes; no
+management authentication system is supplied.
+
+| Path | Meaning |
+| --- | --- |
+| `/livez` | 200 while the supervisor's management service is responding. Does not assert application/database health. |
+| `/readyz` | 200 after startup when not draining, at least one worker has a known ready lease, and the admission queue is not full; otherwise 503. Busy workers alone do not make readiness fail if there is queue capacity. |
+| `/metrics` | 200 with a fixed JSON snapshot of counters and gauges; probes do not count as application requests. |
+
+The listener starts before worker initialization, so readiness is initially false.
+Termination signals make readiness false immediately; liveness and snapshots
+remain available during the bounded application drain. The health listener closes
+when draining finishes. It permits at most eight concurrent connections, with
+no keep-alive, a two-second header/connection lifetime, 8 KiB header buffering,
+and 32 headers per request.
+
+Snapshots contain server-lifetime saturating counters: `requests`,
+`responsesComplete`, `responsesFailed`, `responsesInterrupted`, `timeouts`
+(dispatch/worker request deadlines, deduplicated per request), `overload`
+(admission rejections), `serverErrors` (statuses 500 and above), `bodyBytes`,
+`workerFailures` (failed/cancelled/timed-out worker requests requiring replacement),
+`workerStarts`, `workerRestarts`, `rejectedConnections`, `connectionTimeouts`
+(header/total connection deadlines), and `connectionErrors`. Gauges are
+`activeRequests`, `queuedRequests` (including reserved body reception),
+`busyWorkers`, and `readyWorkers`; booleans are `ready`, `starting`, and `draining`.
+Snapshots read counters independently and are approximate under concurrency.
+There is no per-client/URL label, retained request history, or process heap metric.
+
+Worker readiness currently reflects ready-handshake leases and failures observed
+while dispatching requests. An idle process exit may not be discovered until its
+next request. Existing replacement is lazy: when all workers have been lost,
+readiness stays false until an application request attempts recovery. Proactive
+worker supervision/recovery is planned separately; health probes deliberately do
+not start application work or test database dependencies.
+
+Try the [observability settings](../examples/observe-serve.toml):
+
+```sh
+scripta serve examples/web-proxy.scripta --config examples/observe-serve.toml
+curl http://127.0.0.1:8080/
+curl http://127.0.0.1:9090/livez
+curl http://127.0.0.1:9090/readyz
+curl http://127.0.0.1:9090/metrics
+```
 
 ## Sessions and cookies
 
@@ -190,14 +368,98 @@ ProxyPassReverse "/" "http://127.0.0.1:8080/"
 The front-end handles public TLS and can serve static assets, enforce additional
 limits, or balance multiple Scripta instances. Scripta needs no Apache module,
 FastCGI service, or PHP installation. Choose proxy timeouts consistent with your
-application deadline and 60-second backend connection lifetime. These snippets
-must be validated in your deployment; they are not automatically installed.
+application deadline and configured backend connection lifetime (60 seconds by
+default). These snippets must be validated in your deployment; they are not automatically installed.
 
-Forwarded headers are ordinary untrusted input to `WebRequest`; Scripta does not
-infer a trusted client identity or external scheme from them. No trusted-proxy
-configuration is implemented yet. Prefer relative redirects. If your application
-uses forwarded host/scheme/client fields, restrict backend access and implement
-an explicit trusted-proxy policy first.
+### Trusted proxy metadata and allowed hosts
+
+By default Scripta trusts no proxies. `$request->peerAddress` is the actual TCP
+peer endpoint, `$request->clientAddress` is that peer's IP, `$request->scheme` is
+`"http"`, and `$request->host` is the validated Host authority. Raw forwarded
+headers remain accessible through `header()`/`headers()` but do not establish
+identity. Scripta does not serve inbound TLS in this milestone.
+
+Configure only proxy addresses that you operate and restrict access to the
+backend. Trust is based on the socket peer IP, not on a header or source port:
+
+```toml
+trusted-proxies = ["127.0.0.1/32", "::1/128"]
+allowed-hosts = ["app.example.com"]
+```
+
+The equivalent CLI options take comma-separated lists:
+`--trusted-proxies 127.0.0.1/32,::1/128 --allowed-hosts app.example.com`.
+An empty CLI string clears a configured list. Each option replaces its entire
+file list; lists are not merged. Both default to empty and accept at most 128
+entries. Trust entries are literal IPv4/IPv6 addresses or CIDRs with valid prefix
+lengths. CIDRs mask any supplied host bits; a bare address matches that address
+only. IPv4 and IPv4-mapped IPv6 are separate families, so configure the family
+actually used by your proxy. There is no implicit trust for loopback/private
+networks and no DNS lookup for trust entries.
+
+Only an explicitly trusted immediate peer can supply these resolved fields:
+
+| Header | Resolution policy |
+| --- | --- |
+| `X-Forwarded-For` | At most one header field containing 1–32 comma-separated literal IP addresses, oldest first. Spaces/tabs around entries are trimmed. Starting at the socket peer, walk right to left while the current address is trusted; the first untrusted address is the client. Discard older assertions for identity, but validate the full list. If all hops are trusted, use the leftmost address. Ports, bracketed IPv6, `unknown`, empty entries, and obfuscated identifiers are rejected. |
+| `X-Forwarded-Proto` | One scalar `http` or `https` assertion from the immediate trusted proxy; otherwise the scheme remains `http`. Lists and other schemes are rejected. |
+| `X-Forwarded-Host` | One scalar valid authority asserted by the immediate trusted proxy; otherwise use Host. Lists are rejected. |
+
+Duplicate supported fields or malformed values from a trusted peer return 400
+before body spooling/application execution. From an untrusted peer those three
+fields are ignored for resolution, including duplicate/malformed assertions;
+ordinary global header limits and ASCII validation still apply. RFC `Forwarded`,
+`X-Real-IP`, `X-Forwarded-Port`, and PROXY protocol are not used. There is no
+fallback between header families. The original header values are not rewritten.
+
+The immediate trusted proxy must sanitize incoming scheme/host assertions and
+supply authoritative scalar values. For chains, each trusted proxy must append
+its actual immediate peer to the client-address chain, and the final trusted
+proxy must supply the verified external scheme/host. Trusting a proxy does not
+prove that it performed those operations. Do not copy arbitrary client-supplied
+`X-Forwarded-Host`/`Proto` through a trusted peer.
+
+Host and forwarded-host syntax is deliberately strict: ASCII DNS labels (including
+`localhost` or IDNA A-labels), IPv4 literals, or bracketed IPv6 literals, with an
+optional decimal port 1–65535. DNS labels are at most 63 bytes and the hostname
+at most 253 bytes excluding one optional final root dot. DNS case/root dots,
+IPv6 spelling, and numeric port spelling are normalized for the resolved host.
+Userinfo, whitespace, URL paths, percent escapes, wildcards, IPv6 zone IDs, and
+unbracketed IPv6 authorities are rejected. HTTP/1.1 still requires exactly one
+valid Host field even when forwarded-host is present. HTTP/1.0 may omit Host;
+its resolved host is null unless a trusted proxy supplies one.
+
+An empty `allowed-hosts` list permits any syntactically valid resolved host.
+A nonempty list checks the resolved external host after proxy processing, using
+exact hostname matching with no subdomain/suffix wildcard. An entry without a
+port permits any valid explicit port or no port. An entry with a port requires
+that same explicit port; default ports are not inferred from the scheme.
+A missing/disallowed host returns 400 before application execution. The original
+backend Host must remain syntactically valid but need not be in this list when
+trusted forwarded-host supplies the external authority. Use an allowlist before
+using request host metadata for absolute redirects or links.
+
+Cookie/session Secure defaults remain explicit and do not change based on the
+resolved scheme. A forwarded `http` assertion never disables Secure cookies.
+Use the resolved fields rather than reparsing raw headers in application code;
+they describe network assertions, not authenticated users or authorization.
+
+The [proxy example](../examples/web-proxy.scripta),
+[server settings](../examples/proxy-serve.toml), and
+[Caddy configuration](../examples/Caddyfile.proxy) can be paired:
+
+```sh
+scripta serve examples/web-proxy.scripta --config examples/proxy-serve.toml
+caddy run --config examples/Caddyfile.proxy --adapter caddyfile
+```
+
+Replace `app.example.com` in both configurations with your domain. Caddy documents
+its handling of the supported forwarded headers in its reverse-proxy reference.
+If it is behind a CDN/another proxy, configure trust at Caddy as well. Validate
+that deployment's actual headers; configurations that emit duplicate or list
+scheme/host assertions must be adjusted to the scalar contract above. The local
+regression fixture executes a sanitizing HTTP forwarder; it does not validate
+Caddy installation, public certificates, or a real multi-proxy deployment.
 
 See [Caddy reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 and the [Apache reverse-proxy guide](https://httpd.apache.org/docs/2.4/howto/reverse_proxy.html).
@@ -306,7 +568,8 @@ frames. Each body chunk is at most 64 KiB; each response channel holds at most o
 chunk. Pipe and channel backpressure bound pending handoff data. `flush()` waits
 for the supervisor to accept pending chunks, rather than confirming delivery to
 a remote browser. Slow readers and blocked worker writes remain under the request
-deadline; the connection lifetime is also bounded to 60 seconds. Dropped streaming
+deadline; the connection lifetime is also bounded by `--connection-timeout-ms`
+(60 seconds by default). Dropped streaming
 clients cancel their worker request, and request-owned upload storage is cleaned
 after the worker is stopped. No-body statuses/HEAD suppress streamed body data
 while the worker still completes or reaches its deadline.

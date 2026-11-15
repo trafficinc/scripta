@@ -13,6 +13,24 @@ pub mod uploads;
 pub use cookies::request_cookies;
 use ureq::http::{HeaderName, HeaderValue, Uri};
 
+/// Connection metadata resolved by a trusted HTTP host, never inferred by the
+/// standard library from raw request headers. Embeddings may leave fields unknown.
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct ConnectionInfo {
+    pub peer_address: Option<std::net::SocketAddr>,
+    pub client_address: Option<std::net::IpAddr>,
+    pub scheme: Option<String>,
+    pub host: Option<String>,
+}
+impl ConnectionInfo {
+    fn payload_bytes(&self) -> usize {
+        self.scheme
+            .as_ref()
+            .map_or(0, String::len)
+            .saturating_add(self.host.as_ref().map_or(0, String::len))
+    }
+}
+
 /// A bounded, fully received HTTP request supplied by a trusted host.
 #[derive(Debug)]
 pub struct Request {
@@ -22,6 +40,8 @@ pub struct Request {
     pub query_string: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+    pub connection: ConnectionInfo,
+    pub request_id: Option<String>,
 }
 /// Response metadata; body output goes to the runtime's bounded output writer.
 #[derive(Debug, Clone)]
@@ -70,6 +90,8 @@ impl NativeObject for RequestObject {
                     .saturating_add(self.path.len())
                     .saturating_add(self.query_string.len())
                     .saturating_add(self.body.len())
+                    .saturating_add(self.connection.payload_bytes())
+                    .saturating_add(self.request_id.as_ref().map_or(0, String::len))
                     .saturating_add(
                         self.headers
                             .iter()
@@ -80,6 +102,33 @@ impl NativeObject for RequestObject {
     }
     fn get_property(&self, name: &str) -> Result<Value, String> {
         match name {
+            "requestId" => return Ok(self.request_id.clone().map_or(Value::Null, Value::String)),
+            "peerAddress" => {
+                return Ok(self
+                    .connection
+                    .peer_address
+                    .map_or(Value::Null, |v| Value::String(v.to_string())));
+            }
+            "clientAddress" => {
+                return Ok(self
+                    .connection
+                    .client_address
+                    .map_or(Value::Null, |v| Value::String(v.to_string())));
+            }
+            "scheme" => {
+                return Ok(self
+                    .connection
+                    .scheme
+                    .clone()
+                    .map_or(Value::Null, Value::String));
+            }
+            "host" => {
+                return Ok(self
+                    .connection
+                    .host
+                    .clone()
+                    .map_or(Value::Null, Value::String));
+            }
             "method" => return Ok(Value::String(self.method.clone())),
             "path" => return Ok(Value::String(self.path.clone())),
             "queryString" => return Ok(Value::String(self.query_string.clone())),

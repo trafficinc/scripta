@@ -295,12 +295,25 @@ See [measurements and safety details](performance.md).
 ## Web request hosting
 
 `scripta serve` validates a fixed entry script and starts the `scr-web` HTTP host.
+The CLI merges an explicit optional TOML configuration with CLI overrides;
+`scr-web::Config::validate` checks effective limits and storage paths without
+creating resources. Check/print modes stop before host startup. The runtime's
+`SCR_*` limits remain separate. Connection/header deadlines and the shared
+shutdown drain budget are host configuration, not language execution limits.
 Hyper/Tokio own HTTP/1.1 framing and asynchronous network/process I/O. A bounded
 queue dispatches requests to persistent interpreter processes, each with a cached
 entry AST and a fresh runtime per request. Source snapshots are supplied by the
 parent, including on worker replacement. Request/response native objects live in
 `scr_stdlib::web`, explicitly registered by the host; the core runtime has no HTTP
 backend. CLI-only executions do not register the Web module.
+
+The HTTP supervisor retains each socket peer, compiles bounded explicit proxy
+CIDRs/host allowlists once, and resolves trusted request metadata before receiving
+bodies or enqueueing work. Only its selected X-Forwarded policy affects resolution;
+raw headers remain unchanged. Typed `web::ConnectionInfo` travels in request IPC
+and supplies four read-only request properties. Trust policy/parsing stays in
+`scr-web`; the standard library accepts trusted embedding metadata and the runtime
+has no proxy/network backend.
 
 `Runtime::execute_program_with_source` executes a host-cached AST with retained
 `Arc<SourceFile>` metadata. Hosts must match the AST to its source. It enforces
@@ -414,3 +427,19 @@ options, including explicit address-family and backlog policy. No unsafe code,
 privileged raw IP access, or protocol/event-loop backend is added to the runtime.
 Default CLI permissions include inbound bind/listen; web workers explicitly remove
 those capabilities. Listener accept reserves quota before dequeuing a client.
+
+HTTP observability lives in `scr-web`, outside the language runtime. A supervisor
+observer owns fixed atomic counters, bounded generated IDs, and text/JSON event
+serialization. Request guards and response-body wrappers account for queueing,
+header readiness, body handoff/failure/drop, and cancellation with RAII. Worker IPC
+carries generated IDs and bounded diagnostic/application-log frames, rather than
+forwarding raw worker stderr. Host error records contain codes/spans without
+request/source text. `WebRequest.requestId` is supplied by the host as ordinary
+read-only request metadata.
+
+An optional loopback-only management listener serves JSON liveness, readiness,
+and counter snapshots independently of application routes/worker slots. It has
+fixed connection/header/time bounds. Readiness uses startup/drain flags, known
+worker leases, and admission capacity; it is not an application dependency probe
+or proactive idle-worker supervisor. Body completion records mean handoff to Hyper,
+not proof of remote receipt. See [hosting observability](web-servers.md#logs-and-health-checks).

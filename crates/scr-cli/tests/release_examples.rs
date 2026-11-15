@@ -49,6 +49,7 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
         "http-stream-upload.scripta",
         "socket-echo.scripta",
         "web-transfers.scripta",
+        "web-proxy.scripta",
         "command-runner.scripta",
         "atomic-report.scripta",
         "data-handling.scripta",

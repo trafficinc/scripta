@@ -13,9 +13,15 @@ struct Server {
 }
 impl Server {
     fn start(source: &str, options: &[&str]) -> Self {
+        Self::start_config(source, None, options)
+    }
+    fn start_config(source: &str, config: Option<&str>, options: &[&str]) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("app.scripta");
         fs::write(&path, source).unwrap();
+        if let Some(config) = config {
+            fs::write(directory.path().join("server.toml"), config).unwrap();
+        }
         let log = fs::File::create(directory.path().join("server.log")).unwrap();
         let worker_count = if options.contains(&"--workers") {
             vec![]
@@ -27,6 +33,11 @@ impl Server {
             .arg(path)
             .args(["--port", "0"])
             .args(worker_count)
+            .args(if config.is_some() {
+                vec!["--config", "server.toml"]
+            } else {
+                vec![]
+            })
             .args(options)
             .env("SCR_MAX_STEPS", "100000000000")
             .current_dir(directory.path())
@@ -54,6 +65,15 @@ impl Server {
                     .unwrap()
                     .parse()
                     .unwrap();
+                return server;
+            }
+            if let Some(address) = log
+                .lines()
+                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                .find(|event| event["event"] == "server_listening")
+                .and_then(|event| event["address"].as_str().map(str::to_owned))
+            {
+                server.address = address.parse().unwrap();
                 return server;
             }
             assert!(
@@ -1351,4 +1371,704 @@ fn rejected_upload_never_runs_application_and_request_workers_cannot_bind_listen
     uploads_clean(&server);
     let server = Server::start("<?scripta Socket::listen(\"127.0.0.1\",0);", &[]);
     assert_eq!(server.request("GET", "/", b"", "text/plain").0, 500);
+}
+
+#[test]
+fn configuration_file_controls_real_requests_and_cli_overrides_file_limits() {
+    let config = include_str!("../../../examples/serve.toml");
+    let server = Server::start_config(
+        "<?scripta Web::write(Web::request()->bytes());",
+        Some(config),
+        &["--max-body-bytes", "3"],
+    );
+    assert_eq!(
+        server
+            .request("POST", "/", b"abc", "application/octet-stream")
+            .2,
+        b"abc"
+    );
+    assert_eq!(
+        server
+            .request("POST", "/", b"abcd", "application/octet-stream")
+            .0,
+        413
+    );
+}
+
+#[test]
+fn configured_connection_and_header_timeouts_close_connections() {
+    let server = Server::start(
+        "<?scripta echo \"ok\";",
+        &[
+            "--connection-timeout-ms",
+            "300",
+            "--header-timeout-ms",
+            "100",
+        ],
+    );
+    let start = Instant::now();
+    let output = server.raw(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    assert_eq!(parse(&output).2, b"ok");
+    assert!(start.elapsed() < Duration::from_secs(3));
+    let mut stream = TcpStream::connect(server.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream.write_all(b"GET / HTTP/1.1\r\nHost:").unwrap();
+    let start = Instant::now();
+    let mut output = vec![];
+    if let Err(error) = stream.read_to_end(&mut output) {
+        assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
+    }
+    assert!(start.elapsed() < Duration::from_secs(3));
+    assert!(output.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn configured_drain_deadline_bounds_shutdown_with_active_work() {
+    let mut server = Server::start(
+        "<?scripta File::writeAtomic(\"started\",\"yes\"); Date::sleep(5000); echo \"late\";",
+        &["--timeout-ms", "10000", "--drain-timeout-ms", "100"],
+    );
+    let mut stream = TcpStream::connect(server.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !server.directory.path().join("started").exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &server.child.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while server.child.try_wait().unwrap().is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "configured drain deadline was not applied"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let mut output = vec![];
+    if let Err(error) = stream.read_to_end(&mut output) {
+        assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
+    }
+    assert!(!output.windows(4).any(|w| w == b"late"));
+}
+
+const PROXY_APP: &str = r#"<?scripta
+$r=Web::request();
+if ($r->path === "/redirect") {Web::redirect($r->scheme . "://" . $r->host . "/login",303);exit 0;}
+if ($r->path === "/cookie") {Session::start();Web::cookie("preference","ok");}
+Web::header("Content-Type","application/json");
+echo Json::encode(["peer"=>$r->peerAddress,"client"=>$r->clientAddress,"scheme"=>$r->scheme,"host"=>$r->host,"raw"=>$r->header("X-Forwarded-For")]);
+"#;
+fn proxy_request(server: &Server, host: &str, path: &str, fields: &str) -> (u16, String, Vec<u8>) {
+    parse(
+        &server.raw(
+            format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n{fields}\r\n")
+                .as_bytes(),
+        ),
+    )
+}
+#[test]
+fn direct_clients_cannot_forge_identity_or_bypass_allowed_hosts() {
+    let server = Server::start(PROXY_APP, &["--allowed-hosts", "localhost"]);
+    let response = proxy_request(
+        &server,
+        "LOCALHOST:8080",
+        "/",
+        "X-Forwarded-For: malformed\r\nX-Forwarded-For: 192.0.2.1\r\nX-Forwarded-Host: evil.example\r\nX-Forwarded-Proto: https\r\nForwarded: for=192.0.2.1;proto=https\r\n",
+    );
+    assert_eq!(response.0, 200);
+    let info: serde_json::Value = serde_json::from_slice(&response.2).unwrap();
+    assert_eq!(info["client"], "127.0.0.1");
+    assert_eq!(info["scheme"], "http");
+    assert_eq!(info["host"], "localhost:8080");
+    let peer: SocketAddr = info["peer"].as_str().unwrap().parse().unwrap();
+    assert!(peer.ip().is_loopback());
+    assert_ne!(peer.port(), 0);
+    assert_eq!(
+        proxy_request(
+            &server,
+            "evil.example",
+            "/",
+            "X-Forwarded-Host: localhost\r\n"
+        )
+        .0,
+        400
+    );
+    assert_eq!(proxy_request(&server, "localhost.evil", "/", "").0, 400);
+    assert_eq!(proxy_request(&server, "user@localhost", "/", "").0, 400);
+}
+#[test]
+fn trusted_proxy_metadata_survives_ipc_drives_redirects_and_keeps_cookies_secure() {
+    let server = Server::start(
+        PROXY_APP,
+        &[
+            "--trusted-proxies",
+            "127.0.0.1,10.0.0.0/8",
+            "--allowed-hosts",
+            "app.example.com:443",
+        ],
+    );
+    let fields = "X-Forwarded-For: 203.0.113.99, 192.0.2.1, 10.1.2.3\r\nX-Forwarded-Host: APP.EXAMPLE.COM.:443\r\nX-Forwarded-Proto: https\r\n";
+    let response = proxy_request(&server, "backend.internal", "/", fields);
+    assert_eq!(response.0, 200);
+    let info: serde_json::Value = serde_json::from_slice(&response.2).unwrap();
+    assert_eq!(info["client"], "192.0.2.1");
+    assert_eq!(info["scheme"], "https");
+    assert_eq!(info["host"], "app.example.com:443");
+    assert_eq!(info["raw"], "203.0.113.99, 192.0.2.1, 10.1.2.3");
+    assert!(info["peer"].as_str().unwrap().starts_with("127.0.0.1:"));
+    let redirect = proxy_request(&server, "backend.internal", "/redirect", fields);
+    assert_eq!(redirect.0, 303);
+    assert!(redirect.1.contains("https://app.example.com:443/login"));
+    let cookie = proxy_request(
+        &server,
+        "backend.internal",
+        "/cookie",
+        &fields.replace("Proto: https", "Proto: http"),
+    );
+    assert_eq!(cookie.0, 200);
+    let cookies: Vec<_> = cookie
+        .1
+        .lines()
+        .filter(|s| s.to_ascii_lowercase().starts_with("set-cookie:"))
+        .collect();
+    assert_eq!(cookies.len(), 2);
+    assert!(cookies.iter().all(|s| s.contains("; Secure")));
+    assert_eq!(
+        proxy_request(
+            &server,
+            "backend.internal",
+            "/",
+            &fields.replace("APP.EXAMPLE.COM.:443", "evil.example:443")
+        )
+        .0,
+        400
+    );
+}
+#[test]
+fn malformed_trusted_proxy_headers_are_rejected_before_application_execution() {
+    let server = Server::start(
+        "<?scripta File::writeAtomic(\"executed\",\"bad\");echo \"bad\";",
+        &["--trusted-proxies", "127.0.0.1"],
+    );
+    for fields in [
+        "X-Forwarded-For: 192.0.2.1,\r\n",
+        "X-Forwarded-For: 192.0.2.1\r\nX-Forwarded-For: 192.0.2.2\r\n",
+        "X-Forwarded-Proto: https,http\r\n",
+        "X-Forwarded-Host: a.example,b.example\r\n",
+        "X-Forwarded-Host: a.example\r\nX-Forwarded-Host: b.example\r\n",
+        "X-Forwarded-Proto: https\r\nX-Forwarded-Proto: http\r\n",
+    ] {
+        assert_eq!(
+            proxy_request(&server, "localhost", "/", fields).0,
+            400,
+            "{fields}"
+        );
+        assert!(!server.directory.path().join("executed").exists());
+    }
+}
+#[test]
+fn shipped_proxy_example_runs_through_a_sanitizing_local_proxy() {
+    let source = include_str!("../../../examples/web-proxy.scripta");
+    assert_eq!(scr_cli::formatter::format(source).unwrap(), source);
+    let config = include_str!("../../../examples/proxy-serve.toml");
+    let server = Server::start_config(source, Some(config), &[]);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let backend = server.address;
+    let proxy = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let (mut client, peer) = loop {
+            match listener.accept() {
+                Ok(connection) => break connection,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline);
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => panic!("proxy accept: {e}"),
+            }
+        };
+        client
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut received = vec![];
+        while !received.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            client.read_exact(&mut byte).unwrap();
+            received.push(byte[0]);
+            assert!(received.len() < 32768);
+        }
+        // Controlled front end overwrites incoming identity assertions, just as
+        // deployment requires. This fixture is not a production HTTP proxy.
+        let mut upstream = TcpStream::connect(backend).unwrap();
+        upstream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        upstream.write_all(format!("GET / HTTP/1.1\r\nHost: backend.internal\r\nConnection: close\r\nX-Forwarded-For: {}\r\nX-Forwarded-Host: app.example.com\r\nX-Forwarded-Proto: https\r\n\r\n",peer.ip()).as_bytes()).unwrap();
+        let mut response = vec![];
+        upstream
+            .take(1024 * 1024)
+            .read_to_end(&mut response)
+            .unwrap();
+        client.write_all(&response).unwrap();
+    });
+    let mut client = TcpStream::connect(address).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    client.write_all(b"GET / HTTP/1.1\r\nHost: app.example.com\r\nX-Forwarded-For: 203.0.113.99\r\nX-Forwarded-Host: evil.example\r\n\r\n").unwrap();
+    let mut response = vec![];
+    client.read_to_end(&mut response).unwrap();
+    proxy.join().unwrap();
+    let (status, _, body) = parse(&response);
+    assert_eq!(status, 200);
+    let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(info["client"], "127.0.0.1");
+    assert_eq!(info["scheme"], "https");
+    assert_eq!(info["host"], "app.example.com");
+}
+#[test]
+fn ipv6_peer_and_forwarded_addresses_are_preserved_when_loopback_is_available() {
+    let probe = match std::net::TcpListener::bind("[::1]:0") {
+        Ok(listener) => listener,
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::AddrNotAvailable | std::io::ErrorKind::Unsupported
+            ) =>
+        {
+            return;
+        }
+        Err(e) => panic!("IPv6 probe: {e}"),
+    };
+    drop(probe);
+    let server = Server::start(
+        PROXY_APP,
+        &[
+            "--host",
+            "::1",
+            "--trusted-proxies",
+            "::1/128",
+            "--allowed-hosts",
+            "[::1]",
+        ],
+    );
+    let response = proxy_request(
+        &server,
+        "[::1]:8080",
+        "/",
+        "X-Forwarded-For: 2001:db8::9\r\n",
+    );
+    assert_eq!(response.0, 200);
+    let info: serde_json::Value = serde_json::from_slice(&response.2).unwrap();
+    assert_eq!(info["client"], "2001:db8::9");
+    assert!(info["peer"].as_str().unwrap().starts_with("[::1]:"));
+}
+
+fn json_events(server: &Server) -> Vec<serde_json::Value> {
+    let bytes = fs::read(server.directory.path().join("server.log")).unwrap();
+    let end = bytes.iter().rposition(|b| *b == b'\n').map_or(0, |n| n + 1);
+    std::str::from_utf8(&bytes[..end])
+        .unwrap()
+        .lines()
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|e| panic!("invalid JSON log: {e}: {line}"))
+        })
+        .collect()
+}
+fn wait_event(
+    server: &Server,
+    predicate: impl Fn(&serde_json::Value) -> bool,
+) -> serde_json::Value {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(event) = json_events(server).into_iter().find(&predicate) {
+            return event;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "missing log event: {:?}",
+            json_events(server)
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+fn health(server: &Server, path: &str) -> (u16, String, Vec<u8>) {
+    let event = wait_event(server, |event| event["event"] == "health_listening");
+    let mut stream = TcpStream::connect(event["address"].as_str().unwrap()).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .unwrap();
+    let mut bytes = vec![];
+    stream.read_to_end(&mut bytes).unwrap();
+    parse(&bytes)
+}
+fn response_id(headers: &str) -> String {
+    headers
+        .lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case("x-request-id")
+                .then(|| value.trim().to_owned())
+        })
+        .expect("missing request ID")
+}
+#[test]
+fn json_logs_correlate_requests_diagnostics_and_exclude_default_sensitive_content() {
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();if ($r->path === "/error") {throw $r->text();}Web::header("X-Request-ID","FORGED_RESPONSE");echo $r->requestId;"#,
+        &["--log-format", "json"],
+    );
+    let good = proxy_request(
+        &server,
+        "localhost",
+        "/",
+        "X-Request-ID: INCOMING_ID_SECRET\r\nAuthorization: Bearer HEADER_SECRET\r\nCookie: auth=COOKIE_SECRET\r\n",
+    );
+    let first = response_id(&good.1);
+    assert_eq!(good.2, first.as_bytes());
+    assert!(first.len() <= 64);
+    assert!(!first.contains("SECRET"));
+    let error = server.request(
+        "POST",
+        "/error?secret=QUERY_SECRET",
+        b"BODY_SECRET",
+        "text/plain",
+    );
+    assert_eq!(error.0, 500);
+    let second = response_id(&error.1);
+    assert_ne!(first, second);
+    wait_event(&server, |e| {
+        e["event"] == "response_finished" && e["requestId"] == second
+    });
+    let events = json_events(&server);
+    assert!(
+        events
+            .iter()
+            .any(|e| e["event"] == "request_diagnostic" && e["requestId"] == second)
+    );
+    for id in [&first, &second] {
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e["event"] == "response_headers" && e["requestId"] == *id)
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| e["event"] == "response_finished" && e["requestId"] == *id)
+                .count(),
+            1
+        );
+    }
+    let log = fs::read_to_string(server.directory.path().join("server.log")).unwrap();
+    for secret in [
+        "INCOMING_ID_SECRET",
+        "HEADER_SECRET",
+        "COOKIE_SECRET",
+        "QUERY_SECRET",
+        "BODY_SECRET",
+        "FORGED_RESPONSE",
+    ] {
+        assert!(!log.contains(secret), "leaked {secret}");
+    }
+}
+#[test]
+fn streaming_logs_distinguish_header_readiness_completion_and_failure() {
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();echo "first";flush();if ($r->path === "/error") {throw "SOURCE_SECRET";}File::writeAtomic("running","yes");while (!File::exists("continue")) {Date::sleep(5);}echo "last";"#,
+        &[
+            "--log-format",
+            "json",
+            "--health-address",
+            "127.0.0.1:0",
+            "--timeout-ms",
+            "3000",
+        ],
+    );
+    let mut response = StreamingResponse::start(&server, "/");
+    assert_eq!(response.chunk(), b"first");
+    let id = response_id(&response.headers);
+    wait_event(&server, |e| {
+        e["event"] == "response_headers" && e["requestId"] == id
+    });
+    assert!(
+        !json_events(&server)
+            .iter()
+            .any(|e| e["event"] == "response_finished" && e["requestId"] == id)
+    );
+    fs::write(server.directory.path().join("continue"), "yes").unwrap();
+    assert_eq!(response.chunk(), b"last");
+    assert!(response.chunk().is_empty());
+    let complete = wait_event(&server, |e| {
+        e["event"] == "response_finished" && e["requestId"] == id
+    });
+    assert_eq!(complete["outcome"], "complete");
+    assert_eq!(complete["bodyBytes"], 9);
+    let mut failed = StreamingResponse::start(&server, "/error");
+    assert_eq!(failed.chunk(), b"first");
+    let id = response_id(&failed.headers);
+    let mut tail = vec![];
+    let _ = failed.reader.read_to_end(&mut tail);
+    let event = wait_event(&server, |e| {
+        e["event"] == "response_finished" && e["requestId"] == id
+    });
+    assert_eq!(event["status"], 200);
+    assert_eq!(event["outcome"], "failed");
+    assert_eq!(event["bodyBytes"], 5);
+    assert!(
+        !fs::read_to_string(server.directory.path().join("server.log"))
+            .unwrap()
+            .contains("SOURCE_SECRET")
+    );
+    let metrics: serde_json::Value =
+        serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+    assert_eq!(metrics["responsesComplete"], 1);
+    assert_eq!(metrics["responsesFailed"], 1);
+    assert_eq!(metrics["activeRequests"], 0);
+}
+#[test]
+fn private_health_routes_do_not_execute_or_reserve_application_routes() {
+    let server = Server::start(
+        "<?scripta File::writeAtomic(\"executed\",\"yes\");echo \"application\";",
+        &["--log-format", "json", "--health-address", "127.0.0.1:0"],
+    );
+    assert_eq!(health(&server, "/livez").0, 200);
+    assert_eq!(health(&server, "/readyz").0, 200);
+    let metrics: serde_json::Value =
+        serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+    assert_eq!(metrics["requests"], 0);
+    assert_eq!(metrics["readyWorkers"], 1);
+    assert!(!server.directory.path().join("executed").exists());
+    let address = wait_event(&server, |e| e["event"] == "health_listening")["address"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    for (method, body, expected) in [("HEAD", "", 200), ("POST", "", 405), ("GET", "x", 400)] {
+        let mut stream = TcpStream::connect(&address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        stream.write_all(format!("{method} /livez HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",body.len()).as_bytes()).unwrap();
+        let mut response = vec![];
+        stream.read_to_end(&mut response).unwrap();
+        let response = parse(&response);
+        assert_eq!(response.0, expected);
+        if method == "HEAD" {
+            assert!(response.2.is_empty());
+        }
+    }
+    assert_eq!(health(&server, "/unknown").0, 404);
+    assert_eq!(health(&server, "/metrics?secret=hidden").0, 400);
+    assert_eq!(
+        server.request("GET", "/livez", b"", "text/plain").2,
+        b"application"
+    );
+    assert!(server.directory.path().join("executed").exists());
+    let metrics: serde_json::Value =
+        serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+    assert_eq!(metrics["requests"], 1);
+}
+#[test]
+fn disconnected_streams_and_timeouts_have_correlated_events_and_deduplicated_counters() {
+    let server = Server::start(
+        r#"<?scripta $r=Web::request();if ($r->path === "/ok") {echo "ok";exit 0;}if ($r->path === "/stream") {echo "first";flush();}Date::sleep(5000);"#,
+        &[
+            "--log-format",
+            "json",
+            "--health-address",
+            "127.0.0.1:0",
+            "--timeout-ms",
+            "250",
+        ],
+    );
+    let mut response = StreamingResponse::start(&server, "/stream");
+    assert_eq!(response.chunk(), b"first");
+    let id = response_id(&response.headers);
+    drop(response);
+    let event = wait_event(&server, |e| {
+        e["event"] == "response_finished" && e["requestId"] == id
+    });
+    assert_eq!(event["outcome"], "interrupted");
+    let event = wait_event(&server, |e| {
+        e["event"] == "worker_failure" && e["requestId"] == id
+    });
+    assert_eq!(event["reason"], "client_disconnect");
+    assert_eq!(health(&server, "/readyz").0, 503);
+    assert_eq!(server.request("GET", "/ok", b"", "text/plain").0, 200);
+    let response = server.request("GET", "/slow", b"", "text/plain");
+    assert_eq!(response.0, 504);
+    let id = response_id(&response.1);
+    wait_event(&server, |e| {
+        e["event"] == "worker_failure" && e["requestId"] == id
+    });
+    let metrics: serde_json::Value =
+        serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+    assert_eq!(metrics["timeouts"], 1);
+    assert_eq!(metrics["responsesInterrupted"], 1);
+    assert_eq!(metrics["workerRestarts"], 1);
+}
+#[test]
+fn explicit_application_logs_are_escaped_bounded_and_correlated() {
+    let server = Server::start(
+        r#"<?scripta for ($i=0;$i<30;$i+=1) {Log::info("quoted\"\nvalue");}echo Web::request()->requestId;"#,
+        &["--log-format", "json"],
+    );
+    let response = server.request("GET", "/", b"", "text/plain");
+    assert_eq!(response.0, 200);
+    let id = response_id(&response.1);
+    wait_event(&server, |e| {
+        e["event"] == "response_finished" && e["requestId"] == id
+    });
+    let logs: Vec<_> = json_events(&server)
+        .into_iter()
+        .filter(|e| e["event"] == "application_log")
+        .collect();
+    assert_eq!(logs.len(), 16);
+    assert!(logs.iter().all(|e| e["requestId"] == id));
+    assert!(
+        logs.iter()
+            .all(|e| e["message"].as_str().unwrap().len() <= 4100)
+    );
+}
+
+#[test]
+fn readiness_and_counters_report_queue_overload_and_recovery() {
+    let server = Server::start(
+        r#"<?scripta if (Web::request()->path === "/hold") {echo "first";flush();while (!File::exists("continue")) {Date::sleep(5);}}else {echo "ok";}"#,
+        &[
+            "--log-format",
+            "json",
+            "--health-address",
+            "127.0.0.1:0",
+            "--queue",
+            "1",
+            "--timeout-ms",
+            "3000",
+        ],
+    );
+    let mut hold = StreamingResponse::start(&server, "/hold");
+    assert_eq!(hold.chunk(), b"first");
+    let mut queued = TcpStream::connect(server.address).unwrap();
+    queued
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    queued
+        .write_all(b"GET /ok HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let metrics: serde_json::Value =
+            serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+        if metrics["queuedRequests"] == 1 {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(health(&server, "/readyz").0, 503);
+    assert_eq!(server.request("GET", "/ok", b"", "text/plain").0, 503);
+    let metrics: serde_json::Value =
+        serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+    assert_eq!(metrics["overload"], 1);
+    assert_eq!(metrics["busyWorkers"], 1);
+    fs::write(server.directory.path().join("continue"), "yes").unwrap();
+    assert!(hold.chunk().is_empty());
+    let mut response = vec![];
+    queued.read_to_end(&mut response).unwrap();
+    assert_eq!(parse(&response).0, 200);
+    assert_eq!(health(&server, "/readyz").0, 200);
+}
+
+#[cfg(unix)]
+#[test]
+fn health_reports_draining_without_preventing_active_request_completion() {
+    let mut server = Server::start(
+        r#"<?scripta File::writeAtomic("running","yes");while (!File::exists("continue")) {Date::sleep(5);}echo "done";"#,
+        &[
+            "--log-format",
+            "json",
+            "--health-address",
+            "127.0.0.1:0",
+            "--drain-timeout-ms",
+            "2000",
+            "--timeout-ms",
+            "5000",
+        ],
+    );
+    let mut stream = TcpStream::connect(server.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !server.directory.path().join("running").exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &server.child.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    wait_event(&server, |e| e["event"] == "server_draining");
+    assert_eq!(health(&server, "/readyz").0, 503);
+    assert_eq!(health(&server, "/livez").0, 200);
+    fs::write(server.directory.path().join("continue"), "yes").unwrap();
+    let mut response = vec![];
+    stream.read_to_end(&mut response).unwrap();
+    assert_eq!(parse(&response).2, b"done");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while server.child.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    let stopped = wait_event(&server, |e| e["event"] == "server_stopped");
+    assert_eq!(stopped["readyWorkers"], 0);
+    assert_eq!(stopped["activeRequests"], 0);
+}
+
+#[test]
+fn shipped_observability_configuration_runs_application_and_private_probes() {
+    let config = include_str!("../../../examples/observe-serve.toml");
+    let source = include_str!("../../../examples/web-proxy.scripta");
+    let server = Server::start_config(source, Some(config), &["--health-address", "127.0.0.1:0"]);
+    assert_eq!(health(&server, "/livez").0, 200);
+    assert_eq!(health(&server, "/readyz").0, 200);
+    let response = server.request("GET", "/", b"", "text/plain");
+    assert_eq!(response.0, 200);
+    let id = response_id(&response.1);
+    wait_event(&server, |e| {
+        e["event"] == "response_finished" && e["requestId"] == id
+    });
+    let metrics: serde_json::Value =
+        serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+    assert_eq!(metrics["requests"], 1);
+    assert_eq!(metrics["responsesComplete"], 1);
 }

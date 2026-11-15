@@ -37,9 +37,8 @@ impl Config {
             secure: true,
         }
     }
-    /// The session directory is a dedicated host resource, independent of script file roots.
-    /// Existing Unix directories must be private; permissions are never broadened.
-    pub fn prepare(&mut self) -> NativeResult<()> {
+    /// Validate host limits without preparing storage.
+    pub fn validate(&self) -> NativeResult<()> {
         if !(1..=100_000).contains(&self.max_sessions)
             || !(1..=1024 * 1024).contains(&self.max_bytes)
             || self.ttl.as_secs() == 0
@@ -47,6 +46,12 @@ impl Config {
         {
             return Err(error("invalid session host limits"));
         }
+        Ok(())
+    }
+    /// The session directory is a dedicated host resource, independent of script file roots.
+    /// Existing Unix directories must be private; permissions are never broadened.
+    pub fn prepare(&mut self) -> NativeResult<()> {
+        self.validate()?;
         let mut builder = fs::DirBuilder::new();
         builder.recursive(true);
         #[cfg(unix)]

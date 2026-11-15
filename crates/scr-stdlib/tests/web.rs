@@ -23,6 +23,8 @@ fn runtime(
                 ("x-test".into(), "second".into()),
             ],
             body: body.to_vec(),
+            request_id: None,
+            connection: Default::default(),
         },
         1024,
     )
@@ -209,6 +211,8 @@ fn request_objects_obey_value_limits_and_cancellation() {
             query_string: "".into(),
             headers: vec![],
             body: vec![0; 101],
+            request_id: None,
+            connection: Default::default(),
         },
         1024,
     )
@@ -233,6 +237,8 @@ fn request_objects_obey_value_limits_and_cancellation() {
             query_string: "".into(),
             headers: vec![],
             body: vec![],
+            request_id: None,
+            connection: Default::default(),
         },
         1024,
     )
@@ -244,6 +250,90 @@ fn request_objects_obey_value_limits_and_cancellation() {
             .message
             .contains("interrupted")
     );
+}
+
+#[test]
+fn connection_metadata_is_host_supplied_read_only_and_charged_to_request_budget() {
+    let (mut embedded, _) = runtime(b"", "text/plain", "");
+    run(
+        &mut embedded,
+        "$r=Web::request();$peer=$r->peerAddress;$client=$r->clientAddress;$scheme=$r->scheme; $id=$r->requestId;$host=$r->host;",
+    );
+    for key in ["peer", "client", "scheme", "host", "id"] {
+        assert_eq!(embedded.get_global(key), Some(&Value::Null));
+    }
+    let mut host = Runtime::new();
+    scr_stdlib::register(&mut host).unwrap();
+    web::register(
+        &mut host,
+        Request {
+            method: "GET".into(),
+            path: "/".into(),
+            query_string: "".into(),
+            body: vec![],
+            headers: vec![("x-forwarded-host".into(), "forged.example".into())],
+            request_id: Some("generated-request-id".into()),
+            connection: web::ConnectionInfo {
+                peer_address: Some("[::1]:1234".parse().unwrap()),
+                client_address: Some("192.0.2.1".parse().unwrap()),
+                scheme: Some("https".into()),
+                host: Some("example.com:443".into()),
+            },
+        },
+        32768,
+    )
+    .unwrap();
+    run(
+        &mut host,
+        "$r=Web::request();$peer=$r->peerAddress;$client=$r->clientAddress;$scheme=$r->scheme; $id=$r->requestId;$host=$r->host;",
+    );
+    for (key, value) in [
+        ("peer", "[::1]:1234"),
+        ("client", "192.0.2.1"),
+        ("scheme", "https"),
+        ("host", "example.com:443"),
+    ] {
+        assert_eq!(host.get_global(key), Some(&Value::String(value.into())));
+    }
+    assert_eq!(
+        host.get_global("id"),
+        Some(&Value::String("generated-request-id".into()))
+    );
+    assert!(
+        host.execute_source("<?scripta $r->host=\"forged.example\";", &mut vec![])
+            .is_err()
+    );
+    // Large host-supplied metadata is part of the native request's payload.
+    let mut limited = Runtime::with_options(RuntimeOptions {
+        max_value_bytes: Some(1024),
+        ..Default::default()
+    });
+    scr_stdlib::register(&mut limited).unwrap();
+    web::register(
+        &mut limited,
+        Request {
+            method: "GET".into(),
+            path: "/".into(),
+            query_string: "".into(),
+            body: vec![],
+            headers: vec![],
+            request_id: None,
+            connection: web::ConnectionInfo {
+                host: Some("x".repeat(1025)),
+                ..Default::default()
+            },
+        },
+        32768,
+    )
+    .unwrap();
+    assert!(
+        limited
+            .execute_source("<?scripta $r=Web::request();", &mut vec![])
+            .unwrap_err()
+            .message
+            .contains("value byte limit")
+    );
+    assert!(limited.get_global("r").is_none());
 }
 struct Failed;
 impl Write for Failed {
@@ -277,6 +367,8 @@ fn response_header_exact_limits_reject_only_the_excess_without_mutation() {
             query_string: "".into(),
             headers: vec![],
             body: vec![],
+            request_id: None,
+            connection: Default::default(),
         },
         10,
     )
@@ -300,6 +392,8 @@ fn response_header_exact_limits_reject_only_the_excess_without_mutation() {
             query_string: "".into(),
             headers: vec![],
             body: vec![],
+            request_id: None,
+            connection: Default::default(),
         },
         32768,
     )
@@ -331,6 +425,8 @@ fn cookies_decode_utf8_preserve_duplicates_and_keep_names_case_sensitive() {
             path: "/".into(),
             query_string: "".into(),
             body: vec![],
+            request_id: None,
+            connection: Default::default(),
             headers: vec![
                 (
                     "Cookie".into(),
@@ -372,6 +468,8 @@ fn cookies_decode_utf8_preserve_duplicates_and_keep_names_case_sensitive() {
                 path: "/".into(),
                 query_string: "".into(),
                 body: vec![],
+                request_id: None,
+                connection: Default::default(),
                 headers: vec![("cookie".into(), cookie.into())],
             },
             32768,
@@ -421,6 +519,8 @@ fn cookie_validation_rejects_injection_prefix_violations_and_byte_limit_plus_one
             path: "/".into(),
             query_string: "".into(),
             body: vec![],
+            request_id: None,
+            connection: Default::default(),
             headers: vec![],
         },
         32768,
@@ -482,6 +582,8 @@ fn decoded_cookie_pairs_use_exact_result_budgets() {
                 path: "/".into(),
                 query_string: "".into(),
                 body: vec![],
+                request_id: None,
+                connection: Default::default(),
                 headers: vec![("cookie".into(), "a=%61".into())],
             },
             32768,

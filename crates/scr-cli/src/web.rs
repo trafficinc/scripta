@@ -1,3 +1,5 @@
+#[path = "web_config.rs"]
+mod settings;
 use std::{
     ffi::OsString,
     path::PathBuf,
@@ -66,7 +68,9 @@ pub(crate) fn worker(arguments: Vec<OsString>) -> ExitCode {
         ExitCode::SUCCESS
     }
 }
-fn config(arguments: Vec<OsString>) -> Result<scr_web::Config, Box<dyn std::error::Error>> {
+fn config(
+    arguments: Vec<OsString>,
+) -> Result<(scr_web::Config, settings::Mode), Box<dyn std::error::Error>> {
     let mut arguments = arguments.into_iter();
     let first = arguments.next().ok_or("serve requires one entry script")?;
     let path = if first == "--" {
@@ -84,62 +88,33 @@ fn config(arguments: Vec<OsString>) -> Result<scr_web::Config, Box<dyn std::erro
     }
     let path = std::fs::canonicalize(PathBuf::from(path))?;
     let source = crate::entry::read_source(&path, crate::entry::limits()?.max_source_bytes)?;
-    if let Err(errors) = crate::pipeline::check(&source) {
-        for error in errors {
-            eprintln!("{}", error.render(&path.to_string_lossy(), &source));
-        }
-        return Err("entry script failed validation".into());
+    if crate::pipeline::check(&source).is_err() {
+        return Err(
+            "entry script failed validation; run scripta check locally for detailed diagnostics"
+                .into(),
+        );
     }
     let mut config = scr_web::Config::new(path, source);
-    let mut seen = std::collections::BTreeSet::new();
-    while let Some(key) = arguments.next() {
-        let key = key.to_str().ok_or("option must be UTF-8")?;
-        if !seen.insert(key.to_owned()) {
-            return Err(format!("duplicate serve option {key}").into());
-        }
-        let value = arguments
-            .next()
-            .ok_or_else(|| format!("missing value for {key}"))?;
-        if key == "--upload-temp-dir" {
-            config.uploads.directory = value.into();
-            continue;
-        }
-        if key == "--session-dir" {
-            config.sessions.directory = value.into();
-            if config.sessions.directory.as_os_str().is_empty() {
-                return Err("session directory must not be empty".into());
-            }
-            continue;
-        }
-        let value = value.to_str().ok_or("option value must be UTF-8")?;
-        match key {
-            "--upload-max-file-bytes" => config.uploads.max_file_bytes = value.parse()?,
-            "--upload-max-files" => config.uploads.max_files = value.parse()?,
-            "--upload-max-fields" => config.uploads.max_fields = value.parse()?,
-            "--upload-max-field-bytes" => config.uploads.max_field_bytes = value.parse()?,
-            "--upload-max-fields-bytes" => config.uploads.max_fields_bytes = value.parse()?,
-            "--upload-max-header-bytes" => config.uploads.max_header_bytes = value.parse()?,
-            "--upload-max-disk-bytes" => config.uploads.max_disk_bytes = value.parse()?,
-            "--session-ttl-seconds" => config.sessions.ttl = Duration::from_secs(value.parse()?),
-            "--session-max-records" => config.sessions.max_sessions = value.parse()?,
-            "--session-max-bytes" => config.sessions.max_bytes = value.parse()?,
-            "--session-cookie-secure" => config.sessions.secure = value.parse()?,
-            "--host" => config.host = value.parse()?,
-            "--port" => config.port = value.parse()?,
-            "--workers" => config.workers = value.parse()?,
-            "--queue" => config.queue = value.parse()?,
-            "--max-connections" => config.max_connections = value.parse()?,
-            "--max-body-bytes" => config.max_body_bytes = value.parse()?,
-            "--max-response-bytes" => config.max_response_bytes = value.parse()?,
-            "--timeout-ms" => config.request_timeout = Duration::from_millis(value.parse()?),
-            _ => return Err(format!("unknown serve option {key}").into()),
-        }
-    }
-    Ok(config)
+    let options = settings::Options::parse(arguments)?;
+    let mode = options.mode;
+    options.apply(&mut config)?;
+    Ok((config, mode))
 }
+
 pub(crate) fn launch(arguments: Vec<OsString>) -> ExitCode {
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-        let config = config(arguments)?;
+        let (config, mode) = config(arguments)?;
+        match mode {
+            settings::Mode::Check => {
+                println!("Server configuration is valid");
+                return Ok(());
+            }
+            settings::Mode::Print => {
+                print!("{}", settings::inspect(&config)?);
+                return Ok(());
+            }
+            settings::Mode::Serve => {}
+        }
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed))?;
