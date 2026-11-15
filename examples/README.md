@@ -17,6 +17,7 @@ package or source checkout; sample input directories must already exist.
 | atomic-report.scripta | `scripta examples/atomic-report.scripta report.json --apply` | Previews without --apply; publishes a complete JSON report using atomic file replacement. Parent directory must exist. |
 | server-health.scripta | `scripta examples/server-health.scripta` | Local JSON metrics, system RAM and interval-based CPU sample; optional first argument selects a disk path. |
 | http-client.scripta | `scripta examples/http-client.scripta https://example.com/api/status` | Explicit bounded HTTPS/HTTP request and JSON output. Needs the endpoint and valid TLS. |
+| http-timing.scripta | `scripta examples/http-timing.scripta [URL]` | Local monotonic timing, or HTTP duration and failed-call elapsed time for an explicit URL. |
 | data-handling.scripta | `scripta examples/data-handling.scripta` | Local byte conversions, emoji-aware slicing, CSV round trip, and simple regex. |
 | csv-reader.scripta | `scripta examples/csv-reader.scripta records.csv` | Streams complete CSV records as JSON lines, including quoted multiline fields. |
 | download.scripta | `scripta examples/download.scripta https://example.com/archive.zip archive.zip` | Downloads exact bytes into a new file; default HTTP ceiling is 8 MiB. Requires explicit URL and destination. |
@@ -54,3 +55,8 @@ for Git sources, version constraints, and updates.
 The cross-platform release_examples integration suite uses temporary directories,
 loopback HTTP, and the scripta executable itself for child-process testing. It does
 not invoke public endpoints, Git, Python, Node.js, or PHP.
+
+`web-app.scripta` demonstrates HTML, JSON, redirects, JSON POST bodies, and a SQLite
+counter. Run it with `scripta serve examples/web-app.scripta`; it requires a web
+request context rather than ordinary CLI execution. The SQLite counter creates
+`web-demo.sqlite` in the working directory. See [web hosting](../docs/web-servers.md).

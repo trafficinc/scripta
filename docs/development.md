@@ -276,3 +276,29 @@ permissions, concurrent readers, and a Windows delete-sharing failure fixture.
 The report example is checked through the CLI release-example suite. See the
 [public contract](standard-library.md#atomic-file-replacement) before changing
 permissions, commit ordering, or durability behavior.
+
+## Elapsed-time measurement
+
+`Clock::monotonicMs` and `HttpResponse.durationMs` use `std::time::Instant` in
+`scr-stdlib`; no calendar timestamps or new runtime backends are involved. The
+clock uses one process-local origin and returns fractional milliseconds. HTTP
+duration is frozen at bounded-body EOF, including redirects and body buffering.
+Tests cover cross-runtime clock ordering, scalar budgets, cancellation, delayed
+redirects plus streamed bodies, error statuses, and externally timed failures.
+See the [public timing contracts](standard-library.md#monotonic-timing).
+
+Web hosting changes span `scr-web`, request-scoped `scr-stdlib::web`, CLI wiring,
+and the cached-program runtime interface. Focused checks are:
+
+```sh
+cargo test -p scr-stdlib --test web --locked --offline
+cargo test -p scr-runtime --test cached_program --locked --offline
+cargo test -p scr-cli --test web_server --all-features --locked --offline
+cargo test -p scr-cli --test web_server --no-default-features --locked --offline
+```
+
+The host uses Hyper for HTTP framing and Tokio for bounded asynchronous network
+and worker-process I/O, rather than a custom HTTP parser. New dependencies remain
+compatible with Rust 1.85. The subprocess fixtures bind localhost and require
+permission to spawn persistent workers. The web example must be executed through
+`scripta serve`, including HTTP requests; an ordinary CLI run has no Web context.

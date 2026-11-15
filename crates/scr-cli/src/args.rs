@@ -7,12 +7,12 @@ pub const HELP: &str = "Scripta systems scripting language
 
 Usage: scripta version
        scripta version --verbose
-       scripta help [run|check|fmt]
+       scripta help [run|check|fmt|serve]
        scripta run <file|-> [arguments...]
        scripta <file> [arguments...]
        scripta check <file>
        scripta fmt [--check] <file>
-       scripta playground [options]
+       scripta serve <file> [--host <IP>] [--port <port>] [--workers <count>]\n       scripta playground [options]
        scripta init
        scripta add <name> --path <dir>
        scripta add <name> --git <url> (--version <constraint> | --rev <ref>)
@@ -25,6 +25,13 @@ Arguments after the script path belong to the script; -- ends script option quer
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
+    Serve {
+        arguments: Vec<OsString>,
+    },
+    #[doc(hidden)]
+    WebWorker {
+        arguments: Vec<OsString>,
+    },
     Playground {
         arguments: Vec<OsString>,
     },
@@ -62,6 +69,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
     let Some(first) = args.first() else {
         return Err(UsageError("expected a command or source file".into()));
     };
+    if first == "__web-worker" {
+        return Ok(Command::WebWorker {
+            arguments: args[1..].to_vec(),
+        });
+    }
     if first == "playground" {
         return Ok(Command::Playground {
             arguments: args[1..].to_vec(),
@@ -82,6 +94,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
             "check" => Some(
                 "Usage: scripta check <file>\nCheck syntax and declarations without executing or loading includes.\nUse -- before a dash-prefixed filename.",
             ),
+            "serve" => Some(
+                "Usage: scripta serve <file> [--host <IP>] [--port <port>] [--workers <1..64>] [--queue <1..4096>] [--max-connections <1..4096>] [--max-body-bytes <0..67108864>] [--max-response-bytes <1..67108864>] [--timeout-ms <1..3600000>] [--session-dir <private-directory>] [--session-ttl-seconds <1..2592000>] [--session-max-records <1..100000>] [--session-max-bytes <1..1048576>] [--session-cookie-secure <true|false>]\nRun a fixed entry script for HTTP requests. Defaults: 127.0.0.1:8080, up to 4 workers, queue 32, connections 128, body 1 MiB, response 8 MiB, timeout 10 seconds.\nUse a reverse proxy for public HTTPS. Restart to reload the cached entry script. Sessions use a private temporary store unless --session-dir is supplied; Secure session cookies default to true.",
+            ),
             "fmt" => Some(
                 "Usage: scripta fmt [--check] <file>\nFormat a source file, or report differences without writing with --check.\nUse -- before a dash-prefixed filename.",
             ),
@@ -90,6 +105,11 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
         if let Some(help) = help {
             return Ok(Command::CommandHelp(help));
         }
+    }
+    if first == "serve" {
+        return Ok(Command::Serve {
+            arguments: args[1..].to_vec(),
+        });
     }
     if matches!(first.to_str(), Some("init" | "add" | "install" | "update")) {
         return Ok(Command::Package(args));

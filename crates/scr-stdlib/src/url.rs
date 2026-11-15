@@ -160,7 +160,7 @@ fn build(context: &RuntimeContext<'_>, parameters: &Value, form: bool) -> Native
     })?;
     Ok(Value::String(result))
 }
-fn parse(context: &RuntimeContext<'_>, text: &str, form: bool) -> NativeResult<Value> {
+pub(crate) fn parse(context: &RuntimeContext<'_>, text: &str, form: bool) -> NativeResult<Value> {
     let text = if form {
         text
     } else {
@@ -223,7 +223,11 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
     Ok(())
 }
 
-fn invoke(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> NativeResult<Value> {
+pub(crate) fn invoke(
+    name: &str,
+    context: &RuntimeContext<'_>,
+    args: &[Value],
+) -> NativeResult<Value> {
     context.check_cancelled()?;
     let text = || match &args[0] {
         Value::String(s) => s.as_str(),

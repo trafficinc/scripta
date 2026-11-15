@@ -38,6 +38,8 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
         "directory-backup.scripta",
         "server-health.scripta",
         "http-client.scripta",
+        "http-timing.scripta",
+        "web-app.scripta",
         "command-runner.scripta",
         "atomic-report.scripta",
         "data-handling.scripta",
@@ -495,6 +497,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             "platform architecture hostname cpuUsage memoryUsage diskUsage uptime homeDirectory tempDirectory",
         ),
         ("Date", "now format parse sleep"),
+        ("Clock", "monotonicMs"),
         ("Log", "info warn error debug setFile"),
         ("Json", "encode decode pretty"),
         ("Http", "get post request download"),
@@ -531,7 +534,20 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 160);
+    assert_eq!(count, 161);
+    for name in [
+        "request",
+        "status",
+        "header",
+        "addHeader",
+        "redirect",
+        "write",
+    ] {
+        assert!(
+            reference.contains(&format!("Web::{name}")),
+            "missing Web::{name}"
+        );
+    }
 }
 
 #[test]
@@ -644,5 +660,88 @@ fn url_encoding_example_executes_with_expected_outputs() {
     assert_eq!(
         success(run("url-encoding.scripta", &[])),
         "https://example.com/search?q=caf%C3%A9%20%26%20tea&page=2\n[[\"tag\",\"rust\"],[\"tag\",\"scripting\"]]\nname=Jane+Doe&message=A%2BB\ntrue\n"
+    );
+}
+
+#[test]
+fn http_timing_example_reports_local_success_and_failed_attempts() {
+    let inspect = |text: String, expression: &str| {
+        let mut runtime = scr_runtime::Runtime::new();
+        scr_stdlib::register(&mut runtime).unwrap();
+        runtime
+            .set_global("json", scr_runtime::Value::String(text))
+            .unwrap();
+        runtime
+            .execute_source(
+                &format!("<?scripta $report = Json::decode($json); $result = {expression};"),
+                &mut Vec::new(),
+            )
+            .unwrap();
+        runtime.get_global("result").unwrap().clone()
+    };
+    let output = success(run("http-timing.scripta", &[]));
+    assert_eq!(
+        inspect(
+            output,
+            "$report['operation'] === 'sleep' && type($report['elapsedMs']) === 'float' && $report['elapsedMs'] >= 0.0"
+        ),
+        scr_runtime::Value::Bool(true)
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    listener.set_nonblocking(true).unwrap();
+    let worker = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut request = Vec::new();
+                    while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        let mut buffer = [0; 1024];
+                        let count = stream.read(&mut buffer).unwrap();
+                        assert!(count > 0, "request ended before its headers");
+                        request.extend_from_slice(&buffer[..count]);
+                        assert!(request.len() <= 16 * 1024);
+                    }
+                    assert!(request.starts_with(b"GET / "));
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        )
+                        .unwrap();
+                    break;
+                }
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(2))
+                }
+                other => panic!("HTTP timing example accept failed: {other:?}"),
+            }
+        }
+    });
+    let output = success(run("http-timing.scripta", &[url.as_ref()]));
+    worker.join().unwrap();
+    assert_eq!(
+        inspect(
+            output,
+            "$report['ok'] && $report['status'] === 200 && type($report['durationMs']) === 'float' && $report['durationMs'] >= 0.0 && $report['elapsedMs'] >= $report['durationMs']"
+        ),
+        scr_runtime::Value::Bool(true)
+    );
+    let output = run("http-timing.scripta", &["not-a-url".as_ref()]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        inspect(
+            String::from_utf8(output.stdout).unwrap(),
+            "$report['ok'] === false && type($report['elapsedMs']) === 'float' && $report['elapsedMs'] >= 0.0 && type($report['error']) === 'string'"
+        ),
+        scr_runtime::Value::Bool(true)
     );
 }

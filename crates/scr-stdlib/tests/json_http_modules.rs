@@ -366,28 +366,38 @@ fn http_response_methods_headers_post_and_error_statuses() {
     });
     let mut runtime = runtime(None);
     runtime.set_global("url", Value::String(url)).unwrap();
-    assert_eq!(run(&mut runtime, r#"$r = Http::get($url, ["headers" => ["X-Test" => "hello"]]); $status = $r->status; $headers = $r->headers; $body = $r->body; $text = $r->text(); $ok = $r->ok(); $data = $r->json(); echo $data["status"];"#).unwrap(), "up");
+    assert_eq!(run(&mut runtime, r#"$r = Http::get($url, ["headers" => ["X-Test" => "hello"]]); $duration = $r->durationMs; $status = $r->status; $headers = $r->headers; $body = $r->body; $text = $r->text(); $ok = $r->ok(); $data = $r->json(); echo $data["status"];"#).unwrap(), "up");
     assert_eq!(runtime.get_global("status"), Some(&Value::Int(200)));
     assert_eq!(runtime.get_global("ok"), Some(&Value::Bool(true)));
     assert_eq!(runtime.get_global("body"), runtime.get_global("text"));
+    assert!(
+        matches!(runtime.get_global("duration"), Some(Value::Float(ms)) if ms.is_finite() && *ms >= 0.0)
+    );
     let first = requests.recv().unwrap();
     assert!(first.to_ascii_lowercase().contains("x-test: hello"));
     assert_eq!(
         run(&mut runtime, r#"echo Json::encode($headers["x-value"]);"#).unwrap(),
         r#"["a","b"]"#
     );
-    run(&mut runtime, r#"$r = Http::post($url, Json::encode(["message" => "hello"]), ["headers" => ["Content-Type" => "application/json"]]);"#).unwrap();
+    run(&mut runtime, r#"$r = Http::post($url, Json::encode(["message" => "hello"]), ["headers" => ["Content-Type" => "application/json"]]); $duration = $r->durationMs;"#).unwrap();
+    assert!(
+        matches!(runtime.get_global("duration"), Some(Value::Float(ms)) if ms.is_finite() && *ms >= 0.0)
+    );
     let second = requests.recv().unwrap();
     assert!(second.starts_with("POST "));
     assert!(second.ends_with(r#"{"message":"hello"}"#));
-    run(&mut runtime, r#"$r = Http::request("PATCH", $url, ["body" => "patch"]); $ok = $r->ok(); $status = $r->status;"#).unwrap();
+    run(&mut runtime, r#"$r = Http::request("PATCH", $url, ["body" => "patch"]); $ok = $r->ok(); $status = $r->status; $duration = $r->durationMs;"#).unwrap();
     assert_eq!(runtime.get_global("ok"), Some(&Value::Bool(false)));
     assert_eq!(runtime.get_global("status"), Some(&Value::Int(503)));
+    assert!(
+        matches!(runtime.get_global("duration"), Some(Value::Float(ms)) if ms.is_finite() && *ms >= 0.0)
+    );
     assert!(requests.recv().unwrap().ends_with("patch"));
     worker.join().unwrap();
     error(&mut runtime, "$r->ok(1);", "TypeError");
     error(&mut runtime, "Json::encode($r);", "JsonError");
     error(&mut runtime, "$r->status = 1;", "PropertyError");
+    error(&mut runtime, "$r->durationMs = 0.0;", "PropertyError");
 }
 
 #[test]
@@ -442,10 +452,21 @@ fn http_limits_timeouts_connection_encoding_and_json_failures_are_errors() {
     assert_eq!(runtime.get_global("status"), Some(&Value::Int(404)));
     error(&mut runtime, "$r->json();", "JsonError");
     error(&mut runtime, "Http::get($url);", "EncodingError");
-    error(
+    run(
         &mut runtime,
-        r#"Http::get($url, ["timeoutMs" => 30]);"#,
-        "TimeoutError",
+        r#"
+        $saved = $r;
+        $failedDuration = null;
+        $started = Clock::monotonicMs();
+        try { $r = Http::get($url, ["timeoutMs" => 30]); }
+        catch (TimeoutError $e) { $failedDuration = Clock::monotonicMs() - $started; }
+        $unchanged = $r === $saved;
+    "#,
+    )
+    .unwrap();
+    assert_eq!(runtime.get_global("unchanged"), Some(&Value::Bool(true)));
+    assert!(
+        matches!(runtime.get_global("failedDuration"), Some(Value::Float(ms)) if ms.is_finite() && *ms >= 10.0)
     );
     worker.join().unwrap();
     assert_eq!(requests.iter().count(), 4);
@@ -597,4 +618,87 @@ fn response_limits_apply_to_chunked_bodies_and_exact_boundaries() {
     );
     worker.join().unwrap();
     assert_eq!(requests.iter().count(), 3);
+}
+
+#[test]
+fn http_duration_includes_redirects_and_streamed_body_and_is_frozen() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/start", listener.local_addr().unwrap());
+    listener.set_nonblocking(true).unwrap();
+    let worker = thread::spawn(move || {
+        for index in 0..2 {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(2))
+                    }
+                    other => panic!("timing fixture accept failed: {other:?}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let request = read_request(&mut stream);
+            if index == 0 {
+                assert!(request.starts_with("GET /start "));
+                thread::sleep(Duration::from_millis(100));
+                stream
+                    .write_all(&reply("302 Found", "Location: /final\r\n", b""))
+                    .unwrap();
+            } else {
+                assert!(request.starts_with("GET /final "));
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n\xff",
+                    )
+                    .unwrap();
+                stream.flush().unwrap();
+                thread::sleep(Duration::from_millis(100));
+                stream.write_all(&[0]).unwrap();
+            }
+        }
+    });
+    let mut runtime = runtime(None);
+    runtime.set_global("url", Value::String(url)).unwrap();
+    run(
+        &mut runtime,
+        r#"
+        $started = Clock::monotonicMs();
+        $r = Http::get($url, ["responseType" => "bytes", "maxBodyBytes" => 2]);
+        $elapsed = Clock::monotonicMs() - $started;
+        $duration = $r->durationMs;
+        $body = $r->body;
+        $encoded = Json::encode(["durationMs" => $duration]);
+    "#,
+    )
+    .unwrap();
+    let Some(Value::Float(duration)) = runtime.get_global("duration") else {
+        panic!("duration must be float")
+    };
+    let duration = *duration;
+    let Some(Value::Float(elapsed)) = runtime.get_global("elapsed") else {
+        panic!("elapsed must be float")
+    };
+    assert!(
+        duration.is_finite() && duration >= 150.0,
+        "duration omitted redirect or body wait: {duration}"
+    );
+    assert!(duration <= elapsed + 1.0, "duration exceeds full call time");
+    assert_eq!(
+        runtime.get_global("body"),
+        Some(&Value::Bytes(vec![0xff, 0].into()))
+    );
+    worker.join().unwrap();
+    thread::sleep(Duration::from_millis(20));
+    run(&mut runtime, "$again = $r->durationMs;").unwrap();
+    assert_eq!(runtime.get_global("again"), Some(&Value::Float(duration)));
+    error(&mut runtime, "$r->durationMs = 0.0;", "PropertyError");
+    run(&mut runtime, "$again = $r->durationMs;").unwrap();
+    assert_eq!(runtime.get_global("again"), Some(&Value::Float(duration)));
 }

@@ -7,6 +7,7 @@ use scr_runtime::{
 use std::time::{Duration, Instant};
 mod bytes;
 mod cli;
+mod clock;
 mod collections;
 mod csv;
 mod data_text;
@@ -22,6 +23,7 @@ pub mod process;
 mod strings;
 mod system;
 mod url;
+pub mod web;
 pub use filesystem::FilesystemPolicy;
 
 #[derive(Debug, Clone, Default)]
@@ -118,6 +120,7 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
     filesystem::register(runtime, options.filesystem.clone())?;
     system::register(runtime, options.filesystem.clone())?;
     date::register(runtime)?;
+    clock::register(runtime)?;
     log::register(runtime, options.log, options.filesystem)?;
     paths::register(runtime)?;
     process::register(runtime, options.process)?;

@@ -761,3 +761,13 @@ filesystem write/root permissions and rejects final symlinks and nonregular or
 read-only destinations. It does not change `File::write` or `File::move` semantics.
 See the [atomic replacement contract](standard-library.md#atomic-file-replacement)
 for metadata, cancellation, concurrency, cleanup, and durability limits.
+
+## Web request execution
+
+`scripta serve entry.scripta` runs a fixed entry script for each HTTP request in a
+fresh runtime. The Web module supplies request data, status, headers, redirects,
+and binary output; `echo` supplies ordinary response body output. Syntax and
+strict type rules are unchanged. The host buffers bounded output and turns
+uncaught failures or nonzero exits into generic HTTP 500 responses; `exit 0`
+finishes a normal response. Worker termination on deadline can bypass script
+cleanup. See [Web APIs](standard-library.md#web-requests) and [hosting](web-servers.md).

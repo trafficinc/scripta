@@ -15,6 +15,8 @@ pub fn main() -> ExitCode {
         }
     };
     let (path, check_only, format_only, arguments, source_stdin) = match command {
+        Command::Serve { arguments } => return crate::web::launch(arguments),
+        Command::WebWorker { arguments } => return crate::web::worker(arguments),
         Command::Playground { arguments } => return crate::playground::launch(arguments),
         Command::Package(arguments) => {
             return match env::current_dir()
@@ -163,7 +165,7 @@ pub fn main() -> ExitCode {
     }
 }
 
-fn limits() -> Result<scr_runtime::RuntimeOptions, String> {
+pub(crate) fn limits() -> Result<scr_runtime::RuntimeOptions, String> {
     fn number(name: &str) -> Result<Option<usize>, String> {
         env::var_os(name)
             .map(|value| {
@@ -185,7 +187,7 @@ fn limits() -> Result<scr_runtime::RuntimeOptions, String> {
         ..Default::default()
     })
 }
-fn read_source(path: &std::path::Path, limit: usize) -> io::Result<String> {
+pub(crate) fn read_source(path: &std::path::Path, limit: usize) -> io::Result<String> {
     read_source_stream(fs::File::open(path)?, limit)
 }
 fn read_source_stream(reader: impl Read, limit: usize) -> io::Result<String> {

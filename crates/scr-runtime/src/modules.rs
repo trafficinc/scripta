@@ -58,6 +58,23 @@ impl Runtime {
         self.source = previous;
         result
     }
+    /// Execute a host-cached program with its original source for diagnostics and includes.
+    /// The host must supply the program parsed from this source; execution state is
+    /// still owned entirely by this runtime. Source limits apply on every call.
+    pub fn execute_program_with_source(
+        &mut self,
+        program: &Program,
+        source: Arc<SourceFile>,
+        output: &mut impl Write,
+    ) -> std::result::Result<u8, RuntimeError> {
+        if source.text.len() > self.options.max_source_bytes {
+            return Err(*self.error("source byte limit exceeded", Span::default()));
+        }
+        let previous = self.source.replace(source);
+        let result = self.execute(program, output);
+        self.source = previous;
+        result
+    }
     fn parse_source(&self, text: &str) -> Result<Program> {
         let tokens = scr_lexer::lex(text).map_err(Diagnostic::from);
         tokens

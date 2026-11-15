@@ -43,6 +43,7 @@ struct Response {
     headers: Value,
     body: Rc<[u8]>,
     binary: bool,
+    duration_ms: f64,
 }
 fn header_bytes(headers: &Value) -> usize {
     let Value::Map(entries) = headers else {
@@ -87,6 +88,7 @@ impl NativeObject for Response {
     fn get_property(&self, name: &str) -> Result<Value, String> {
         Ok(match name {
             "status" => Value::Int(i64::from(self.status)),
+            "durationMs" => Value::Float(self.duration_ms),
             "headers" => self.headers.clone(),
             "body" if self.binary => Value::Bytes(self.body.clone()),
             "body" => Value::String(decode(&self.body).map_err(|e| e.to_string())?.into()),
@@ -348,6 +350,9 @@ pub(crate) fn register(
                     let request = builder
                         .body(options.body.as_ref())
                         .map_err(|_| NativeError::type_error("invalid HTTP request"))?;
+                    // Measure client setup and the full transfer, including redirects.
+                    // Argument/request validation has already completed.
+                    let started = Instant::now();
                     let agent: ureq::Agent = ureq::Agent::config_builder()
                         .http_status_as_error(false)
                         .timeout_global(Some(options.timeout))
@@ -420,6 +425,9 @@ pub(crate) fn register(
                             .map_err(|_| resource("HTTP body allocation failed"))?;
                         bytes.extend_from_slice(&buffer[..count]);
                     }
+                    // Freeze the transfer duration at body EOF, before text decoding
+                    // or constructing the response object and script-visible values.
+                    let duration_ms = crate::clock::milliseconds(started.elapsed());
                     context.check_cancelled()?;
                     if !options.binary {
                         decode(&bytes)?;
@@ -429,6 +437,7 @@ pub(crate) fn register(
                         headers,
                         body: bytes.into(),
                         binary: options.binary,
+                        duration_ms,
                     })))
                 },
             ),

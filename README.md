@@ -63,7 +63,8 @@ notarization; the reviewed macOS binaries have linker-generated ad hoc signature
 
 Scripta focuses on command-line tools, scheduled jobs, server automation, and
 report generation. Run scripts directly or through cron and systemd; publish
-generated HTML or JSON through an existing web server when you need a dashboard.
+generated HTML or JSON through an existing web server, or serve dynamic HTTP
+requests behind a reverse proxy.
 
 - **Everyday automation:** filesystem operations, literal command arguments,
   bounded process output, timeouts, and local system metrics.
@@ -423,10 +424,11 @@ an SSH terminal open. See the [crontab reference](https://man7.org/linux/man-pag
 | `scripta check script.scripta` | Validate tags, complete syntax, declarations, and control flow without execution. |
 | `scripta fmt script.scripta` | Format indentation and spacing while preserving comments and string literals. |
 | `scripta fmt --check script.scripta` | Check formatting without writing; useful in CI. |
+| `scripta serve app.scripta` | Receive HTTP requests with persistent workers; use a reverse proxy for public HTTPS. |
 | `scripta playground` | Launch the separately installed, optional local browser playground. |
 | `scripta version` | Print the interpreter version. |
 | `scripta version --verbose` | Show version, build target, compiler, profile, and supplied commit metadata. |
-| `scripta help` | Show usage; `scripta help run`, `check`, or `fmt` shows command help. |
+| `scripta help` | Show usage; `scripta help run`, `check`, `fmt`, or `serve` shows command help. |
 
 `check` is a syntax/declaration check, not complete static type checking. It does
 not execute or load required files. `fmt` is idempotent and keeps an optional
@@ -468,17 +470,22 @@ file named `-` remains accessible with `scripta run -- -` or `scripta run ./-`.
 
 ## Web-server use
 
-Scripta's dashboard workflow follows its CLI focus: run a script to collect data
-and generate HTML or JSON, then serve the generated files with Caddy or Apache.
-Use cron to refresh the output independently of browser requests. Visitors see
-the latest generated report, and browser-side JavaScript can poll the JSON for
-updates.
+Run a dynamic application locally with:
 
-`Http` makes outgoing requests. Scripta has no built-in HTTP server, PHP-style
-request handler, or FastCGI service. A web runtime or FPM equivalent is outside
-the current project direction. The
+```sh
+scripta serve examples/web-app.scripta --host 127.0.0.1 --port 8080
+```
+
+Scripta receives HTTP requests, runs a fixed entry script in a fresh runtime, and
+returns its status, headers, and bounded output. Persistent worker processes cache
+the parsed entry script. Use Caddy or Apache as an HTTPS reverse proxy for public
+hosting. See the [web hosting guide](docs/web-servers.md) for limits, deployment,
+redirects, JSON/form bodies, and the SQLite example. `Web` APIs are available during
+requests; `Http` remains the outgoing HTTP client.
+
+For periodically generated dashboards, the
 [static-output guide](docs/web-servers.md#generate-static-html-or-json-on-any-platform)
-shows report generation on macOS, Linux, and Windows.
+remains available on all platforms.
 
 ### A dashboard with Caddy or Apache on Linux
 
@@ -548,7 +555,7 @@ examples and have not been deployment-tested in this checkout.
 
 ## Standard library
 
-The [complete reference](docs/standard-library.md) documents all **160 functions**,
+The [complete reference](docs/standard-library.md) documents all **161 default CLI functions** and six request-context Web functions,
 return values, native objects, limits, and errors.
 
 | Modules | Use |
@@ -558,6 +565,8 @@ return values, native objects, limits, and errors.
 | `Env`, `Cli` | Environment values, script arguments, options, and prompts. |
 | `System` | Platform, CPU sampling, system memory, disk usage, and host details. |
 | `Date`, `Log` | UTC timestamps, parsing, sleep, and redacted local JSON logs. |
+| `Clock` | Monotonic elapsed-time measurement with fractional milliseconds, independent of calendar time. |
+| `Web` (request context) | Incoming HTTP requests, response status/headers, redirects, and bounded text/binary output. |
 | `Json`, `Http` | JSON conversion, binary HTTP/HTTPS requests, and downloads directly to disk. |
 | `Sqlite` | Bundled local databases, parameterized SQL, transactions, and bounded query results. |
 | `Url`, `Form` | UTF-8 percent/query encoding and form bodies. |
