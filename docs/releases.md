@@ -102,6 +102,56 @@ artifacts. Existing tags are not republished automatically. The workflow change
 itself does not establish native macOS 15 support; record the first successful
 four-target run before updating that compatibility row.
 
+## Promote validated packages without rebuilding
+
+Use [Promote validated release](../.github/workflows/promote-release.yml) from
+the repository's default branch after reviewing a successful candidate. Open
+Actions, select that workflow, and choose **Run workflow** on `main`. For the
+validated 0.1.0 candidate, supply:
+
+| Input | Value |
+| --- | --- |
+| `validation_tag` | `v0.1.0-validation.20261115.5` |
+| `validation_run_id` | `43805248723` |
+| `release_tag` | `v0.1.0` |
+
+The workflow must first be installed on the default branch. Do not create or
+push the stable tag yourself: a normal tag push starts the native build workflow.
+Promotion creates the stable tag with the workflow's built-in `GITHUB_TOKEN`;
+[GitHub does not trigger another workflow for that token's tag event](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+Do not substitute a personal access token.
+
+The [promotion verifier](../scripts/promote_release.py) downloads the published
+candidate's six assets, which remain available after Actions artifacts expire.
+It checks the candidate tag, commit, workspace version, successful native run
+and all five jobs, archive hashes, native records, smoke records, and evidence
+inventory before creating anything remotely. The stable tag points to the
+validated commit, even when the promotion tools are newer on `main`.
+
+All four platform archives are copied byte-for-byte. Stable release metadata,
+`SHA256SUMS`, and the evidence ZIP are regenerated; the manifest records the
+source candidate, run, and source evidence hash. Native records and logs retain
+their original bytes. There are still exactly six published assets. No Rust
+build or package rebuild runs during promotion.
+
+Published releases and existing unrelated tags are never replaced or moved.
+After a failed upload, rerun with the same inputs to resume the draft and the
+tag created by this promotion. Review and resolve other failures before retrying.
+
+For read-only preparation locally, use a fresh output directory and omit
+`--publish`:
+
+```sh
+python3 scripts/promote_release.py --repository trafficinc/scripta \
+  --validation-tag v0.1.0-validation.20261115.5 \
+  --validation-run-id 43805248723 --release-tag v0.1.0 \
+  --output dist/promotion-preview
+```
+
+This downloads and verifies assets and prepares the stable files locally; it
+does not create a tag or release. Publishing requires manual dispatch on the
+default branch with its workflow token.
+
 ## Pinned inputs and profiles
 
 Rust 1.99.1 is pinned in rust-toolchain.toml; Cargo.lock is committed and every

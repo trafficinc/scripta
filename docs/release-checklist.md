@@ -59,6 +59,21 @@ replace a fresh run against the intended release source.
 - [ ] Publish chosen validated assets, checksums, validation and dependency reports.
 - [ ] Download a published artifact, verify checksum, and repeat local-script smoke.
 
+## Promotion without rebuilding
+
+Follow the [manual promotion instructions](releases.md#promote-validated-packages-without-rebuilding)
+when reusing a published candidate's packages.
+
+- [ ] Review the source prerelease, exact validated commit, successful native run,
+  and all four platform packages and evidence.
+- [ ] Install the manual promotion workflow on the default branch.
+- [ ] Run read-only preparation and verify the four output archive hashes match
+  the candidate; review stable metadata and source-run provenance.
+- [ ] Dispatch **Promote validated release** on `main` with the reviewed source
+  tag, native run ID, and stable tag. Let the workflow create the stable tag.
+- [ ] Confirm the stable tag resolves to the validated commit and the published
+  release has exactly six assets, with unchanged platform archive hashes.
+
 Checking this file and local packaging commands do not publish anything. Every
 tag push containing the [release workflow](development.md#tag-triggered-builds-and-releases)
 authorizes automated publication after all native validation jobs pass. The exact
