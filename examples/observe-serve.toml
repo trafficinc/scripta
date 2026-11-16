@@ -8,5 +8,7 @@
 host = "127.0.0.1"
 port = 8080
 workers = 2
+# Recycle after completed exchanges; 0 disables request-count recycling.
+worker-max-requests = 10000
 log-format = "json"
 health-address = "127.0.0.1:9090"

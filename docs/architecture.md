@@ -328,6 +328,14 @@ source limits and restores the previous source association after execution.
 
 Worker pipes use bounded, length-prefixed JSON metadata and separate raw-body
 frames. Script output goes to a bounded writer, never the protocol stream.
+Worker-loop slots proactively observe idle child exit and unsolicited output,
+terminate failed children, and recover without application dispatch. Per-slot
+replacement backoff is bounded at five seconds and resets on a completed exchange
+or observed 30-second survival, not on handshake alone. Optional request-count
+recycling retires only after the full exchange. The accept loop reaps unexpected
+worker-loop task completions and restores slots with bounded task-failure backoff.
+Ready/recovering gauges distinguish usable leases from replacement waits;
+shutdown cancels pending recovery while healthy workers drain admitted work.
 The supervisor terminates/replaces workers on deadline or protocol failure;
 worker input monitoring also exits when the parent pipe closes. Response metadata
 and output are request-local, so errors can discard partial bodies before HTTP
@@ -447,6 +455,6 @@ read-only request metadata.
 An optional loopback-only management listener serves JSON liveness, readiness,
 and counter snapshots independently of application routes/worker slots. It has
 fixed connection/header/time bounds. Readiness uses startup/drain flags, known
-worker leases, and admission capacity; it is not an application dependency probe
-or proactive idle-worker supervisor. Body completion records mean handoff to Hyper,
+worker leases, and admission capacity; probes do not initiate worker recovery or
+check application dependencies. Body completion records mean handoff to Hyper,
 not proof of remote receipt. See [hosting observability](web-servers.md#logs-and-health-checks).

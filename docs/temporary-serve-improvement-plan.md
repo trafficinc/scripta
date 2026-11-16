@@ -6,15 +6,15 @@ isolated worker processes and deployment behind an HTTPS reverse proxy.
 
 ## Progress and approval rules
 
-Current position: **Sections 1–3 accepted; Section 4 complete and validated, awaiting acceptance and explicit OK to begin Section 5.**
+Current position: **Sections 1–4 accepted; Section 5 complete and validated, awaiting acceptance and explicit OK to begin Section 6.**
 
 | Section | Scope | Status |
 | --- | --- | --- |
 | 1 | Reliable configuration | Accepted |
 | 2 | Trusted reverse proxies | Accepted |
 | 3 | Logs and health checks | Accepted |
-| 4 | Deployment and shutdown | Complete; awaiting acceptance |
-| 5 | Worker resilience | Not started |
+| 4 | Deployment and shutdown | Accepted |
+| 5 | Worker resilience | Complete; awaiting acceptance |
 | 6 | Development workflow | Not started |
 | 7 | Performance and platform evidence | Not started |
 
@@ -422,27 +422,110 @@ Validation evidence (2026-11-15):
   External forced kills/machine failure can leave persistent-directory debris.
   Section 5 remains unstarted pending explicit approval.
 
-Acceptance / OK to proceed: pending.
+Acceptance / OK to proceed: user replied “ok”, accepting Section 4 and approving Section 5.
 
 ## Section 5 — Worker resilience
 
-- [ ] Explicit approval to begin recorded.
-- [ ] Add configurable recycling after a bounded request count without killing
+- [x] Explicit approval to begin recorded: user replied “ok” after Section 4 was presented.
+- [x] Add configurable recycling after a bounded request count without killing
       an active successful request solely to recycle its worker.
-- [ ] Supervise unexpected worker-loop termination and restore configured capacity.
-- [ ] Add bounded replacement backoff and define recovery/reset behavior so
+- [x] Supervise unexpected worker-loop termination and restore configured capacity.
+- [x] Add bounded replacement backoff and define recovery/reset behavior so
       persistent startup failures cannot cause a rapid restart loop.
-- [ ] Reflect usable worker capacity and recovery state in readiness and logs.
-- [ ] Preserve admission limits, request deadlines, fresh request state, descriptor
+- [x] Reflect usable worker capacity and recovery state in readiness and logs.
+- [x] Preserve admission limits, request deadlines, fresh request state, descriptor
       ownership, and request-storage cleanup across recycling and replacement.
-- [ ] Test crashes, malformed/truncated IPC, repeated startup failures, recycling,
+- [x] Test crashes, malformed/truncated IPC, repeated startup failures, recycling,
       capacity recovery, and shutdown while replacement is pending.
-- [ ] Run checks, record evidence, and present for acceptance before Section 6.
+- [x] Run checks, record evidence, and present for acceptance before Section 6.
 
 Completion criteria: failure does not silently shrink capacity or trigger an
 unbounded restart loop; healthy workers recover without resource leaks.
 
-Validation evidence: pending.
+Implemented contract:
+
+- Added TOML/CLI `worker-max-requests`, default 0 (disabled), bounded 0–1000000,
+  with standard file/CLI precedence and redacted effective inspection. Counts
+  advance only after full worker exchanges; retirement never interrupts an
+  active successful request solely for recycling. Buffered application-error
+  responses still complete exchanges. Source snapshots and session stores stay
+  unchanged across replacement; request spools retain their ownership lifecycle.
+- Idle worker slots monitor child exit and any unsolicited output byte, not just
+  application dispatch. Failed workers are stopped/reaped before replacement.
+  Replacement runs without application requests, including after all capacity
+  is lost. Malformed/truncated active IPC still fails the request without replay.
+- Per-slot delays grow 100/200/400/800/1600/3200/5000 ms and cap at 5000 ms;
+  replacement handshakes have a separate 30-second ceiling. Completed exchanges
+  or 30-second survival observed at an idle/dispatch event reset backoff;
+  handshakes alone do not. Initial startup continues to fail on worker startup
+  errors rather than silently becoming a partially started service.
+- The accept-loop supervisor reaps unexpected worker-loop task completion and
+  restores its slot with separate bounded task-failure backoff, reset after
+  30 seconds without a further loop failure. Pending replacements stop when
+  draining is observed; healthy workers continue admitted drain work without
+  count-based recycling. Wait/start shutdown checks poll at most every 25 ms,
+  subject to scheduling and OS/log-sink delays.
+- Added fixed `configuredWorkers`/`recoveringWorkers` gauges and saturating
+  `workerStartupFailures`/`workerRecycles`/`workerLoopFailures` counters.
+  Readiness still requires startup complete, not draining, queue capacity, and
+  at least one healthy handshake lease; recovering slots do not count as usable.
+  Added bounded recovery/idle-failure/recycle/loop-failure events without paths,
+  request contents, dynamic labels, or retained histories.
+- Updated CLI help, hosting/architecture/development references, and existing
+  server/observability/deployment TOML examples with an explicit count limit.
+  No dependencies, lockfile, standard-library native exports, runtime backend,
+  service installations, or release artifacts changed.
+
+Validation evidence (2026-11-15):
+
+- Base revision `67e3ca4` plus Section 5 working-tree changes. Native macOS
+  27.0.1 arm64; pinned Rust 1.99.1 compiler host/target
+  `aarch64-apple-darwin`; Cargo build/test/lint commands used
+  `MACOSX_DEPLOYMENT_TARGET=15.0`. No commit, tag, release, or public deployment.
+- `cargo test -p scr-web --lib --locked --offline --target
+  aarch64-apple-darwin`: 16 passed. New regressions cover retry growth/cap/reset/
+  overflow, injected worker-loop panic and supervised slot restoration/shutdown,
+  malformed JSON, truncated/oversized frames, and out-of-order IPC through local
+  child pipes, including releasing child/queue capacity after failure.
+- `cargo test -p scr-cli --test web_server --test serve_config --locked
+  --offline --target aarch64-apple-darwin`: 72 passed (65 HTTP, seven config).
+  New coverage checks disabled/default/exact-maximum/invalid recycling settings,
+  CLI precedence, two-request retirement boundaries, new PIDs with unchanged
+  cached source, active-stream completion before recycle, upload spool cleanup,
+  committed session continuity, shutdown during pending recovery, all idle
+  workers lost, repeated failed handshakes, and automatic capacity restoration.
+- The all-capacity-loss fixture changed its private session directory mode so
+  replacement handshakes repeatedly failed, killed both idle worker children,
+  observed false readiness/recovering capacity and 100/200/400/800 ms delays,
+  restored private permissions, then observed full capacity/readiness recovery
+  while application request count remained zero. After successful service,
+  another child loss verified retry reset to 100 ms. No production fault knobs
+  or public network fixtures were introduced.
+- Used the environment approval mechanism for required localhost/subprocess/
+  fixture-signal access. Corrected a new unit-test use of an unavailable JoinSet
+  iterator to use its returned abort handle before final successful runs.
+- Full `cargo test --workspace --all-features --locked --offline --target
+  aarch64-apple-darwin` and `cargo test --workspace --locked --offline --target
+  aarch64-apple-darwin`: each passed 628 tests, zero failures/ignored.
+- `cargo test -p scr-cli --test web_server --test serve_config
+  --no-default-features --locked --offline --target aarch64-apple-darwin`:
+  71 passed. Full/default/minimal runs exercised the changed shipped server,
+  observability, and blue/green deployment configurations over real local HTTP.
+- `cargo clippy --workspace --all-targets --all-features --locked --offline
+  --target aarch64-apple-darwin -- -D warnings`, `cargo fmt --all -- --check`,
+  local Markdown reference paths, and `git diff --check` passed.
+- `cargo +1.85.0 check -p scr-cli --locked --offline --target
+  aarch64-apple-darwin` passed; compilation only, not minimum-Rust test execution.
+  Full/focused/lint logs remain locally in `/private/tmp/scripta-section5-*.log`
+  for this session.
+- Linux/Windows and native macOS 15 baseline execution remain pending; Unix
+  signal/permission/child-pipe tests do not establish Windows behavior. No native
+  service manager, public TLS deployment, or performance/availability claim was
+  added. Readiness reflects observed leases, not instantaneous OS liveness or
+  dependency health; losing/recycling a sole worker can transiently queue work
+  or fail readiness. Retry delay/startup/reaping and host scheduling/log-sink
+  delays remain separate from request deadlines. Section 6 remains unstarted
+  pending explicit approval.
 
 Acceptance / OK to proceed: pending.
 

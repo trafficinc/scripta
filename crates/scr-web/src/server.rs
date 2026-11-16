@@ -44,6 +44,7 @@ pub struct Config {
     pub host: IpAddr,
     pub port: u16,
     pub workers: usize,
+    pub worker_max_requests: u64,
     pub queue: usize,
     pub max_connections: usize,
     pub max_body_bytes: usize,
@@ -69,6 +70,7 @@ impl Config {
             workers: std::thread::available_parallelism()
                 .map_or(2, usize::from)
                 .min(4),
+            worker_max_requests: 0,
             queue: 32,
             max_connections: 128,
             max_body_bytes: 1024 * 1024,
@@ -99,6 +101,9 @@ impl Config {
                     "health-address conflicts with the application listener",
                 ));
             }
+        }
+        if self.worker_max_requests > 1_000_000 {
+            return Err(io::Error::other("worker-max-requests must be 0..1000000"));
         }
         self.uploads.validate()?;
         self.sessions
@@ -253,9 +258,21 @@ impl Worker {
         let mut input = child.stdin.take().unwrap();
         let mut output = child.stdout.take().unwrap();
         // A lease counts only workers which completed their ready handshake.
-        write_frame(&mut input, config.source.as_bytes()).await?;
-        if read_frame(&mut output, 16).await? != b"ready" {
-            return Err(io::Error::other("worker initialization failed"));
+        let handshake = async {
+            write_frame(&mut input, config.source.as_bytes()).await?;
+            if read_frame(&mut output, 16).await? != b"ready" {
+                return Err(io::Error::other("worker initialization failed"));
+            }
+            if observer.shutdown.load(Ordering::Acquire) {
+                return Err(io::Error::other("server draining"));
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(error) = handshake {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(error);
         }
         add(&observer.stats.worker_starts, 1);
         observer.event(
@@ -410,6 +427,29 @@ impl Worker {
         let _ = self.child.wait().await;
     }
 }
+// The handshake alone does not reset failure history: a process which keeps
+// dying immediately must not turn successful handshakes into a restart storm.
+#[derive(Default)]
+struct Backoff {
+    failures: u32,
+}
+impl Backoff {
+    fn next(&mut self) -> Duration {
+        let millis = 100u64
+            .saturating_mul(1u64 << self.failures.min(6))
+            .min(5000);
+        self.failures = self.failures.saturating_add(1);
+        Duration::from_millis(millis)
+    }
+    fn reset(&mut self) {
+        self.failures = 0;
+    }
+}
+async fn wait_shutdown(flag: &AtomicBool) {
+    while !flag.load(Ordering::Acquire) {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
 async fn worker_loop(
     mut worker: Option<Worker>,
     config: Arc<Config>,
@@ -417,14 +457,87 @@ async fn worker_loop(
     observer: Arc<Observer>,
     mut force_stop: watch::Receiver<bool>,
 ) {
+    let mut backoff = Backoff::default();
+    let mut completed = 0u64;
+    let mut healthy_since = Deadline::now();
     loop {
+        if *force_stop.borrow() {
+            break;
+        }
+        if worker.is_none() {
+            if observer.shutdown.load(Ordering::Acquire) {
+                break;
+            }
+            let _recovering = Gauge::new(&observer, GaugeKind::Recovering);
+            let delay = backoff.next();
+            observer.event(
+                "worker_recovering",
+                None,
+                json!({"delayMs":delay.as_millis() as u64}),
+                "worker recovery scheduled",
+            );
+            let result = tokio::select! {
+                biased;
+                _ = force_stop.changed() => break,
+                () = wait_shutdown(&observer.shutdown) => break,
+                result = async {
+                    tokio::time::sleep(delay).await;
+                    timeout(Duration::from_secs(30), Worker::start(&config, &observer)).await
+                } => result,
+            };
+            match result {
+                Ok(Ok(replacement)) => {
+                    worker = Some(replacement);
+                    completed = 0;
+                    healthy_since = Deadline::now();
+                    add(&observer.stats.worker_restarts, 1);
+                }
+                _ => {
+                    add(&observer.stats.worker_startup_failures, 1);
+                    observer.event(
+                        "worker_startup_failed",
+                        None,
+                        json!({}),
+                        "worker startup failed; retrying with backoff",
+                    );
+                    continue;
+                }
+            }
+        }
+        enum Next {
+            Stop,
+            Failed,
+            Job,
+        }
+        let current = worker.as_mut().unwrap();
+        let mut incoming_job = None;
         let next = tokio::select! {
             biased;
-            _ = force_stop.changed() => None,
-            job = async { queue.lock().await.recv().await } => job,
+            _ = force_stop.changed() => Next::Stop,
+            _ = current.child.wait() => Next::Failed,
+            _ = current.output.read_u8() => Next::Failed,
+            job = async { queue.lock().await.recv().await } => { incoming_job = job; Next::Job },
         };
-        let Some(mut job) = next else {
-            break;
+        if healthy_since.elapsed() >= Duration::from_secs(30) {
+            backoff.reset();
+        }
+        let mut job = match next {
+            Next::Stop => break,
+            Next::Failed => {
+                add(&observer.stats.worker_failures, 1);
+                observer.event(
+                    "worker_idle_failure",
+                    None,
+                    json!({"workerPid":worker.as_ref().and_then(|w|w.child.id())}),
+                    "idle worker exited or sent unexpected IPC",
+                );
+                worker.take().unwrap().stop().await;
+                continue;
+            }
+            Next::Job => match incoming_job {
+                Some(job) => job,
+                None => break,
+            },
         };
         drop(job.queued.take());
         if job.reply.as_ref().is_none_or(|reply| reply.is_closed())
@@ -445,10 +558,7 @@ async fn worker_loop(
         let result = tokio::select! {
             biased;
             _=force_stop.changed()=>Ok(Err(io::Error::other("shutdown deadline"))),
-            result=timeout_at(job.deadline,async {
-                if worker.is_none() {worker=Some(Worker::start(&config,&observer).await?);add(&observer.stats.worker_restarts,1);}
-                worker.as_mut().unwrap().request(&mut job,&config).await
-            })=>result,
+            result=timeout_at(job.deadline, worker.as_mut().unwrap().request(&mut job,&config))=>result,
             ()=cancel.wait()=>Ok(Err(io::Error::other("client disconnected"))),
         };
         if !matches!(result, Ok(Ok(()))) {
@@ -482,13 +592,70 @@ async fn worker_loop(
             if let Some(reply) = job.reply.take() {
                 let _ = reply.send(Err(status));
             }
+        } else {
+            backoff.reset();
+            completed = completed.saturating_add(1);
         }
         if *force_stop.borrow() {
             break;
         }
+        if config.worker_max_requests != 0
+            && completed >= config.worker_max_requests
+            && !observer.shutdown.load(Ordering::Acquire)
+        {
+            add(&observer.stats.worker_recycles, 1);
+            observer.event(
+                "worker_recycled",
+                None,
+                json!({"workerPid":worker.as_ref().and_then(|w|w.child.id()),"requests":completed}),
+                "worker request limit reached; recycling",
+            );
+            if let Some(current) = worker.take() {
+                current.stop().await;
+            }
+        }
     }
     if let Some(worker) = worker {
         worker.stop().await;
+    }
+}
+// JoinSet failures must not silently remove a worker-loop slot. A separate
+// bounded backoff also covers repeated panics in the Rust worker-loop task.
+fn supervise_workers(
+    workers: &mut JoinSet<()>,
+    config: &Arc<Config>,
+    queue: &Arc<Mutex<mpsc::Receiver<Job>>>,
+    observer: &Arc<Observer>,
+    force_stop: &watch::Receiver<bool>,
+    backoff: &mut Backoff,
+) {
+    while workers.try_join_next().is_some() {
+        if observer.shutdown.load(Ordering::Acquire) {
+            continue;
+        }
+        add(&observer.stats.worker_loop_failures, 1);
+        let delay = backoff.next();
+        observer.event(
+            "worker_loop_failed",
+            None,
+            json!({"delayMs":delay.as_millis() as u64}),
+            "worker loop terminated; restoring slot",
+        );
+        let config = config.clone();
+        let queue = queue.clone();
+        let observer = observer.clone();
+        let mut force_stop = force_stop.clone();
+        workers.spawn(async move {
+            let recovering = Gauge::new(&observer, GaugeKind::Recovering);
+            tokio::select! {
+                biased;
+                _ = force_stop.changed() => return,
+                () = wait_shutdown(&observer.shutdown) => return,
+                () = tokio::time::sleep(delay) => {},
+            }
+            drop(recovering);
+            worker_loop(None, config, queue, observer, force_stop).await;
+        });
     }
 }
 type HttpResponse = Response<Body>;
@@ -712,6 +879,10 @@ async fn run(
     shutdown: Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let observer = Observer::new(config.log_format, config.queue, shutdown.clone());
+    observer
+        .stats
+        .configured_workers
+        .store(config.workers as u64, Ordering::Relaxed);
     let temporary_sessions = if config.sessions.directory.as_os_str().is_empty() {
         Some(
             tempfile::Builder::new()
@@ -813,7 +984,25 @@ async fn run(
     let slots = Arc::new(Semaphore::new(config.max_connections));
     let (draining, _) = watch::channel(false);
     let mut connections = JoinSet::new();
+    let mut task_backoff = Backoff::default();
+    let mut task_healthy_since = Deadline::now();
     while !shutdown.load(Ordering::Relaxed) {
+        if task_healthy_since.elapsed() >= Duration::from_secs(30) {
+            task_backoff.reset();
+            task_healthy_since = Deadline::now();
+        }
+        let failures = observer.stats.worker_loop_failures.load(Ordering::Relaxed);
+        supervise_workers(
+            &mut workers,
+            &config,
+            &receiver,
+            &observer,
+            &force_receiver,
+            &mut task_backoff,
+        );
+        if observer.stats.worker_loop_failures.load(Ordering::Relaxed) != failures {
+            task_healthy_since = Deadline::now();
+        }
         while connections.try_join_next().is_some() {}
         match timeout(Duration::from_millis(100), listener.accept()).await {
             Err(_) => continue,
@@ -935,4 +1124,149 @@ async fn run(
     );
     drop(temporary_uploads);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replacement_backoff_caps_and_resets_without_overflow() {
+        let mut backoff = Backoff::default();
+        let delays: Vec<_> = (0..10).map(|_| backoff.next().as_millis()).collect();
+        assert_eq!(
+            delays,
+            [100, 200, 400, 800, 1600, 3200, 5000, 5000, 5000, 5000]
+        );
+        backoff.failures = u32::MAX;
+        assert_eq!(backoff.next(), Duration::from_secs(5));
+        backoff.reset();
+        assert_eq!(backoff.next(), Duration::from_millis(100));
+    }
+
+    #[tokio::test]
+    async fn unexpected_worker_loop_panic_restores_a_slot_and_shutdown_cancels_it() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let observer = Observer::new(crate::LogFormat::Json, 1, shutdown.clone());
+        let config = Arc::new(Config::new("fixture.scripta".into(), "<?scripta".into()));
+        let (_queue, receiver) = mpsc::channel(1);
+        let queue = Arc::new(Mutex::new(receiver));
+        let (force, stop) = watch::channel(false);
+        let mut workers = JoinSet::new();
+        let failed = workers.spawn(async { panic!("injected worker-loop failure") });
+        // Leave the failed task in JoinSet for the production supervisor to reap.
+        while !failed.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        supervise_workers(
+            &mut workers,
+            &config,
+            &queue,
+            &observer,
+            &stop,
+            &mut Backoff::default(),
+        );
+        assert_eq!(
+            observer.stats.worker_loop_failures.load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(workers.len(), 1);
+        shutdown.store(true, Ordering::Release);
+        force.send_replace(true);
+        timeout(Duration::from_secs(1), async {
+            while let Some(result) = workers.join_next().await {
+                result.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(observer.stats.recovering_workers.load(Ordering::Relaxed), 0);
+        assert_eq!(observer.stats.worker_starts.load(Ordering::Relaxed), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn malformed_truncated_and_out_of_order_worker_ipc_fail_and_release_capacity() {
+        let cases = [
+            b"\0\0\0\x01{".to_vec(),
+            b"\0\0\0\x20partial".to_vec(),
+            u32::MAX.to_be_bytes().to_vec(),
+            {
+                let frame = br#"{"kind":"Chunk"}"#;
+                let mut bytes = (frame.len() as u32).to_be_bytes().to_vec();
+                bytes.extend_from_slice(frame);
+                bytes
+            },
+        ];
+        for bytes in cases {
+            let observer =
+                Observer::new(crate::LogFormat::Json, 1, Arc::new(AtomicBool::new(false)));
+            let escaped = bytes
+                .iter()
+                .map(|byte| format!("\\{byte:03o}"))
+                .collect::<String>();
+            let mut child = Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    &format!("printf '%b' '{escaped}'; exec 1>&-; read ignored"),
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap();
+            let worker = Worker {
+                input: child.stdin.take().unwrap(),
+                output: child.stdout.take().unwrap(),
+                child,
+                _lease: Gauge::new(&observer, GaugeKind::Worker),
+            };
+            let (send, receive) = mpsc::channel(1);
+            let (reply, answer) = oneshot::channel();
+            let trace = observer.request().unwrap();
+            send.send(Job {
+                trace,
+                queued: Some(Gauge::new(&observer, GaugeKind::Queue)),
+                logs: 0,
+                application_error: false,
+                metadata: RequestMeta {
+                    method: "GET".into(),
+                    path: "/".into(),
+                    query: String::new(),
+                    headers: vec![],
+                    multipart: None,
+                    connection: Default::default(),
+                    request_id: "test".into(),
+                },
+                body: vec![],
+                spool: None,
+                deadline: Deadline::now() + Duration::from_secs(2),
+                reply: Some(reply),
+                stream: None,
+                failed: Arc::new(AtomicBool::new(false)),
+                cancel: Arc::new(Cancel::default()),
+            })
+            .await
+            .unwrap();
+            // Exercise active IPC rather than idle detection: the fixture bytes
+            // are consumed directly by the request handler with a live reply.
+            let queue = Arc::new(Mutex::new(receive));
+            let mut job = queue.lock().await.recv().await.unwrap();
+            drop(job.queued.take());
+            let mut worker = worker;
+            let config = Config::new("fixture.scripta".into(), "<?scripta".into());
+            assert!(
+                timeout(Duration::from_secs(1), worker.request(&mut job, &config))
+                    .await
+                    .unwrap()
+                    .is_err()
+            );
+            worker.stop().await;
+            drop(job);
+            assert!(answer.await.is_err());
+            assert_eq!(observer.stats.workers.load(Ordering::Relaxed), 0);
+            assert_eq!(observer.stats.queued.load(Ordering::Relaxed), 0);
+        }
+    }
 }

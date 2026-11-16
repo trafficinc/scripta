@@ -95,6 +95,10 @@ fn invalid_files_fail_with_safe_diagnostics_and_no_side_effects() {
         "workers = 'DO_NOT_PRINT_ME'",
         "workers = 1\nworkers = 'DO_NOT_PRINT_ME'",
         "workers = 65",
+        "worker-max-requests = 1000001",
+        "worker-max-requests = -1",
+        "worker-max-requests = 'DO_NOT_PRINT_ME'",
+        "worker-max-requests = 1.5",
         "port = 65536",
         "port = -1",
         "queue = 0",
@@ -344,4 +348,53 @@ fn inspection_rejects_symlink_and_nonprivate_storage() {
                 .unwrap(),
         );
     }
+}
+
+#[test]
+fn worker_recycling_settings_preserve_defaults_bounds_and_cli_precedence() {
+    let root = fixture();
+    let text = success(command(root.path()).arg("--print-config").output().unwrap());
+    let settings: toml::Table = toml::from_str(&text).unwrap();
+    assert_eq!(settings["worker-max-requests"].as_integer(), Some(0));
+    fs::write(
+        root.path().join("server.toml"),
+        "worker-max-requests = 1000000\n",
+    )
+    .unwrap();
+    success(
+        command(root.path())
+            .args(["--config", "server.toml", "--check-config"])
+            .output()
+            .unwrap(),
+    );
+    for value in ["0", "1", "1000000"] {
+        let text = success(
+            command(root.path())
+                .args([
+                    "--worker-max-requests",
+                    value,
+                    "--config",
+                    "server.toml",
+                    "--print-config",
+                ])
+                .output()
+                .unwrap(),
+        );
+        let settings: toml::Table = toml::from_str(&text).unwrap();
+        assert_eq!(
+            settings["worker-max-requests"].as_integer(),
+            value.parse::<i64>().ok()
+        );
+    }
+    for value in ["-1", "1000001", "18446744073709551616", "secret"] {
+        assert!(
+            !command(root.path())
+                .args(["--worker-max-requests", value, "--check-config"])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    }
+    assert!(!root.path().join("executed").exists());
 }
