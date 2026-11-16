@@ -128,6 +128,29 @@ tags/releases are not changed retroactively. Review results before updating
 platform compatibility claims; queuing a workflow does not establish success.
 
 
+## Manual promotion of validated releases
+
+[Promote validated release](../.github/workflows/promote-release.yml) is a
+separate `workflow_dispatch` workflow with no push or pull-request trigger.
+Install it on the default branch, as required by
+[GitHub's manual dispatch rules](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
+Its Python tests and verifier run without compiling Rust. It reads published
+candidate assets, verifies the successful native run and unchanged package
+hashes, then creates a stable tag at the validated commit using `GITHUB_TOKEN`.
+That token's tag event does not start another native workflow. The existing
+tag-triggered workflow remains unchanged.
+
+See [promotion instructions](releases.md#promote-validated-packages-without-rebuilding)
+for inputs, read-only preparation, provenance, and retry rules. Promotion tools
+may be newer than the validated source; the workspace version and stable tag
+always come from the validated commit. Generated metadata uses LF bytes while
+native evidence is preserved verbatim. Run the Python suite after changing
+either publication path:
+
+```sh
+python3 -m unittest discover -s scripts -p 'test_*.py'
+```
+
 ## Formatter and diagnostic tooling
 
 `scripta fmt [--check] <file>` and `scripta fmt <file> --check` share the public
