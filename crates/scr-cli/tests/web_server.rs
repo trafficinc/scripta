@@ -1603,6 +1603,7 @@ fn shipped_proxy_example_runs_through_a_sanitizing_local_proxy() {
     listener.set_nonblocking(true).unwrap();
     let address = listener.local_addr().unwrap();
     let backend = server.address;
+    let (prefix_read, prefix_ready) = std::sync::mpsc::channel();
     let proxy = thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(5);
         let (mut client, peer) = loop {
@@ -1615,15 +1616,23 @@ fn shipped_proxy_example_runs_through_a_sanitizing_local_proxy() {
                 Err(e) => panic!("proxy accept: {e}"),
             }
         };
+        // Accepted sockets may inherit the listener's nonblocking mode.
+        // This synchronous fixture expects reads to wait for the next bytes.
+        client.set_nonblocking(false).unwrap();
         client
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
         let mut received = vec![];
+        let mut reported_prefix = false;
         while !received.ends_with(b"\r\n\r\n") {
             let mut byte = [0];
             client.read_exact(&mut byte).unwrap();
             received.push(byte[0]);
             assert!(received.len() < 32768);
+            if !reported_prefix && received.ends_with(b"\r\n") {
+                prefix_read.send(()).unwrap();
+                reported_prefix = true;
+            }
         }
         // Controlled front end overwrites incoming identity assertions, just as
         // deployment requires. This fixture is not a production HTTP proxy.
@@ -1643,7 +1652,12 @@ fn shipped_proxy_example_runs_through_a_sanitizing_local_proxy() {
     client
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    client.write_all(b"GET / HTTP/1.1\r\nHost: app.example.com\r\nX-Forwarded-For: 203.0.113.99\r\nX-Forwarded-Host: evil.example\r\n\r\n").unwrap();
+    client.write_all(b"GET / HTTP/1.1\r\nHost: app.example.com\r\nX-Forwarded-For: 203.0.113.99\r\nX-Forwarded-Host: evil.example\r\n").unwrap();
+    prefix_ready.recv_timeout(Duration::from_secs(3)).unwrap();
+    // Exercise a header arriving in separate writes after the proxy starts
+    // reading. Its accepted socket must support blocking reads on every OS.
+    thread::sleep(Duration::from_millis(50));
+    client.write_all(b"\r\n").unwrap();
     let mut response = vec![];
     client.read_to_end(&mut response).unwrap();
     proxy.join().unwrap();

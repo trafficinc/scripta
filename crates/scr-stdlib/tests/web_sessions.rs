@@ -375,6 +375,14 @@ fn store_rejects_symlinks_and_cleans_abandoned_atomic_staging_files() {
     drop(stage_file);
     store.execute(None, "Session::start();").unwrap();
     assert!(!stage.exists());
+    // Cleanup must preserve the already committed session on every platform.
+    assert_eq!(
+        store
+            .execute(Some(&first), "Session::start();")
+            .unwrap()
+            .id(),
+        first
+    );
     #[cfg(unix)]
     {
         let external = tempfile::NamedTempFile::new().unwrap();
