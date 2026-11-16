@@ -1277,15 +1277,56 @@ milliseconds rather than PHP's nanosecond number or seconds/nanoseconds array.
 
 | API | Behavior |
 | --- | --- |
-| `Date::now(): int` | Current wall-clock Unix **milliseconds**, UTC; may move backward when the system clock changes. |
-| `Date::format(timestamp, format): string` | Formats signed Unix milliseconds in UTC using [Chrono strftime directives](https://docs.rs/chrono/latest/chrono/format/strftime/). No local-time or locale dependency. |
+| `Date::now(): int` | Current wall-clock Unix **milliseconds**; may move backward when the system clock changes. Timezone selection changes display, not this instant. |
+| `Date::format(timestamp: int, format: string, timezone: string optional): string` | Formats signed Unix milliseconds using [Chrono strftime directives](https://docs.rs/chrono/latest/chrono/format/strftime/). Omitted timezone means UTC; pass `"local"`, `"UTC"`, or an IANA name such as `"America/New_York"`. |
 | `Date::parse(value): int` | Parses RFC 3339 with an explicit `Z` or numeric offset, returning UTC Unix milliseconds. Submillisecond precision is floored, including dates before 1970. |
 | `Date::sleep(milliseconds): null` | Same nonnegative int duration, `sleep` permission, and cooperative cancellation as global `sleep`. Uses monotonic elapsed time. |
 
-Invalid dates, missing timezones, unsupported leap seconds, and invalid format
-directives raise `DateError`. Out-of-range formatting raises `RangeError` rather
-than panicking. There is no heuristic parsing of ambiguous locale-specific dates.
-For example, `Date::format(Date::now(), "%Y-%m-%dT%H:%M:%S%.3fZ")` emits UTC.
+Timezone names and aliases are looked up case-insensitively in the bundled IANA
+database. `"local"` is a case-sensitive selector for the host timezone. There is
+no mutable script-wide default timezone. Named-zone rules are compiled into every
+CLI build, including minimal builds: no external date command, downloaded library,
+network connection, or system zoneinfo installation is needed for named zones.
+Updating those rules requires updating the dependency data and rebuilding Scripta.
+
+Local detection uses the process's `TZ` override when present, otherwise the OS
+configuration. It may read local timezone configuration files on Unix or map the
+Windows timezone setting to an IANA zone. Unknown/unavailable local configuration
+raises `DateError` instead of falling back to UTC. Detection is cached by Jiff;
+restart long-running hosts after changing timezone configuration. `Env::set`
+changes the runtime's environment snapshot and child environments, not the running
+process timezone. Pass a zone explicitly to select a different timezone per call.
+Local detection needs host configuration, but does not use the internet.
+
+Offsets are calculated for the supplied instant, including historical rules and
+daylight-saving transitions. `%Z` prints its abbreviation, `%:z` prints a numeric
+hour/minute offset, and `%::z` includes offset seconds for historical rules.
+Abbreviations can be ambiguous; use IANA names to select zones. Include an offset
+when displaying local times that can repeat during a daylight-saving transition.
+A literal `Z` in the format is printed literally, so reserve it for UTC output.
+
+Invalid dates, missing parse offsets, invalid format directives, unknown zones,
+and timezone names that are empty, contain NUL, or exceed 255 UTF-8 bytes raise
+`DateError`. A numeric offset string such as `"+05:30"` is not a zone selector;
+use an IANA name. Wrong types/counts, including an explicit null timezone, raise
+`TypeError`. Out-of-range timestamps raise `RangeError`: named/local timezone
+conversion supports Jiff's timestamp range (years -9999 through 9999); omitted or
+explicit UTC retains Chrono's existing wider range. Leap seconds remain unsupported.
+`Date::parse` still requires RFC 3339 with an explicit offset; it does not guess
+ambiguous or nonexistent local wall times. `Date::format` checks cancellation and
+preflights its exact output against the logical value budget before allocating.
+
+```scr
+<?scripta
+$now = Date::now();
+echo Date::format($now, "%Y-%m-%dT%H:%M:%S%.3fZ") . "\n";
+echo Date::format($now, "%Y-%m-%d %H:%M:%S %:z", "local") . "\n";
+echo Date::format($now, "%Y-%m-%d %H:%M:%S %:z", "America/New_York") . "\n";
+```
+
+See the [timezone example](../examples/timezones.scripta). Calendar formatting
+remains locale-independent, `Log` timestamps remain UTC, and `Clock::monotonicMs`
+remains the elapsed-time API.
 
 ## Local logging
 

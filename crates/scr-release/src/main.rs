@@ -722,6 +722,17 @@ fn smoke(path: &Path) -> Result<()> {
     // Exercise the shipped collection APIs from the extracted package, with
     // the same cleared environment and package-only PATH as the other smoke checks.
     execute(&["run", "playground/collections.scripta"])?;
+    // Older immutable archives predate this example; keep their smoke support.
+    // New packages always collect the example from the source tree.
+    let timezone_smoke = if directory.join("examples/timezones.scripta").is_file() {
+        let output = execute(&["run", "examples/timezones.scripta"])?;
+        if output.stdout != b"UTC: 2024-07-15 12:34:56.123 +00:00\nAmerica/New_York: 2024-07-15 08:34:56.123 -04:00\nAsia/Kathmandu: 2024-07-15 18:19:56.123 +05:45\n" {
+            return Err(fail("packaged timezone example output differs"));
+        }
+        "passed with bundled timezone data"
+    } else {
+        "not present in this historical archive"
+    };
     let offline = r#"<?scripta require_once "examples/lib/helpers.scripta"; $data=Json::decode("{\"status\":\"offline\"}"); File::write("offline.json",Json::encode($data)); echo statusLabel(File::read("offline.json")) . "\n"; echo Date::format(Date::parse("2026-01-01T00:00:00Z"),"%Y") . "\n"; Log::info("local smoke complete");"#;
     let offline = if legacy {
         offline
@@ -742,7 +753,7 @@ fn smoke(path: &Path) -> Result<()> {
     if output.stdout != b"Status: offline\n2026\n" {
         return Err(fail("offline smoke output differs"));
     }
-    let validation = json!({"version":version,"target":target,"extensions":manifest["extensions"],"binary_sha256":manifest["binary_sha256"],"archive_sha256":digest(&fs::read(path)?),"host_os":env::consts::OS,"host_arch":env::consts::ARCH,"offline_smoke":"passed with cleared environment and PATH containing only extracted package, including the collection playground","workspace_tests":"must be checked in the associated native validation record; not inferred from smoke"});
+    let validation = json!({"version":version,"target":target,"extensions":manifest["extensions"],"binary_sha256":manifest["binary_sha256"],"archive_sha256":digest(&fs::read(path)?),"timezone_smoke":timezone_smoke,"host_os":env::consts::OS,"host_arch":env::consts::ARCH,"offline_smoke":"passed with cleared environment and PATH containing only extracted package, including the collection playground","workspace_tests":"must be checked in the associated native validation record; not inferred from smoke"});
     fs::write(
         path.with_file_name(format!(
             "{}.validation.json",

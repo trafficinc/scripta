@@ -41,6 +41,7 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
         "server-health.scripta",
         "http-client.scripta",
         "http-timing.scripta",
+        "timezones.scripta",
         "web-app.scripta",
         "web-sessions.scripta",
         "web-uploads.scripta",
@@ -970,4 +971,33 @@ fn socket_echo_example_runs_with_binary_data_on_an_ephemeral_loopback_port() {
         std::thread::sleep(Duration::from_millis(5));
     };
     assert!(status.success(), "{}", fs::read_to_string(&stderr).unwrap());
+}
+
+#[test]
+fn timezone_example_runs_with_only_bundled_data_and_no_external_programs() {
+    let directory = tempfile::tempdir().unwrap();
+    let script = example("timezones.scripta");
+    let original = fs::read_to_string(&script).unwrap();
+    let formatted = scr_cli::formatter::format(&original).unwrap();
+    assert_eq!(original, formatted);
+    let formatted_path = directory.path().join("timezones.scripta");
+    fs::write(&formatted_path, formatted).unwrap();
+    for script in [&script, &formatted_path] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_scripta"));
+        command
+            .arg(script)
+            .current_dir(directory.path())
+            .env_clear()
+            .env("PATH", directory.path())
+            .env("TZDIR", directory.path());
+        for name in ["SystemRoot", "WINDIR"] {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
+            }
+        }
+        assert_eq!(
+            success(command.output().unwrap()),
+            "UTC: 2024-07-15 12:34:56.123 +00:00\nAmerica/New_York: 2024-07-15 08:34:56.123 -04:00\nAsia/Kathmandu: 2024-07-15 18:19:56.123 +05:45\n"
+        );
+    }
 }

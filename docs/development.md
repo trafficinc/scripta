@@ -549,3 +549,28 @@ those validations as pending and preserve historical compatibility receipts.
 A deployment target alone is not execution on macOS 15. Full native release
 support additionally requires the dist tests, inspection, packaging, and extracted
 smoke steps in [releases](releases.md); this work publishes no release assets.
+
+## Date and timezone changes
+
+`Date::format` retains Chrono's formatting syntax and uses Jiff for bundled IANA
+rules and host-local detection. Both are intentional: changing format backends
+must preserve the documented directives, invalid-format errors, UTC range, and
+existing UTC output. Jiff's `tzdb-bundle-always` feature is required for every
+platform and minimal build. Update `Cargo.lock` and review timezone/dependency
+notices when refreshing the bundle; no runtime download updates its rules.
+
+Focused coverage is in `scr-stdlib --test system_date_log`,
+`scr-stdlib --lib date::tests`, and the timezone example in
+`scr-cli --test release_examples`.
+Tests cover DST boundaries and repeated local times, fractional-hour and historical
+offsets, negative timestamps, UTC compatibility, strict errors, allocation
+budgets/cancellation, and local detection in isolated subprocesses with controlled
+`TZ`. Tests never change the parent process environment. The CLI example runs
+with a cleared environment, empty external-program PATH, and unavailable `TZDIR`
+to check bundled lookup independently of host zoneinfo. Packaging smoke also
+executes the bundled example when present, preserving historical archive support.
+
+Run the full workspace checks, the minimum-Rust check, and native platform checks
+after dependency or feature changes. Follow the [release procedure](releases.md)
+for dependency notices, archive verification, and extracted-package smoke. Local
+success does not establish other-platform support.

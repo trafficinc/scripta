@@ -1,0 +1,11 @@
+<?scripta
+// One instant, displayed with bundled timezone rules. No network is used.
+$instant = Date::parse("2024-07-15T12:34:56.123Z");
+$format = "%Y-%m-%d %H:%M:%S%.3f %:z";
+foreach (["UTC", "America/New_York", "Asia/Kathmandu"] as $zone) {
+    echo $zone . ": " . Date::format($instant, $format, $zone) . "\n";
+}
+// Opt into host-local detection with: scripta examples/timezones.scripta --local
+if (Cli::has("--local")) {
+    echo "Local now: " . Date::format(Date::now(), $format, "local") . "\n";
+}
