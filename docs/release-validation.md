@@ -1,9 +1,22 @@
-# Release validation — 2026-11-13
+# Release validation records
 
-This record covers local macOS release-readiness work for Scripta 0.1.0 and
-subsequent native Linux/Windows validation. No release has been published.
+For each candidate, retain the source commit and tag, compiler, native host,
+complete test results, dependency inspection, archive hashes, and extracted-package
+smoke records. Published releases bundle these records and logs in
+`validation-evidence.zip`; `SHA256SUMS` covers the packages and evidence ZIP.
+Use the selected release's evidence for its results, and the
+[release checklist](release-checklist.md) for the publication process.
 
-## Source and environment
+## Historical evidence
+
+The sections below preserve earlier runs, their source identifiers, and receipt
+links. Results and outstanding work describe those runs at the time they were
+recorded; they do not describe the current release or checkout. Original hashes
+and receipts remain unchanged.
+
+### Local preparation — 2026-11-13
+
+#### Source and environment
 
 - Source base: `55fa03d191568838a94e99951e758941c88517cb`.
 - Tested workspace: local, uncommitted documentation and release-tooling changes
@@ -20,7 +33,7 @@ validated natively. This local run did not use GitHub Actions. Subsequent
 [tag-triggered validation](development.md#tag-triggered-builds-and-releases)
 collects separate native Linux/Windows evidence.
 
-## Validation scope
+#### Validation scope
 
 Validation runs focused release-tool tests, formatting, all-target/all-feature
 Clippy, a Rust 1.85.0 all-target/all-feature source check, native debug workspace
@@ -52,7 +65,7 @@ records, and the combined validation record are retained locally under
 not part of the source distribution. The complete generated record is
 `validation.json`; smoke records alone do not establish workspace test results.
 
-## Follow-up archive review
+#### Follow-up archive review
 
 The previously built base and SQLite archives were inspected by their recorded
 SHA-256 identities. Both passed isolated installation/removal in a temporary
@@ -73,7 +86,7 @@ checks against the existing archives. Follow-up documentation edits are not
 contained in those immutable reviewed archives; final release inputs must be
 repackaged after selecting the reviewed source revision.
 
-## Remaining release blockers
+#### Release blockers recorded during local preparation
 
 - Native baseline validation for all pending targets, including macOS 15 ARM64.
 - Maintainer review of changes and dependency/license attribution notices.
@@ -86,7 +99,7 @@ The [release checklist](release-checklist.md) and [compatibility matrix](compati
 remain the sources for release gates and platform claims. The local run did not
 create a commit, tag, published asset, installation into a user's PATH, or release.
 
-## Native GitHub Actions validation
+### Native GitHub Actions validation
 
 The [validation run](https://github.com/trafficinc/scripta/actions/runs/43551112355)
 tests tag `v0.1.0-validation.20261113.6`, source revision
@@ -129,7 +142,7 @@ recording these results was added after the tested tag and is not contained in
 those immutable candidate archives; final release inputs still need a reviewed
 source tag and fresh packages.
 
-## Post-migration native validation
+### Post-migration native validation
 
 On 2026-11-14, [run 43608759544](https://github.com/trafficinc/scripta/actions/runs/43608759544)
 passed on all three native targets at tag `v0.1.0-validation.20261114.2`, source

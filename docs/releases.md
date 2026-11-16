@@ -1,61 +1,27 @@
 # Release procedure
 
-## Current candidate
+## Release inputs
 
-Workspace version: **0.1.0**. This is a first public-test candidate, not a stable
-language/API compatibility guarantee. See [compatibility](compatibility.md) for
-actual native evidence. Every future tag push runs native builds and publishes
-a release only after all four targets pass.
-See the [validation record](release-validation.md) for the reviewed scope,
-source provenance, generated evidence, and outstanding release gates.
+Choose a reviewed source commit and a tag consistent with the workspace version.
+Use the [release checklist](release-checklist.md) to collect native test results,
+package checks, dependency reports, and attribution review. The
+[compatibility guide](compatibility.md) defines platform baselines and evidence
+requirements. [Historical validation records](release-validation.md) retain
+results for their recorded source revisions.
 
-## Draft candidate notes
+## Release notes
 
-Scripta 0.1.0 is a first public-test candidate. These notes are prepared for
-maintainer review; they do not announce a published release or stable API.
+Prepare notes for each release describing:
 
-- Strict scripting with explicit conversions, UTF-8 strings and immutable bytes,
-  separate lists/maps, lexical functions/closures, and tracing of unreachable
-  captured scopes. Cached module roots and host-held callables remain protected.
-- Standard-library automation covers filesystem operations, bounded subprocesses,
-  HTTP/HTTPS with text or binary bodies, JSON, CSV, regular expressions, dates,
-  logging, system metrics, and bundled SQLite. The SQLite extension does not
-  currently bind or return the core bytes type as BLOB data.
-- Collection helpers provide list end operations and splice, generation,
-  aggregation, comparisons, record columns, and typed map merging/construction.
-  Key-based map operations use temporary indexes while preserving entry order.
-- Git/local package installation, isolated aliases, syntax checks, diagnostics,
-  and formatting are implemented. Interpolation, script-defined classes,
-  callback-based collection transforms, and recursive merge variants are absent.
-- The local macOS 27.0.1 ARM64 run passed 422 default-feature debug tests,
-  423 all-feature debug tests, and 423 all-feature dist tests. Rust 1.85 source
-  compatibility, formatting, Clippy, both archive variants, and offline package
-  smoke passed. See the [validation record](release-validation.md) for scope.
-- Base and SQLite archives were reviewed with all 34 shipped scripts checked,
-  isolated local installation/removal, and matching dependency-notice inventories.
-  These checks establish local artifact behavior, not other-platform support or
-  maintainer attribution signoff.
-- Native Ubuntu 22.04 x86-64 and ARM64 validation passed on
-  `v0.1.0-validation.20261113.6`: 433 default-feature and 434 all-feature tests
-  in each of debug and dist profiles, with no failed or ignored tests. Clippy,
-  base/SQLite package verification, dependency inspection, offline smoke, and
-  identical-input repacking passed; see the
-  [Actions evidence](release-validation.md#native-github-actions-validation).
-- Native Windows Server 2022 x86-64 validation passed on the same tag:
-  426 default-feature and 427 all-feature tests in each profile, with no failed
-  or ignored tests. Both package variants passed verification, static-CRT import
-  inspection, offline smoke, and identical-input repacking.
-- The binaries target macOS 15.0 but have not been run on that OS baseline.
-  macOS support is limited to Apple Silicon (M-series) Macs; Intel Macs are
-  excluded. macOS 15 ARM64 native evidence remains pending.
-  Reviewed macOS binaries have linker-generated ad hoc signatures, with no
-  publisher identity or notarization. No Windows signing is claimed.
+- Changes visible to users, migration steps, and compatibility limitations.
+- The source commit and tag, native run URL, target coverage, and evidence links.
+- Package contents, optional features, dependency notices, and installation steps.
+- Signing or notarization details established by the selected artifacts.
+- For promotion, the source candidate and run, unchanged archive hashes, and
+  regenerated release metadata.
 
-Before publication, review attribution notices and changes, select a clean
-source revision and matching tag, collect native evidence for the selected
-platforms, and repackage that final source. The reviewed local archives predate
-these final documentation-review updates; their hashes are retained separately
-and no current archive is presented as a clean tagged release.
+Review notes against the selected source and artifacts before publication.
+Keep earlier receipts and archive identities intact when adding new evidence.
 
 ## Command and source filename migration
 
@@ -70,10 +36,7 @@ so the companion can execute the renamed binary without a protocol change;
 its editor file-extension filters belong to the separate companion repository.
 
 Existing native receipts and immutable archives retain their original names and
-hashes. The [post-migration native run](release-validation.md#post-migration-native-validation)
-passed on Linux x86-64/ARM64 and Windows x86-64 at
-`v0.1.0-validation.20261114.2`, including both package variants. Native macOS 15
-validation and maintainer publication review remain pending.
+hashes. Record migration results against the source and packages actually tested.
 
 ## Automatic publication on tag pushes
 
@@ -98,22 +61,22 @@ is enabled; minimal source builds are tested but are not release variants.
 Uploads remain in a draft until every asset succeeds. A failed upload can be
 retried while the release is still a draft; a published release is not replaced.
 Release downloads do not use the seven-day retention of temporary Actions
-artifacts. Existing tags are not republished automatically. The workflow change
-itself does not establish native macOS 15 support; record the first successful
-four-target run before updating that compatibility row.
+artifacts. Existing tags are not republished automatically. Record native results
+against the selected source and packages; workflow configuration alone does not
+establish platform support.
 
 ## Promote validated packages without rebuilding
 
 Use [Promote validated release](../.github/workflows/promote-release.yml) from
 the repository's default branch after reviewing a successful candidate. Open
-Actions, select that workflow, and choose **Run workflow** on `main`. For the
-validated 0.1.0 candidate, supply:
+Actions, select that workflow, and choose **Run workflow** on the default branch.
+Supply the reviewed candidate and destination:
 
-| Input | Value |
+| Input | Meaning |
 | --- | --- |
-| `validation_tag` | `v0.1.0-validation.20261115.5` |
-| `validation_run_id` | `43805248723` |
-| `release_tag` | `v0.1.0` |
+| `validation_tag` | Published candidate tag whose packages will be reused |
+| `validation_run_id` | Successful native build and publication run for that candidate |
+| `release_tag` | Stable tag matching `v<workspace-version>` at the validated commit |
 
 The workflow must first be installed on the default branch. Do not create or
 push the stable tag yourself: a normal tag push starts the native build workflow.
@@ -126,7 +89,7 @@ candidate's six assets, which remain available after Actions artifacts expire.
 It checks the candidate tag, commit, workspace version, successful native run
 and all five jobs, archive hashes, native records, smoke records, and evidence
 inventory before creating anything remotely. The stable tag points to the
-validated commit, even when the promotion tools are newer on `main`.
+validated commit, even when the promotion tools are newer on the default branch.
 
 All four platform archives are copied byte-for-byte. Stable release metadata,
 `SHA256SUMS`, and the evidence ZIP are regenerated; the manifest records the
@@ -139,12 +102,13 @@ After a failed upload, rerun with the same inputs to resume the draft and the
 tag created by this promotion. Review and resolve other failures before retrying.
 
 For read-only preparation locally, use a fresh output directory and omit
-`--publish`:
+`--publish`. Set `CANDIDATE_TAG`, `NATIVE_RUN_ID`, and `STABLE_TAG` to the
+reviewed inputs:
 
 ```sh
 python3 scripts/promote_release.py --repository trafficinc/scripta \
-  --validation-tag v0.1.0-validation.20261115.5 \
-  --validation-run-id 43805248723 --release-tag v0.1.0 \
+  --validation-tag "$CANDIDATE_TAG" \
+  --validation-run-id "$NATIVE_RUN_ID" --release-tag "$STABLE_TAG" \
   --output dist/promotion-preview
 ```
 
@@ -154,8 +118,8 @@ default branch with its workflow token.
 
 ## Pinned inputs and profiles
 
-Rust 1.99.1 is pinned in rust-toolchain.toml; Cargo.lock is committed and every
-release command uses `--locked`. Record the native build OS, SDK/linker, and
+Use the compiler pinned in [`rust-toolchain.toml`](../rust-toolchain.toml),
+retain the committed `Cargo.lock`, and use `--locked` for release commands. Record the native build OS, SDK/linker, and
 system-library versions with validation results.
 
 `release` uses opt-level 3, thin LTO, one codegen unit, no incremental compilation,
@@ -182,6 +146,7 @@ in the [Cargo profile reference](https://doc.rust-lang.org/cargo/reference/profi
 From a source checkout after the complete tests pass:
 
 ```sh
+# Set RELEASE_VERSION to the workspace version.
 # macOS ARM64 example; do not use a foreign-target binary as native proof.
 export MACOSX_DEPLOYMENT_TARGET=15.0
 cargo test --workspace --locked --target aarch64-apple-darwin
@@ -189,15 +154,15 @@ cargo test --workspace --all-features --locked --target aarch64-apple-darwin
 cargo test --workspace --profile dist --target aarch64-apple-darwin --locked
 cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked
 cargo run -p scr-release --locked --target aarch64-apple-darwin -- package --binary target/aarch64-apple-darwin/dist/scripta --target aarch64-apple-darwin --out-dir dist/local-standard
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify --archive dist/local-standard/scripta-0.1.0-aarch64-apple-darwin.tar.gz
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- smoke --archive dist/local-standard/scripta-0.1.0-aarch64-apple-darwin.tar.gz
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify --archive dist/local-standard/scripta-${RELEASE_VERSION}-aarch64-apple-darwin.tar.gz
+cargo run -p scr-release --locked --target aarch64-apple-darwin -- smoke --archive dist/local-standard/scripta-${RELEASE_VERSION}-aarch64-apple-darwin.tar.gz
 cargo run -p scr-release --locked --target aarch64-apple-darwin -- checksums --dir dist/local-standard
 cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify-checksums --dir dist/local-standard
 ```
 
 Use the Windows target explicitly for **all** Cargo commands on Windows. Package
 extension is selected by the target; target values outside the four configured
-candidate names are rejected. `--tag v0.1.0` validates tag/version agreement.
+candidate names are rejected. `--tag "v${RELEASE_VERSION}"` checks tag/version agreement.
 Choose a fresh output directory for each validation run so prior evidence and
 archives are retained; `dist/local-standard` above is only an example. Packages
 include reference documentation, examples, and runnable playgrounds with their
@@ -228,11 +193,11 @@ Verification rejects unsafe paths, duplicates, non-regular TAR entries, missing
 files, and hash mismatches, with a 128 MiB/4096-file verification budget.
 Checksums provide integrity, not publisher authentication.
 
-## Limitations for 0.1.0
+## Limitations
 
-- Only rows with recorded native evidence may be called verified. Older OS releases,
-  other architectures, ARM32, musl, and device-specific Raspberry Pi behavior are
-  unverified. A successful cross build is not a substitute for running the tests.
+- Collect native evidence before making platform support claims, including for
+  other OS baselines, architectures, or device-specific environments. A cross
+  build does not replace native tests.
 - Candidates are not notarized/Developer-ID-signed or Authenticode-signed. No MSI,
   PKG, OS package-manager publication, automatic updater, or privileged installer is
   provided. Platform security prompts may require manual review.

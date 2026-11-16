@@ -1,63 +1,50 @@
-# Release checklist — 0.1.0
+# Release checklist
 
-Check only completed items with evidence. Unchecked platform entries block an
-all-platform release.
+Use a separate copy for each candidate. Record evidence links alongside completed
+items; this template does not track a particular release's status.
 
 ## Source and version
 
-- [x] Standalone scripta binary target; workspace version 0.1.0.
-- [x] Rust compiler pinned, Cargo.lock retained, unwind/overflow-safe profiles.
-- [x] Required examples and standard-library reference included in package inputs.
-- [x] Inspect release-tool diff, unchanged dependency inputs, packaged notice
-  inventory, and documented release limitations against local artifacts.
-- [ ] Maintainer review of changes and license/attribution notices for publication.
-- [x] Reconcile feature-absence and capture-lifetime claims across release notes,
-  architecture, and library docs with the current [package manager](packages.md),
-  [collector documentation](performance.md), implementation, and tests.
-- [ ] Verify the source tag exactly matches v0.1.0 and the intended reviewed commit.
-- [ ] Ensure the source tree is clean and source/release settings are committed.
+- [ ] Select the reviewed source commit and workspace version.
+- [ ] Check the pinned compiler, minimum Rust version, lockfile, and build profiles.
+- [ ] Review changes, dependency notices, and license/attribution requirements.
+- [ ] Check documentation, examples, compatibility notes, and package inputs
+  against the selected source.
+- [ ] Choose a tag consistent with the workspace version and publication type.
+- [ ] Commit release inputs and preserve unrelated working-tree changes.
 
-## Local evidence
+## Native validation and packaging
 
-The current [local validation record](release-validation.md) identifies the
-source base and uncommitted changes, native environment, feature variants, and
-generated evidence. Earlier artifacts in `dist/` are historical and do not
-replace a fresh run against the intended release source.
+Follow the [release procedure](releases.md) and
+[platform baselines](compatibility.md) on each native host.
 
-- [x] Complete macOS ARM64 debug test suite and Clippy passed during preparation.
-- [x] Declared MSRV check result recorded.
-- [x] Complete native dist-profile test suite passed.
-- [x] Native distribution binary dependency inspection passed.
-- [x] Archive inventory/checksums verified; identical-input repack has identical hash.
-- [x] Extracted archive passed offline smoke with no external language runtime PATH.
-- [x] Archive name/hash and local machine/OS recorded in dist validation evidence.
-- [x] Local base/SQLite archives pass isolated installation/removal, syntax checks
-  of all 34 shipped scripts, and dependency-notice inventory review.
+- [ ] Linux x86-64: debug/dist tests, Clippy, package checks, and dependency report.
+- [ ] Linux ARM64: debug/dist tests, Clippy, package checks, and dependency report.
+- [ ] macOS ARM64: debug/dist tests, Clippy, package checks, and dependency report.
+- [ ] Windows x86-64: debug/dist tests, Clippy, package checks, and static-CRT import report.
+- [ ] Review default/all-feature tests, minimal source feature checks, collection
+  limits/behavior, formatting, and validation/publication script tests.
+- [ ] Record compiler host, native OS/architecture, source revision, and results.
+- [ ] Review minimum-compiler checks separately from native platform results.
+- [ ] Verify archive inventory and checksums, identical-input repacking, and
+  extracted-package smoke with no external language runtime on PATH.
+- [ ] Review installation/removal, shipped scripts, and dependency notices.
+- [ ] Retain per-target records, logs, binary/archive hashes, and smoke records.
 
-## Required native evidence before advertising all targets
+## Publication review
 
-- [x] Linux x86-64 debug/dist/CLI/package tests and dependency report.
-- [x] Linux ARM64 debug/dist/CLI/package tests and dependency report.
-- [ ] macOS ARM64 debug/dist/CLI/package tests on the declared macOS baseline.
-- [x] Windows x86-64 debug/dist/CLI/package tests and static-CRT import report.
-- [ ] Review the MSRV check and every relevant test; no ignored/skipped platform failures.
-- [ ] Attach per-target validation records; update compatibility rows.
-
-## Candidate review before tagging and automatic publication
-
-- [ ] Verify aggregate SHA256SUMS, all four SQLite-enabled platform archives, and the evidence ZIP.
-- [ ] Keep exactly six uploaded assets: four packages, SHA256SUMS, and one
-  validation-evidence.zip containing all supporting checksums, records, logs,
-  and the release manifest.
-- [ ] Inspect documentation/examples and installation/uninstallation for every
-  target selected for publication; local macOS artifact review is recorded above.
-- [x] Describe observed local ad hoc signatures and absent publisher
-  signing/notarization without claiming other-platform verification.
-- [x] Review local preview limitations and explicit optional network/process behavior.
-- [x] Prepare [draft candidate notes](releases.md#draft-candidate-notes) with local
-  platform evidence and known limitations; maintainer approval remains pending.
-- [ ] Publish chosen validated assets, checksums, validation and dependency reports.
-- [ ] Download a published artifact, verify checksum, and repeat local-script smoke.
+- [ ] Review release notes against the source, artifacts, and known limitations.
+- [ ] Describe signing/notarization according to the selected artifacts.
+- [ ] Check that all required native jobs and package checks succeeded.
+- [ ] Keep exactly six uploaded assets: four SQLite-enabled platform packages,
+  `SHA256SUMS`, and `validation-evidence.zip`.
+- [ ] Check that `SHA256SUMS` covers the packages and evidence ZIP; the ZIP contains
+  individual checksums, native/smoke records, logs, and the release manifest.
+- [ ] Use a prerelease for candidate tags and a normal release for the exact
+  workspace version tag.
+- [ ] Publish through the chosen workflow after reviewing its inputs and evidence.
+- [ ] Download published assets, verify checksums, and repeat local-script smoke.
+- [ ] Preserve published tags, assets, historical receipts, and hashes.
 
 ## Promotion without rebuilding
 
@@ -66,15 +53,16 @@ when reusing a published candidate's packages.
 
 - [ ] Review the source prerelease, exact validated commit, successful native run,
   and all four platform packages and evidence.
-- [ ] Install the manual promotion workflow on the default branch.
-- [ ] Run read-only preparation and verify the four output archive hashes match
+- [ ] Ensure the manual promotion workflow is installed on the default branch.
+- [ ] Run read-only preparation and compare all four output archive hashes with
   the candidate; review stable metadata and source-run provenance.
-- [ ] Dispatch **Promote validated release** on `main` with the reviewed source
-  tag, native run ID, and stable tag. Let the workflow create the stable tag.
+- [ ] Dispatch **Promote validated release** on the default branch with the
+  reviewed source tag, native run ID, and stable tag. Let the workflow create
+  the stable tag with its built-in token.
 - [ ] Confirm the stable tag resolves to the validated commit and the published
   release has exactly six assets, with unchanged platform archive hashes.
 
-Checking this file and local packaging commands do not publish anything. Every
-tag push containing the [release workflow](development.md#tag-triggered-builds-and-releases)
-authorizes automated publication after all native validation jobs pass. The exact
-version tag produces a normal release; other tags produce prereleases.
+Local checklist and packaging commands do not publish anything. A normal tag
+push starts the [native build and release workflow](development.md#tag-triggered-builds-and-releases).
+Manual promotion reuses existing packages and creates its tag without starting
+another native build. Neither path moves existing tags or replaces published assets.

@@ -28,36 +28,19 @@ and an output console. Get the separate download from
 [Scripta Playground](https://github.com/trafficinc/scripta-playground).
 The playground is optional and is not included in normal Scripta installations.
 
-## Project status
+## Releases and platforms
 
-**0.1.0 is a first public-test candidate.** Tag pushes now build and test all four
-supported targets and publish a GitHub Release only after every job succeeds.
-[Release downloads](https://github.com/trafficinc/scripta/releases) include SQLite
-by default; validation tags are marked as prereleases.
-Local macOS ARM64 validation covers debug and distribution-profile tests,
-formatting, Clippy, the Rust 1.85 source check, archive checksums and
-reproducibility, and an offline test of the packaged executable, including the
-collection playground. See the [local validation record](docs/release-validation.md)
-for the tested source, feature variants, results, and limitations.
-Native Ubuntu 22.04 x86-64/ARM64 and Windows Server 2022 x86-64 validation also
-passed; see the
-[Actions validation record](docs/release-validation.md#post-migration-native-validation).
+Get platform archives from [release downloads](https://github.com/trafficinc/scripta/releases).
+Standard packages include SQLite, reference documentation, and runnable examples.
+See [installation and uninstallation](docs/install.md) for checksum verification
+and PATH setup, and [compatibility](docs/compatibility.md) for target architectures
+and OS baselines.
 
-The latest native run covers the URL/form helpers, `scripta`/`scr` commands,
-source extensions, canonical `<?scripta` tag, and legacy `<?scr` compatibility.
-
-| Target | Current validation |
-| --- | --- |
-| macOS ARM64 | Verified locally on macOS 27.0.1; macOS 15 validation pending |
-| Linux x86-64 | Verified natively on Ubuntu 22.04 |
-| Linux ARM64 | Verified natively on Ubuntu 22.04 |
-| Windows x86-64 | Verified natively on Windows Server 2022 |
-
-Build instructions below describe the configured targets; they do not certify an
-untested platform. See the [compatibility matrix](docs/compatibility.md) for OS
-baselines and evidence, and the [release checklist](docs/release-checklist.md)
-for the remaining release work. Candidates have no publisher signatures or
-notarization; the reviewed macOS binaries have linker-generated ad hoc signatures.
+Release assets include checksums and native test/package evidence. Consult the
+selected release's evidence for its source revision and platform results.
+[Release procedures](docs/releases.md) describe native validation and promotion
+of existing packages without rebuilding; the [release checklist](docs/release-checklist.md)
+is a reusable publication guide.
 
 ## What Scripta provides
 
@@ -147,9 +130,10 @@ separate compilation step for `.scripta` files. With an installed interpreter, u
 
 ## Run a standalone executable
 
-Obtain an archive **only after its target has been verified**, check its SHA-256
-sidecar, and extract it. No public download URL is available yet. A local macOS
-ARM64 candidate is produced under `dist/` during release preparation.
+Choose the archive for your platform from
+[release downloads](https://github.com/trafficinc/scripta/releases), verify its
+hash against `SHA256SUMS`, and extract it. Review the accompanying
+`validation-evidence.zip` for native test and package records.
 See [installation and uninstallation](docs/install.md) for checksums, PATH setup,
 and platform security prompts.
 
@@ -476,12 +460,23 @@ Run a dynamic application locally with:
 scripta serve examples/web-app.scripta --host 127.0.0.1 --port 8080
 ```
 
-Scripta receives HTTP requests, runs a fixed entry script in a fresh runtime, and
-returns its status, headers, and bounded output. Persistent worker processes cache
-the parsed entry script. Use Caddy or Apache as an HTTPS reverse proxy for public
-hosting. See the [web hosting guide](docs/web-servers.md) for limits, deployment,
-redirects, JSON/form bodies, and the SQLite example. `Web` APIs are available during
+Scripta runs a fixed entry script in a fresh runtime for each HTTP request.
+Persistent worker processes cache the parsed entry script. Use Caddy or Apache
+as an HTTPS reverse proxy for public hosting. `Web` APIs are available during
 requests; `Http` remains the outgoing HTTP client.
+
+| Task | Guide and example |
+| --- | --- |
+| Configure the server | [TOML settings and CLI overrides](docs/web-servers.md#server-configuration); inspect with `--check-config` or redacted `--print-config`. |
+| Reload during development | [Opt-in watch mode](docs/web-servers.md#development-watch-mode), coherent source snapshots, and last-good fallback; start with [the watch application](examples/watch/main.scripta). |
+| Manage worker lifetime | [Runtime and limits](docs/web-servers.md#runtime-and-limits), automatic recovery, and optional `--worker-max-requests` recycling. Recycling retains cached source. |
+| Observe requests and capacity | [Structured logs and private health endpoints](docs/web-servers.md#logs-and-health-checks): `/livez`, `/readyz`, and `/metrics`. |
+| Deploy and stop an instance | [Service management and bounded shutdown](docs/web-servers.md#deployment-and-service-management), with [deployment templates](examples/deploy/). |
+| Stream output or transfer files | [Incremental responses and output buffers](docs/web-servers.md#incremental-responses-and-output-buffers), [multipart uploads](docs/web-servers.md#multipart-forms-and-uploads), and [raw uploads/downloads](docs/web-servers.md#raw-uploads-and-file-downloads). |
+
+See the [web hosting guide](docs/web-servers.md) for proxy trust, sessions, request
+limits, and runnable examples. Keep development watch mode opt-in; use immutable
+application releases and instance replacement for deployment.
 
 For periodically generated dashboards, the
 [static-output guide](docs/web-servers.md#generate-static-html-or-json-on-any-platform)
@@ -555,19 +550,20 @@ examples and have not been deployment-tested in this checkout.
 
 ## Standard library
 
-The [complete reference](docs/standard-library.md) documents all **207 default CLI functions** and 19 request-context Web/Session functions,
-return values, native objects, limits, and errors.
+The [complete reference](docs/standard-library.md) covers CLI and request-context
+functions, return values, native objects, limits, and errors.
 
 | Modules | Use |
 | --- | --- |
 | `File`, `Dir`, `Path` | Read/write text and bytes, stream bounded lines, list, copy, move, and organize files. |
 | `Process` | Run literal arguments, capture bounded output, manage child processes. |
-| `Env`, `Cli` | Environment values, script arguments, options, and prompts. |
+| `Env`, `Cli` | Environment values, script arguments/options, terminal detection, prompts, and bounded stdin records with `Cli::readLine`. |
 | `System` | Platform, CPU sampling, system memory, disk usage, and host details. |
 | `Date`, `Log` | UTC timestamps, parsing, sleep, and redacted local JSON logs. |
 | `Clock` | Monotonic elapsed-time measurement with fractional milliseconds, independent of calendar time. |
 | `Socket` | TCP listeners/clients, UDP endpoints, half-close, options, and OS readiness polling. |
 | `Stream` | Bounded binary file and HTTP streams, connected TCP, and UDP datagrams. |
+| Output functions | Nested application buffers with `ob_*`, plus explicit transport flushing with `flush`. |
 | `Web`, `Session` (request context) | Incoming requests, responses, redirects, multipart forms/uploads, cookies, and bounded server-side sessions shared across workers. |
 | `Json`, `Http` | JSON conversion, binary HTTP/HTTPS requests, and downloads directly to disk. |
 | `Sqlite` | Bundled local databases, parameterized SQL, transactions, and bounded query results. |
@@ -577,7 +573,7 @@ return values, native objects, limits, and errors.
 | `Bytes`, `Csv`, `Regex` | Explicit UTF-8 conversion, byte slicing, CSV records and streams, and simple Rust-backed regex. |
 | `String` | Grapheme length/slicing for emoji and combining text; trim, split/join, search, replace, take substrings, convert case, and format scalar values with `{}`. |
 | `Math` | Type-preserving abs, min/max, floor, ceil, and round (ties away from zero). |
-| `List`, `Map` | Slice, remove, concatenate, sort, test membership, construct maps, and safely look up keys. |
+| `List`, `Map` | End operations, splice, chunks, search, aggregation, comparisons, record columns, and map merge/construction helpers. |
 | Global functions | Explicit conversions, `type`, `len`, and cancellable `sleep`. |
 
 Local script reuse uses `require "lib/helpers.scripta"` or
@@ -635,7 +631,7 @@ In PowerShell set `$env:SCR_MAX_STEPS = '1000000'` before invoking `scripta`.
 Source files default to an 8 MiB ceiling and value nesting is bounded at 128.
 Optional value/scope budgets are logical limits, not a hard process RSS ceiling.
 See the [performance and safety report](docs/performance.md) and
-[release limitations](docs/releases.md#limitations-for-010).
+[release limitations](docs/releases.md#limitations).
 
 ## Documentation
 

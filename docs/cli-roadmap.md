@@ -1,12 +1,16 @@
-# Scripta CLI development phases and approvals
+# Historical CLI development phases and approvals
 
-Scripta's next work focuses on practical CLI automation: processing text,
-transforming collections, handling failures, and reusing scripts. Each phase
-requires explicit approval before implementation starts. Completing one phase
-does not authorize the next.
+This document preserves milestone scopes, approvals, implementation notes, and
+results as recorded during development. Phase status, export counts, proposed
+next actions, and deferred features below belong to those milestones. They are
+not the current feature inventory or an instruction to start further work.
+Recorded approvals and completion acceptances remain unchanged.
 
-**Next action: review Phase 7 below.** All six
-phases are accepted. Phase 7 is approved and implemented; completion is ready for review.
+For current behavior, use the [CLI reference](../README.md#cli-reference),
+[language specification](language-spec.md), [standard library](standard-library.md),
+[package guide](packages.md), and [web hosting guide](web-servers.md). In
+particular, bounded binary writable streams, HTTP uploads, and server development
+watch mode are documented in the current references.
 
 ## Progress and approval record
 
