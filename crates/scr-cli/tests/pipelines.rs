@@ -56,10 +56,10 @@ fn stdin_source_supports_arguments_includes_eof_and_exit_codes() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("helper.scripta"),
-        "<?scr function hello() { return \"hello\"; }",
+        "function hello() { return \"hello\"; }",
     )
     .unwrap();
-    let source = b"<?scripta require_once \"helper.scripta\"; echo hello() . Cli::arg(0); if (Cli::readLine() !== null) exit 9; exit 7;";
+    let source = b"require_once \"helper.scripta\"; echo hello() . Cli::arg(0); if (Cli::readLine() !== null) exit 9; exit 7;";
     let output = piped(&["run", "-", "--help"], source, dir.path(), None);
     assert_eq!(output.status.code(), Some(7), "{:?}", output);
     assert_eq!(output.stdout, b"hello--help");
@@ -70,14 +70,18 @@ fn stdin_source_supports_arguments_includes_eof_and_exit_codes() {
 }
 
 #[test]
-fn stdin_source_enforces_tags_utf8_and_source_budget() {
+fn stdin_source_enforces_syntax_utf8_and_source_budget() {
     let dir = tempfile::tempdir().unwrap();
-    for source in [b"echo 1;".as_slice(), b"<?scr \xff", b"<?scr echo"] {
+    for source in [
+        b"echo \"missing semicolon\"".as_slice(),
+        b"<?scr \xff",
+        b"<?scr echo",
+    ] {
         let output = piped(&["run", "-"], source, dir.path(), None);
         assert_eq!(output.status.code(), Some(1));
         assert!(output.stdout.is_empty());
     }
-    for tag in ["<?scripta", "<?scr"] {
+    for tag in ["", "<?scripta", "<?scr"] {
         let source = format!("{tag} echo \"ok\";");
         for (limit, expected) in [(source.len(), 0), (source.len() - 1, 1)] {
             let output = piped(
@@ -118,4 +122,39 @@ fn file_script_consumes_piped_records_and_streaming_example_matches_file_mode() 
             .unwrap()
             .replace("Stream closed: true\n", "")
     );
+}
+
+#[test]
+fn tag_free_files_check_format_and_execute_without_synthetic_source_offsets() {
+    let directory = tempfile::tempdir().unwrap();
+    for name in ["main.scripta", "main.scta", "main.scr", "main"] {
+        let path = directory.path().join(name);
+        std::fs::write(&path, "# comment\r\necho \"tag free\";\r\n").unwrap();
+        for command in ["check", "fmt", "run"] {
+            let output = piped(&[command, name], b"", directory.path(), None);
+            assert!(output.status.success(), "{command}: {:?}", output);
+            if command == "run" {
+                assert_eq!(output.stdout, b"tag free");
+            }
+        }
+        assert!(!std::fs::read_to_string(path).unwrap().contains("<?"));
+    }
+    let output = piped(
+        &["run", "-"],
+        b"# comment\r\necho $missing;",
+        directory.path(),
+        None,
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("<stdin>:2:6"));
+    for source in [
+        b"".as_slice(),
+        b"# comment only",
+        b"#!/usr/bin/env scripta",
+        b"\xef\xbb\xbf",
+    ] {
+        let output = piped(&["run", "-"], source, directory.path(), None);
+        assert!(output.status.success(), "{:?}", output);
+        assert!(output.stdout.is_empty());
+    }
 }

@@ -2983,3 +2983,21 @@ fn shipped_watch_example_executes_an_include_edit_with_configured_polling() {
     );
     assert_eq!(health(&server, "/readyz").0, 200);
 }
+
+#[test]
+fn tag_free_web_entry_and_include_execute_in_persistent_workers() {
+    let server = Server::start_files(
+        "require_once 'helper.scripta'; Web::header('Content-Type', 'text/plain'); echo message() . Web::request()->path;",
+        None,
+        &[],
+        &[(
+            "helper.scripta",
+            "function message() { return 'tag free '; }",
+        )],
+    );
+    for path in ["/first", "/second"] {
+        let (status, _, body) = server.request("GET", path, b"", "text/plain");
+        assert_eq!(status, 200);
+        assert_eq!(body, format!("tag free {path}").as_bytes());
+    }
+}

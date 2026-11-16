@@ -217,8 +217,38 @@ pub fn execute(args: &[std::ffi::OsString], cwd: &Path) -> Result<String> {
                 .write(true)
                 .create_new(true)
                 .open(cwd.join(MANIFEST))?;
-            file.write_all(toml::to_string_pretty(&manifest)?.as_bytes())?;
-            Ok("Created scripta.toml".into())
+            let result = (|| -> io::Result<bool> {
+                file.write_all(
+                    toml::to_string_pretty(&manifest)
+                        .map_err(io::Error::other)?
+                        .as_bytes(),
+                )?;
+                match fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(cwd.join("main.scripta"))
+                {
+                    Ok(mut source) => {
+                        if let Err(error) = source.write_all(b"echo \"Hello, Scripta!\\n\";\n") {
+                            drop(source);
+                            let _ = fs::remove_file(cwd.join("main.scripta"));
+                            return Err(error);
+                        }
+                        Ok(true)
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+                    Err(error) => Err(error),
+                }
+            })();
+            match result {
+                Ok(true) => Ok("Created scripta.toml and main.scripta".into()),
+                Ok(false) => Ok("Created scripta.toml; kept existing main.scripta".into()),
+                Err(error) => {
+                    drop(file);
+                    let _ = fs::remove_file(cwd.join(MANIFEST));
+                    Err(error.into())
+                }
+            }
         }
         ["install", rest @ ..] | ["update", rest @ ..] => {
             let update = args[0] == "update";

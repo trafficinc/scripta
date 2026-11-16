@@ -512,3 +512,66 @@ fn new_projects_declare_scripta_entries_and_legacy_packages_keep_scr_defaults() 
     ok(&app, &["install", "--locked", "--offline"]);
     assert_eq!(ok(&app, &["main.scripta"]), "legacy");
 }
+
+#[test]
+fn init_creates_a_tag_free_starter_and_preserves_existing_source() {
+    let directory = tempfile::tempdir().unwrap();
+    ok(directory.path(), &["init"]);
+    let source = fs::read_to_string(directory.path().join("main.scripta")).unwrap();
+    assert_eq!(source, "echo \"Hello, Scripta!\\n\";\n");
+    assert_eq!(
+        ok(directory.path(), &["run", "main.scripta"]),
+        "Hello, Scripta!\n"
+    );
+    ok(directory.path(), &["check", "main.scripta"]);
+    ok(directory.path(), &["fmt", "--check", "main.scripta"]);
+    fails(directory.path(), &["init"], "error[E0601]");
+    assert_eq!(
+        fs::read_to_string(directory.path().join("main.scripta")).unwrap(),
+        source
+    );
+
+    let existing = tempfile::tempdir().unwrap();
+    let source = "<?scr echo 'existing';";
+    fs::write(existing.path().join("main.scripta"), source).unwrap();
+    ok(existing.path(), &["init"]);
+    assert_eq!(
+        fs::read_to_string(existing.path().join("main.scripta")).unwrap(),
+        source
+    );
+}
+
+#[test]
+fn tag_free_packages_and_callers_interoperate_with_tagged_dependencies_offline() {
+    let directory = tempfile::tempdir().unwrap();
+    let app = directory.path().join("app");
+    fs::create_dir(&app).unwrap();
+    let helper = directory.path().join("helpers");
+    package(
+        &helper,
+        "helpers",
+        "1.0.0",
+        "require_once 'legacy.scripta'; function message() { return legacy() . ' tag free'; }",
+    );
+    fs::write(
+        helper.join("legacy.scripta"),
+        "<?scr function legacy() { return 'tagged'; }",
+    )
+    .unwrap();
+    ok(&app, &["init"]);
+    ok(&app, &["add", "helpers", "--path", "../helpers"]);
+    fs::write(
+        app.join("main.scripta"),
+        "require_once 'helpers' as Helpers; echo Helpers::message();",
+    )
+    .unwrap();
+    ok(&app, &["install", "--locked", "--offline"]);
+    assert_eq!(ok(&app, &["run", "main.scripta"]), "tagged tag free");
+    ok(&app, &["fmt", "main.scripta"]);
+    assert!(
+        !fs::read_to_string(app.join("main.scripta"))
+            .unwrap()
+            .contains("<?")
+    );
+    assert_eq!(ok(&app, &["run", "main.scripta"]), "tagged tag free");
+}

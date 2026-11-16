@@ -20,7 +20,9 @@ scripta add helpers --git https://example.com/team/helpers.git --version '^1.2'
 scripta add helpers --git https://example.com/team/helpers.git --rev v1.2.3
 ```
 
-`init` creates `scripta.toml` and refuses to overwrite an existing manifest.
+`init` creates `scripta.toml` and a tag-free `main.scripta` greeting when the source
+path is absent. It keeps existing source unchanged and refuses to overwrite an
+existing manifest.
 `add` records the dependency and installs the dependency graph. An existing name
 is replaced, allowing you to change its source or version constraint. Failed
 resolution leaves the previous manifest, lockfile, and installation intact.
@@ -46,8 +48,9 @@ file with that name takes precedence. Other local paths retain their existing
 behavior. Packages must be declared as direct dependencies of the closest
 `scripta.toml` to the including source file. Functions retain their definition
 file, so later calls resolve dependencies relative to their defining package.
-New scripts start with `<?scripta`. Legacy `<?scr` remains accepted, including
-in installed packages and mixed modern/legacy includes.
+Opening tags are optional for package entries and included files. Tag-free source,
+optional `<?scripta`, and legacy `<?scr` interoperate in installed packages and
+local includes. New starter scripts use tag-free source.
 
 ## Package aliases and isolation
 

@@ -63,8 +63,8 @@ fn reassignment_and_unicode_strings() {
 #[test]
 fn invalid_programs_report_errors() {
     for (source, message) in [
-        ("echo \"hi\";", "expected opening tag"),
-        ("<?script", "expected opening tag"),
+        ("echo \"hi\"", "expected Semicolon"),
+        ("<?script", "invalid opening tag"),
         ("<?scr echo \"hi\"", "expected Semicolon"),
         ("<?scr echo \"open", "unterminated string"),
         ("<?scr echo $missing;", "undefined variable"),

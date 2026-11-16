@@ -9,8 +9,8 @@ Recorded approvals and completion acceptances remain unchanged.
 For current behavior, use the [CLI reference](../README.md#cli-reference),
 [language specification](language-spec.md), [standard library](standard-library.md),
 [package guide](packages.md), and [web hosting guide](web-servers.md). In
-particular, bounded binary writable streams, HTTP uploads, and server development
-watch mode are documented in the current references.
+particular, bounded binary writable streams, HTTP uploads, development watch mode,
+and optional source opening tags are documented in the current references.
 
 ## Progress and approval record
 

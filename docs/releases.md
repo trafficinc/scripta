@@ -28,9 +28,9 @@ Keep earlier receipts and archive identities intact when adding new evidence.
 New artifacts use `scripta`/`scripta.exe` as the primary executable and ship an
 identical `scr`/`scr.exe` compatibility copy. `.scripta` is the official source
 extension, `.scta` is accepted as shorthand, and legacy `.scr` scripts remain
-valid. The canonical opening tag is `<?scripta`; legacy `<?scr` stays accepted.
-The formatter preserves either spelling. Rust crate names, `SCR_*` environment
-variables, and the separate playground's `scr-playground` / `--scr` launch
+valid. Opening tags are optional; `<?scripta` and legacy `<?scr` stay accepted.
+The formatter preserves either spelling and leaves tag-free source tag-free.
+Rust crate names, `SCR_*` environment variables, and the separate playground's `scr-playground` / `--scr` launch
 protocol are unchanged. The launcher passes the actual current interpreter path,
 so the companion can execute the renamed binary without a protocol change;
 its editor file-extension filters belong to the separate companion repository.

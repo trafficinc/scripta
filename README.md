@@ -19,7 +19,8 @@
 Use `scripta backup.scripta`, `scripta deploy.scripta`, or
 `scripta monitor.scripta`. `.scripta` is the official source extension; `.scta`
 is a shorthand. The `scr` command and `.scr` files remain compatible.
-New scripts start with `<?scripta`. Legacy `<?scr` remains accepted.
+Scripts can start directly with code. Optional `<?scripta` and legacy `<?scr`
+opening tags remain accepted; Scripta executes scripts as standalone source.
 
 ## Try Scripta Playground
 
@@ -69,11 +70,10 @@ unimplemented.
 
 ## Quick start
 
-Save this as `hello.scripta`. Start new scripts, including included files, with
-`<?scripta`; legacy `<?scr` is also accepted. A closing tag is optional.
+Save this as `hello.scripta`. Opening and closing tags are optional, including
+in files loaded with `require` or `require_once`.
 
 ```scr
-<?scripta
 $name = "Scripta";
 echo "Hello, " . $name . "!\n";
 ```
@@ -405,7 +405,7 @@ an SSH terminal open. See the [crontab reference](https://man7.org/linux/man-pag
 | --- | --- |
 | `scripta run script.scripta` | Execute a script; `scripta script.scripta` is shorthand. |
 | `scripta run - [arguments...]` | Read script source from stdin through EOF and execute it. |
-| `scripta check script.scripta` | Validate tags, complete syntax, declarations, and control flow without execution. |
+| `scripta check script.scripta` | Validate source syntax, declarations, and control flow without execution. |
 | `scripta fmt script.scripta` | Format indentation and spacing while preserving comments and string literals. |
 | `scripta fmt --check script.scripta` | Check formatting without writing; useful in CI. |
 | `scripta serve app.scripta` | Receive HTTP requests with persistent workers; use a reverse proxy for public HTTPS. |
@@ -442,7 +442,7 @@ On macOS/Linux, try the streaming example with piped data:
 
 ```sh
 cat playground/sample-events.txt | scripta run playground/streaming.scripta -
-printf '%s\n' '<?scripta echo "Hello from stdin!\n";' | scripta run -
+printf '%s\n' 'echo "Hello from stdin!\n";' | scripta run -
 ```
 
 `scripta run -` consumes stdin as UTF-8 source through EOF, subject to

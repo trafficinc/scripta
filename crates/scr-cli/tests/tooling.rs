@@ -245,7 +245,7 @@ fn malformed_and_deep_input_is_rejected_without_panics() {
         assert!(formatter::format(&source).is_err());
     }
     for source in [
-        "",
+        "<?",
         "<?scr $",
         "<?scr if () {}",
         "<?scr function f( {",
@@ -358,5 +358,55 @@ fn formatter_preserves_each_opening_spelling_and_preamble_without_changing_execu
         pipeline::run(&formatted, &mut formatted_output).unwrap();
         assert_eq!(original_output, b"Hello from Scripta");
         assert_eq!(formatted_output, original_output);
+    }
+}
+
+#[test]
+fn formatter_keeps_tag_free_source_tag_free_with_preambles_and_empty_programs() {
+    for source in [
+        "",
+        " \r\n\t",
+        "\u{feff}",
+        "// <?scripta comment",
+        "/* <?scr */",
+        "#!/usr/bin/env scripta",
+        "\u{feff}#!/usr/bin/env scripta\r\n# comment",
+    ] {
+        let formatted = formatter::format(source).unwrap();
+        assert_eq!(formatter::format(&formatted).unwrap(), formatted);
+        assert!(!formatted.trim_start_matches('\u{feff}').starts_with("<?"));
+        pipeline::check(&formatted).unwrap();
+        let mut output = Vec::new();
+        assert_eq!(pipeline::run(&formatted, &mut output).unwrap(), 0);
+        assert!(output.is_empty());
+    }
+    assert_eq!(
+        formatter::format("\u{feff}echo'hi';").unwrap(),
+        "\u{feff}echo 'hi';\n"
+    );
+    for preamble in [
+        "",
+        "\u{feff}",
+        "#!/usr/bin/env scripta\r\n",
+        "\u{feff}#!/usr/bin/env scripta\r\n",
+    ] {
+        for closing in ["", "?>"] {
+            let source =
+                format!("{preamble}/* <?scripta */$value=\"<?scr ?>\";echo $value;{closing}");
+            let formatted = formatter::format(&source).unwrap();
+            assert!(!formatted.trim_start_matches('\u{feff}').starts_with("<?"));
+            assert!(formatted.contains("/* <?scripta */"));
+            if preamble.contains("#!") {
+                assert!(formatted.contains("#!/usr/bin/env scripta\n"));
+            }
+            assert_eq!(formatted.ends_with("?>\n"), !closing.is_empty());
+            assert_eq!(formatter::format(&formatted).unwrap(), formatted);
+            let mut before = Vec::new();
+            let mut after = Vec::new();
+            pipeline::run(&source, &mut before).unwrap();
+            pipeline::run(&formatted, &mut after).unwrap();
+            assert_eq!(before, b"<?scr ?>");
+            assert_eq!(before, after);
+        }
     }
 }
