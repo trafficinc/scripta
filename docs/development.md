@@ -430,3 +430,13 @@ and management readiness during a real termination drain. Execute the
 management HTTP requests. Host logs intentionally omit source/error text; use
 `scripta check` for local syntax diagnostics and keep explicit application logs
 free of secrets. Management probes never execute application scripts.
+
+Shutdown regressions in `scr-cli --test web_server` cover idle and
+partial-header connections, active keep-alive/pipelined requests, queued work,
+repeated Unix termination signals, forced stream truncation, worker reaping,
+request spool cleanup, saved sessions, and a controlled two-instance front-end
+switch. Signal tests are Unix-gated; they do not establish Windows console/service
+behavior. Deployment/service templates and an operator command sequence live in
+[web hosting](web-servers.md#deployment-and-service-management) and
+[`examples/deploy`](../examples/deploy/). The front-end fixture validates backend
+replacement behavior; it does not run Caddy or install a service manager job.

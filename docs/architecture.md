@@ -300,6 +300,13 @@ The CLI merges an explicit optional TOML configuration with CLI overrides;
 creating resources. Check/print modes stop before host startup. The runtime's
 `SCR_*` limits remain separate. Connection/header deadlines and the shared
 shutdown drain budget are host configuration, not language execution limits.
+On shutdown a watch notification invokes Hyper graceful shutdown for every
+connection; a service-entry flag check rejects requests buffered across the
+admission boundary. Admitted body receivers and queued jobs drain under one
+shared deadline. At expiry connection tasks abort and worker loops receive a
+forced-stop notification, explicitly kill/reap children, and then release owned
+spools before persistent/temporary stores close. Repeated handled signals only
+set the same shutdown flag. OS reaping/cleanup adds overhead to the work budget.
 Hyper/Tokio own HTTP/1.1 framing and asynchronous network/process I/O. A bounded
 queue dispatches requests to persistent interpreter processes, each with a cached
 entry AST and a fresh runtime per request. Source snapshots are supplied by the

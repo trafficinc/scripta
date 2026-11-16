@@ -6,14 +6,14 @@ isolated worker processes and deployment behind an HTTPS reverse proxy.
 
 ## Progress and approval rules
 
-Current position: **Sections 1–3 complete and validated; awaiting Section 3 acceptance and explicit OK to begin Section 4.**
+Current position: **Sections 1–3 accepted; Section 4 complete and validated, awaiting acceptance and explicit OK to begin Section 5.**
 
 | Section | Scope | Status |
 | --- | --- | --- |
 | 1 | Reliable configuration | Accepted |
 | 2 | Trusted reverse proxies | Accepted |
-| 3 | Logs and health checks | Complete; awaiting acceptance |
-| 4 | Deployment and shutdown | Not started |
+| 3 | Logs and health checks | Accepted |
+| 4 | Deployment and shutdown | Complete; awaiting acceptance |
 | 5 | Worker resilience | Not started |
 | 6 | Development workflow | Not started |
 | 7 | Performance and platform evidence | Not started |
@@ -322,33 +322,105 @@ Validation evidence (2026-11-15):
   No public management authentication or external deployment was added.
   Section 4 remains unstarted pending approval.
 
-Acceptance / OK to proceed: pending.
+Acceptance / OK to proceed: user replied “OK”, accepting Section 3 and approving Section 4.
 
 ## Section 4 — Deployment and shutdown
 
-- [ ] Explicit approval to begin recorded.
-- [ ] Make shutdown close idle keep-alive connections promptly and prevent new
+- [x] Explicit approval to begin recorded: user explicitly approved Section 4 — deployment and shutdown.
+- [x] Make shutdown close idle keep-alive connections promptly and prevent new
       requests on existing connections while draining admitted work.
-- [ ] Apply the configured drain deadline consistently across connections,
+- [x] Apply the configured drain deadline consistently across connections,
       queued requests, workers, and streaming responses.
-- [ ] Preserve worker termination, session semantics, and spool cleanup when a
+- [x] Preserve worker termination, session semantics, and spool cleanup when a
       drain expires; document that completed side effects cannot be rolled back.
-- [ ] Update readiness during shutdown and define repeated-signal behavior.
-- [ ] Document dedicated service accounts, persistent private data directories,
+- [x] Update readiness during shutdown and define repeated-signal behavior.
+- [x] Document dedicated service accounts, persistent private data directories,
       service-manager startup/restart, and immutable application directories.
-- [ ] Provide reviewable Caddy/service configuration examples, with platform
+- [x] Provide reviewable Caddy/service configuration examples, with platform
       differences stated. Do not install services or alter host configuration
       merely to create these examples.
-- [ ] Document deployment by starting a replacement instance, checking readiness,
+- [x] Document deployment by starting a replacement instance, checking readiness,
       switching the front end, and draining the old instance, including limitations.
-- [ ] Test idle/active keep-alive, queued work, long streams, deadline expiry,
+- [x] Test idle/active keep-alive, queued work, long streams, deadline expiry,
       repeated signals, child cleanup, and a controlled service replacement.
-- [ ] Run checks, record evidence, and present for acceptance before Section 5.
+- [x] Run checks, record evidence, and present for acceptance before Section 5.
 
 Completion criteria: shutdown stops admission, drains within its configured bound,
 and cleans up owned resources predictably; deployment instructions are executable.
 
-Validation evidence: pending.
+Implemented contract:
+
+- Per-connection watch notifications invoke Hyper graceful shutdown: idle
+  keep-alive connections close promptly and active responses finish without
+  accepting another request. Connections awaiting their first complete header
+  close immediately on notification. Service-entry admission checks also reject
+  requests buffered across shutdown, with a closing 503 if a response is sent.
+  A partially received later header retains its header/drain ceilings.
+- The application listener closes when the accept loop enters draining, within
+  its existing 100 ms flag polling interval. One existing configured drain budget
+  covers body reception, queues, workers, and streaming; existing earlier request
+  and connection deadlines still apply. At expiry connections abort and worker
+  loops receive a forced-stop notification, explicitly terminate/reap children,
+  then release request-owned storage before temporary stores close. No new
+  dependencies, public native APIs, or lockfile changes.
+- Readiness uses the immediate shutdown flag; private liveness/metrics remain
+  available through application cleanup. Repeated handled termination signals
+  are idempotent, without forcing early exit or resetting the drain clock.
+- Documented committed versus uncommitted sessions, persistent stores, spool
+  ownership, irreversible completed side effects, cleanup overhead, dedicated
+  accounts, immutable releases, service restart/stop policy, and platform gaps.
+- Added reviewable Linux systemd template, blue/green TOML configurations, and
+  Caddy example under `examples/deploy/`, with an operator sequence for readiness,
+  application probes, front-end switch, old-instance drain, and rollback limits.
+  Updated hosting, architecture, and development references.
+
+Validation evidence (2026-11-15):
+
+- Base revision `7561328` plus Section 4 working-tree changes. Native macOS
+  27.0.1 arm64; pinned Rust 1.99.1 compiler host/target
+  `aarch64-apple-darwin`; `MACOSX_DEPLOYMENT_TARGET=15.0` on Cargo build/test/lint
+  commands. No commit, tag, release, service installation, or public deployment.
+- `cargo test -p scr-cli --test web_server --test serve_config --locked
+  --offline --target aarch64-apple-darwin`: 66 passed (60 web, six config).
+  Six new regressions cover idle keep-alive/initial partial headers, active
+  keep-alive and pipelining, admitted queued work, repeated signals, stream
+  truncation, child termination/reaping, complete/partial upload spool cleanup,
+  discarded queued side effects, persistent saved sessions, uncommitted-session
+  rollback, controlled replacement, and the shipped deployment configurations.
+- Initial sandboxed shutdown tests failed because localhost binding was blocked
+  (`Operation not permitted`). Reran through the environment approval mechanism;
+  retained all assertions. New fixture errors were corrected before final runs.
+  A real Hyper initial-partial-header graceful-shutdown wait was found and fixed
+  by closing connections which have never entered the request service.
+- Controlled replacement ran two real Scripta instances with distinct listeners:
+  verified replacement readiness, forwarded requests through a local front-end
+  fixture before/after the target switch, drained an old active stream, and
+  verified replacement service afterward. The shipped blue/green configurations
+  served real HTTP with CLI overrides for ephemeral ports and private fixture
+  storage; their proxy host allowlists and private health probes were exercised.
+- `cargo test --workspace --all-features --locked --offline --target
+  aarch64-apple-darwin` and `cargo test --workspace --locked --offline --target
+  aarch64-apple-darwin`: each passed 619 tests, zero failures/ignored.
+- `cargo test -p scr-cli --test serve_config --test web_server
+  --no-default-features --locked --offline --target aarch64-apple-darwin`:
+  65 passed, including shutdown, replacement, and deployment-config coverage.
+- `cargo clippy --workspace --all-targets --all-features --locked --offline
+  --target aarch64-apple-darwin -- -D warnings` and
+  `cargo fmt --all -- --check` passed.
+- `cargo +1.85.0 check -p scr-cli --locked --offline --target
+  aarch64-apple-darwin` passed; compile coverage only, not minimum-Rust tests.
+- Local Markdown reference paths, deployment-template whitespace, and
+  `git diff --check` passed. Full test/lint command logs were retained locally
+  under `/private/tmp/scripta-section4-*.log` for this session.
+- Caddy and `systemd-analyze` are unavailable on this host. Their templates were
+  reviewed against official references linked in the hosting guide, but Caddy
+  execution/config validation, systemd installation/start/stop, launchd, Windows
+  console/service wrappers, public TLS, and native Linux/Windows/macOS 15 baseline
+  validation remain pending. No platform-support or zero-downtime claim was added.
+  The drain bounds admitted work; OS process reaping, filesystem cleanup, and
+  scheduling add overhead. A blocked host log sink remains a known limitation.
+  External forced kills/machine failure can leave persistent-directory debris.
+  Section 5 remains unstarted pending explicit approval.
 
 Acceptance / OK to proceed: pending.
 

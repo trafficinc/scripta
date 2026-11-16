@@ -170,13 +170,128 @@ for correlation, diagnostics, and delivery semantics. `exit 0` finishes a valid 
 HEAD suppresses the transmitted body; statuses 204, 205, and 304 also send no body.
 Application code should recognize HEAD when it wants it to follow a GET route.
 
-Ctrl+C / termination signals stop new connections and allow a bounded drain of
-existing work within `--drain-timeout-ms` before terminating remaining workers.
-The drain budget defaults to 11 seconds independently of `--timeout-ms`; increase
-it explicitly when longer in-flight requests should be allowed to finish.
-Keep-alive connections can consume that drain interval. The parent is intended to run under an OS service
-manager for restart after host failure. Worker stdin monitoring makes workers exit
-when their parent pipe closes, including while a request is blocked.
+Ctrl+C / termination signals mark readiness false immediately. The accept loop
+observes the flag within its 100 ms polling interval, closes the listener, and
+notifies all existing connections. Idle keep-alive connections and connections awaiting their first complete
+header close promptly. A partially received later header remains subject to the
+header and drain deadlines. Active connections finish their admitted request and
+close instead of accepting another request. Buffered pipelined requests whose
+service has not begun are not admitted; a request racing shutdown may receive a
+closing `503` or a closed connection. Requests already receiving bodies or waiting
+in the queue remain eligible to finish.
+
+One `--drain-timeout-ms` budget covers connection/body reception, queued work,
+execution, streamed responses, and workers, starting when the accept loop enters
+draining. Existing request, header, and connection deadlines still apply and can
+end work sooner. The default drain is 11 seconds; increase it explicitly for
+longer work. At expiry the host aborts remaining HTTP connections, terminates and
+reaps worker children, then drops queued request spools and temporary stores.
+Process reaping, filesystem cleanup, and scheduler delays add overhead beyond the
+configured work allowance; this is not a hard wall-clock process-exit guarantee.
+The private health listener remains available until application/worker cleanup
+finishes. Repeated handled signals are idempotent: they neither force an early
+exit nor restart the drain clock. Use the service manager's outer stop timeout for
+forced termination if the supervisor itself becomes stuck.
+
+Script `finally` blocks may be bypassed on forced termination. Uncommitted session
+changes are discarded; sessions saved before a flush or successful request remain
+saved in a configured persistent store. Request-owned spools/stages are cleaned;
+explicitly saved uploads and completed filesystem/database/network side effects
+cannot be rolled back. External forced kills or machine failure may leave
+persistent-directory debris requiring operator cleanup. Worker stdin monitoring
+also exits workers when their parent pipe closes, including during native work.
+
+## Deployment and service management
+
+Reviewable examples are in [`examples/deploy`](../examples/deploy/): a Linux
+[systemd template](../examples/deploy/scripta@.service), paired
+[blue](../examples/deploy/blue.toml)/[green](../examples/deploy/green.toml)
+configurations, and a [Caddyfile](../examples/deploy/Caddyfile). These are templates;
+creating them does not install a service. Install a verified native `scripta`
+binary at `/usr/local/bin/scripta`, create an unprivileged `scripta` account/group,
+and provision immutable application trees at `/srv/scripta/releases/blue` and
+`/srv/scripta/releases/green`, each containing `main.scripta` and its includes.
+Use unique release names in subsequent deployments rather than modifying a tree
+still used by workers. The account needs read/traverse access to code and config;
+code, includes, and configuration should be owned by the deployment administrator
+and unwritable by the service account. Set the working directory to that exact
+release tree so relative includes cannot follow a changing `current` symlink.
+
+Install reviewed configs as `/etc/scripta/blue.toml` and `green.toml`, readable by
+the service account. Replace the example domain in both allowlists and Caddy.
+The service template creates private state directories under `/var/lib/scripta`,
+with a shared session directory and separate per-instance upload directories.
+Keep databases and other application writes outside the immutable release tree,
+use explicit absolute paths, and provision only the writable directories the
+application requires. The template's filesystem protection permits state writes
+and private temporary files. Audit environment/credential delivery separately;
+never put secrets in command arguments, application source, or public logs.
+
+The template uses foreground execution with a 3-second failure restart delay and
+a five-starts-per-minute limit. Its 15-second outer stop timeout exceeds the
+11-second application drain. Adjust both together. `KillMode=mixed` sends the
+initial termination signal to the supervisor and reserves forced group termination
+for the outer timeout, allowing isolated workers to finish. `Type=simple` does not
+establish application readiness: always probe the private listener. See the
+[systemd service reference](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html)
+and [kill policy reference](https://www.freedesktop.org/software/systemd/man/latest/systemd.kill.html).
+
+After account, files, and Caddy have been provisioned by an operator, this Linux
+sequence starts a replacement, verifies it, switches traffic, and drains the old
+instance. Run privileged commands through the host's normal administration flow:
+
+```sh
+systemd-analyze verify /etc/systemd/system/scripta@.service
+systemctl daemon-reload
+systemctl enable --now scripta@blue
+curl --fail --max-time 2 http://127.0.0.1:9090/readyz
+systemctl start scripta@green
+curl --fail --max-time 2 http://127.0.0.1:9091/readyz
+curl --fail --max-time 5 -H 'Host: app.example.com' http://127.0.0.1:8081/
+# Edit /etc/caddy/Caddyfile: change only the upstream 8080 to 8081.
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+# Verify real application traffic through your HTTPS front end before stopping blue.
+curl --fail --max-time 5 https://app.example.com/
+systemctl stop scripta@blue
+systemctl disable scripta@blue
+systemctl enable scripta@green
+journalctl -u scripta@blue -u scripta@green
+```
+
+Use bounded polling for readiness if startup has not finished, and abort the
+switch on any failed probe. The application smoke route must be harmless and
+appropriate for your application. The management port is private and must not be
+proxied publicly. The Caddy example intentionally has no health route on the
+application port; management and application routes are separate. Consult
+[Caddy reload](https://caddyserver.com/docs/command-line#caddy-reload) and
+[reverse proxy streaming](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#streaming)
+when choosing proxy timeouts and stream behavior. Validate proxy configuration
+with the installed version before use.
+
+A reload/switch is not a zero-downtime guarantee. Existing proxy connections and
+streams can outlive a configuration reload or be interrupted by proxy policy;
+the old backend refuses further requests after shutdown begins. Clients may see
+closed connections, `503`, or truncated bodies when a deadline expires. Do not
+blindly retry non-idempotent requests: a failed HTTP response does not prove that
+side effects failed. Keep enough CPU/memory/worker capacity for both instances.
+Shared sessions require the same local store, account, limits, and compatible
+session schema; this is not distributed multi-host session storage. SQLite and
+other shared data need compatible schemas and independent migration/backup plans.
+Before switching, rollback means stopping green and retaining blue. After
+switching, switch back only if old code remains compatible with persisted changes;
+a drain does not undo writes. Keep old release files until its processes exit.
+
+On Apple Silicon macOS, use a reviewed launchd job or a foreground supervisor with
+absolute paths, a dedicated account, private state directories, and a stop grace
+period longer than the application drain; the Linux unit and `/var/lib` paths are
+not macOS service configuration. Windows `scripta serve` is a console process,
+not a Windows Service Control Manager implementation. A service wrapper must
+forward a handled console stop event and allow the drain before forced process-tree
+termination; a wrapper that only kills the process cannot provide graceful drain.
+Apply private account ACLs on Windows instead of relying on Unix modes. No native
+Linux service manager, launchd job, or Windows wrapper was executed for these
+examples; platform service validation remains pending.
 
 ## Logs and health checks
 

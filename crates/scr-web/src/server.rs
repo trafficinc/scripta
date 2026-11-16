@@ -31,7 +31,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     process::{Child, ChildStdin, ChildStdout, Command},
-    sync::{Mutex, Semaphore, mpsc, oneshot},
+    sync::{Mutex, Semaphore, mpsc, oneshot, watch},
     task::JoinSet,
     time::{Instant as Deadline, timeout, timeout_at},
 };
@@ -415,9 +415,15 @@ async fn worker_loop(
     config: Arc<Config>,
     queue: Arc<Mutex<mpsc::Receiver<Job>>>,
     observer: Arc<Observer>,
+    mut force_stop: watch::Receiver<bool>,
 ) {
     loop {
-        let Some(mut job) = queue.lock().await.recv().await else {
+        let next = tokio::select! {
+            biased;
+            _ = force_stop.changed() => None,
+            job = async { queue.lock().await.recv().await } => job,
+        };
+        let Some(mut job) = next else {
             break;
         };
         drop(job.queued.take());
@@ -437,6 +443,8 @@ async fn worker_loop(
         let _busy = Gauge::new(&observer, GaugeKind::Busy);
         let cancel = job.cancel.clone();
         let result = tokio::select! {
+            biased;
+            _=force_stop.changed()=>Ok(Err(io::Error::other("shutdown deadline"))),
             result=timeout_at(job.deadline,async {
                 if worker.is_none() {worker=Some(Worker::start(&config,&observer).await?);add(&observer.stats.worker_restarts,1);}
                 worker.as_mut().unwrap().request(&mut job,&config).await
@@ -445,7 +453,9 @@ async fn worker_loop(
         };
         if !matches!(result, Ok(Ok(()))) {
             let status = if result.is_err() { 504 } else { 502 };
-            let reason = if result.is_err() {
+            let reason = if *force_stop.borrow() {
+                "shutdown_deadline"
+            } else if result.is_err() {
                 "timeout"
             } else if cancel.is_cancelled() {
                 "client_disconnect"
@@ -473,6 +483,9 @@ async fn worker_loop(
                 let _ = reply.send(Err(status));
             }
         }
+        if *force_stop.borrow() {
+            break;
+        }
     }
     if let Some(worker) = worker {
         worker.stop().await;
@@ -489,6 +502,15 @@ fn plain(status: u16, text: &'static str) -> HttpResponse {
     response
 }
 async fn dispatch(request: Request<Incoming>, peer: SocketAddr, host: Host) -> HttpResponse {
+    // Hyper may already have buffered a pipelined request when shutdown begins.
+    // Only requests whose service began before the flag are admitted to drain.
+    if host.observer.shutdown.load(Ordering::Acquire) {
+        let mut response = plain(503, "Server draining\n");
+        response
+            .headers_mut()
+            .insert("connection", HeaderValue::from_static("close"));
+        return response;
+    }
     let Some(trace) = host.observer.request() else {
         return plain(503, "Request identifier capacity exhausted\n");
     };
@@ -764,6 +786,7 @@ async fn run(
     };
     let (queue, receiver) = mpsc::channel(config.queue);
     let receiver = Arc::new(Mutex::new(receiver));
+    let (force_stop, force_receiver) = watch::channel(false);
     let mut workers = JoinSet::new();
     for _ in 0..config.workers {
         if shutdown.load(Ordering::Relaxed) {
@@ -775,6 +798,7 @@ async fn run(
             config.clone(),
             receiver.clone(),
             observer.clone(),
+            force_receiver.clone(),
         ));
     }
     observer.startup_done.store(true, Ordering::Release);
@@ -787,6 +811,7 @@ async fn run(
         observer: observer.clone(),
     };
     let slots = Arc::new(Semaphore::new(config.max_connections));
+    let (draining, _) = watch::channel(false);
     let mut connections = JoinSet::new();
     while !shutdown.load(Ordering::Relaxed) {
         while connections.try_join_next().is_some() {}
@@ -800,13 +825,17 @@ async fn run(
                     continue;
                 };
                 let host = host.clone();
+                let mut drain = draining.subscribe();
                 connections.spawn(async move {
                     let _slot = slot;
                     let connection_timeout = host.config.connection_timeout;
                     let header_timeout = host.config.header_timeout;
                     let observer = host.observer.clone();
+                    let admitted = Arc::new(AtomicBool::new(false));
+                    let request_admitted = admitted.clone();
                     let service = service_fn(move |request| {
                         let host = host.clone();
+                        request_admitted.store(true, Ordering::Release);
                         async move { Ok::<_, Infallible>(dispatch(request, peer, host).await) }
                     });
                     let mut builder = http1::Builder::new();
@@ -817,7 +846,28 @@ async fn run(
                         .max_headers(100);
                     let connection = builder.serve_connection(TokioIo::new(stream), service);
                     // Also bound slow response readers and idle persistent connections.
-                    let failure = match timeout(connection_timeout, connection).await {
+                    tokio::pin!(connection);
+                    let lifetime = tokio::time::sleep(connection_timeout);
+                    tokio::pin!(lifetime);
+                    let result = tokio::select! {
+                        biased;
+                        _ = drain.changed() => {
+                            if !admitted.load(Ordering::Acquire) {
+                                // Hyper can wait for an incomplete initial header
+                                // during graceful shutdown. No service has run here,
+                                // so dropping this connection cannot lose a response.
+                                return;
+                            }
+                            connection.as_mut().graceful_shutdown();
+                            tokio::select! {
+                                result = &mut connection => Ok(result),
+                                _ = &mut lifetime => Err(()),
+                            }
+                        }
+                        result = &mut connection => Ok(result),
+                        _ = &mut lifetime => Err(()),
+                    };
+                    let failure = match result {
                         Err(_) => Some(("connection_lifetime", true)),
                         Ok(Err(error)) => Some((
                             if error.is_timeout() {
@@ -850,8 +900,10 @@ async fn run(
         }
     }
     observer.event("server_draining", None, json!({}), "server draining");
-    // Stop accepting requests; close keep-alive connections after active work drains.
+    drop(listener);
     let drain_deadline = Deadline::now() + config.drain_timeout;
+    // Wake every connection, including idle/partial-header connections.
+    draining.send_replace(true);
     let drain = async {
         while let Some(result) = connections.join_next().await {
             let _ = result;
@@ -866,7 +918,9 @@ async fn run(
         while workers.join_next().await.is_some() {}
     })
     .await;
-    workers.abort_all();
+    // Terminate and reap children explicitly before dropping queued spools or
+    // temporary stores. No second request/drain allowance is granted here.
+    force_stop.send_replace(true);
     while workers.join_next().await.is_some() {}
     drop(receiver);
     health_stop.store(true, Ordering::Release);
