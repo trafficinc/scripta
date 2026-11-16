@@ -329,3 +329,242 @@ fn inspection_and_file_logging_respect_capabilities_and_root_policy() {
     runtime.set_error_stream(Fail);
     error(&mut runtime, r#"Log::error("x");"#, "IoError");
 }
+
+#[test]
+fn timezone_formatting_uses_historical_and_dst_offsets_without_changing_the_instant() {
+    let mut runtime = runtime();
+    for (instant, zone, expected) in [
+        (
+            "2024-01-15T12:34:56.123Z",
+            "America/New_York",
+            "2024-01-15 07:34:56.123 -05:00 EST",
+        ),
+        (
+            "2024-07-15T12:34:56.123Z",
+            "America/New_York",
+            "2024-07-15 08:34:56.123 -04:00 EDT",
+        ),
+        (
+            "2024-03-10T06:59:59Z",
+            "America/New_York",
+            "2024-03-10 01:59:59.000 -05:00 EST",
+        ),
+        (
+            "2024-03-10T07:00:00Z",
+            "America/New_York",
+            "2024-03-10 03:00:00.000 -04:00 EDT",
+        ),
+        (
+            "2024-11-03T05:30:00Z",
+            "America/New_York",
+            "2024-11-03 01:30:00.000 -04:00 EDT",
+        ),
+        (
+            "2024-11-03T06:30:00Z",
+            "America/New_York",
+            "2024-11-03 01:30:00.000 -05:00 EST",
+        ),
+        (
+            "2024-01-01T23:45:00Z",
+            "Asia/Kathmandu",
+            "2024-01-02 05:30:00.000 +05:45 +0545",
+        ),
+        (
+            "2024-01-01T00:00:00Z",
+            "Australia/Adelaide",
+            "2024-01-01 10:30:00.000 +10:30 ACDT",
+        ),
+        (
+            "1969-12-31T23:59:59.999Z",
+            "Asia/Tokyo",
+            "1970-01-01 08:59:59.999 +09:00 JST",
+        ),
+        (
+            "1900-01-01T00:00:00Z",
+            "Europe/Paris",
+            "1900-01-01 00:09:21.000 +00:09 PMT",
+        ),
+    ] {
+        run(
+            &mut runtime,
+            &format!(
+                r#"
+            $instant = Date::parse("{instant}");
+            $value = Date::format($instant, "%Y-%m-%d %H:%M:%S%.3f %:z %Z", "{zone}");
+            $seconds = Date::format($instant, "%s", "{zone}");
+            $utcSeconds = Date::format($instant, "%s");
+        "#
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            runtime.get_global("value"),
+            Some(&Value::String(expected.into())),
+            "{instant} {zone}"
+        );
+        assert_eq!(
+            runtime.get_global("seconds"),
+            runtime.get_global("utcSeconds")
+        );
+    }
+    run(
+        &mut runtime,
+        r#"
+        $withOffset = Date::format(0, "%+", "Asia/Tokyo");
+        $back = Date::parse($withOffset);
+        $escaped = Date::format(0, "%%Z %Z", "America/New_York");
+        $historical = Date::format(Date::parse("1900-01-01T00:00:00Z"), "%::z", "Europe/Paris");
+    "#,
+    )
+    .unwrap();
+    assert_eq!(runtime.get_global("back"), Some(&Value::Int(0)));
+    assert_eq!(
+        runtime.get_global("escaped"),
+        Some(&Value::String("%Z EST".into()))
+    );
+    assert_eq!(
+        runtime.get_global("historical"),
+        Some(&Value::String("+00:09:21".into()))
+    );
+}
+
+#[test]
+fn utc_formatting_remains_compatible_and_timezone_errors_preserve_assignments() {
+    let mut runtime = runtime();
+    let formats = [
+        "",
+        "%+",
+        "%c %x %X",
+        "%Y %G %V %u %j %a %A %b %B",
+        "%s %f %.3f %z %:z %::z %:::z %Z %%",
+        "世界 %Y",
+    ];
+    for value in [-1, 0, 1705322096123, 253402300800000] {
+        for format in formats {
+            runtime
+                .set_global("format", Value::String(format.into()))
+                .unwrap();
+            run(&mut runtime, &format!(r#"$default = Date::format({value}, $format); $explicit = Date::format({value}, $format, "UTC");"#)).unwrap();
+            let expected = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(value)
+                .unwrap()
+                .format(format)
+                .to_string();
+            assert_eq!(
+                runtime.get_global("default"),
+                Some(&Value::String(expected))
+            );
+            assert_eq!(
+                runtime.get_global("default"),
+                runtime.get_global("explicit")
+            );
+        }
+    }
+    for zone in [
+        "",
+        "Not/A_Zone",
+        "../etc/localtime",
+        "/etc/localtime",
+        "+05:30",
+        " America/New_York",
+        "America/New_York\0",
+        &"a".repeat(256),
+    ] {
+        runtime
+            .set_global("zone", Value::String(zone.into()))
+            .unwrap();
+        run(&mut runtime, "$value = 123;").unwrap();
+        error(
+            &mut runtime,
+            r#"$value = Date::format(0, "%Y", $zone);"#,
+            "DateError",
+        );
+        assert_eq!(runtime.get_global("value"), Some(&Value::Int(123)));
+    }
+    for source in [
+        r#"Date::format(0, "%Y", null);"#,
+        r#"Date::format(0, "%Y", 1);"#,
+        r#"Date::format(0, "%Y", "UTC", "local");"#,
+    ] {
+        error(&mut runtime, source, "TypeError");
+    }
+    for source in [
+        r#"Date::format(0, "%Q", "Asia/Tokyo");"#,
+        r#"Date::format(0, "%#z", "Asia/Tokyo");"#,
+    ] {
+        error(&mut runtime, source, "DateError");
+    }
+    error(
+        &mut runtime,
+        r#"Date::format(253402300800000, "%Y", "Asia/Tokyo");"#,
+        "RangeError",
+    );
+    error(
+        &mut runtime,
+        r#"Date::format(-9223372036854775807, "%Y", "local");"#,
+        "RangeError",
+    );
+}
+
+#[test]
+fn local_timezones_are_resolved_in_isolated_processes() {
+    const CASE: &str = "SCR_DATE_TZ_TEST_CASE";
+    if let Ok(case) = std::env::var(CASE) {
+        let mut runtime = runtime();
+        if case == "invalid" {
+            error(
+                &mut runtime,
+                r#"Date::format(0, "%Y", "local");"#,
+                "DateError",
+            );
+        } else {
+            run(
+                &mut runtime,
+                r#"
+                $winter = Date::format(Date::parse("2024-01-15T12:00:00Z"), "%H:%M %:z", "local");
+                $summer = Date::format(Date::parse("2024-07-15T12:00:00Z"), "%H:%M %:z", "local");
+                Env::set("TZ", "Asia/Tokyo");
+                $after = Date::format(Date::parse("2024-01-15T12:00:00Z"), "%H:%M %:z", "local");
+            "#,
+            )
+            .unwrap();
+            let (winter, summer) = if case == "new_york" {
+                ("07:00 -05:00", "08:00 -04:00")
+            } else {
+                ("17:45 +05:45", "17:45 +05:45")
+            };
+            assert_eq!(
+                runtime.get_global("winter"),
+                Some(&Value::String(winter.into()))
+            );
+            assert_eq!(
+                runtime.get_global("summer"),
+                Some(&Value::String(summer.into()))
+            );
+            assert_eq!(runtime.get_global("winter"), runtime.get_global("after"));
+        }
+        return;
+    }
+    for (case, zone) in [
+        ("new_york", "America/New_York"),
+        ("kathmandu", "Asia/Kathmandu"),
+        ("invalid", ":/scripta-nonexistent-zone-fixture"),
+    ] {
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "local_timezones_are_resolved_in_isolated_processes",
+                "--nocapture",
+            ])
+            .env(CASE, case)
+            .env("TZ", zone)
+            .env("TZDIR", "/scripta-nonexistent-zone-fixture")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{case}: {}{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+}

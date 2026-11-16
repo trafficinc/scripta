@@ -474,3 +474,22 @@ runtime interface, preserving canonical include identity and fresh request state
 without adding a runtime filesystem backend. Reload failure retains the old pool;
 shutdown owns polling cancellation, staged children, and snapshot cleanup. See
 [watch semantics and limits](web-servers.md#development-watch-mode).
+
+## Timezone formatting
+
+`scr-stdlib::date` keeps Unix milliseconds as the public timestamp representation.
+Jiff resolves timezone rules; Chrono retains the existing strftime formatting,
+RFC 3339 parsing, and UTC log/cookie behavior. `Date::format` adds an optional
+string selector without adding native exports or runtime date types. Named zones
+use `TimeZoneDatabase::bundled()` explicitly; `tzdb-bundle-always` embeds IANA rules
+on every platform, including minimal CLI builds. Default Jiff features are disabled
+so named formatting does not select a system database. `"local"` uses Jiff's
+fallible host detection, its process-global cache, and host configuration. Runtime
+`Env::set` does not mutate that process state.
+
+The formatter obtains the offset and abbreviation at the supplied instant, then
+uses a counting writer to validate the exact result size before allocating the
+output. Both formatting passes check cancellation. Date backends stay out of
+`scr-runtime`; no shell command, network lookup, or dynamic timezone plugin is
+involved. The new dependency graph and timezone rules are covered by ordinary
+release dependency notices and archive hashes.

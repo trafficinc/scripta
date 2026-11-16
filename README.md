@@ -51,7 +51,7 @@ requests behind a reverse proxy.
 
 - **Everyday automation:** filesystem operations, literal command arguments,
   bounded process output, timeouts, and local system metrics.
-- **Structured data and APIs:** lists, maps, JSON, HTTPS requests, UTC dates,
+- **Structured data and APIs:** lists, maps, JSON, HTTPS requests, timezone-aware dates,
   and structured local logging.
 - **Reusable scripts:** default/variadic parameters, anonymous functions, lexical
   captures, local `require` / `require_once`, and versioned Git/local packages.
@@ -559,7 +559,7 @@ functions, return values, native objects, limits, and errors.
 | `Process` | Run literal arguments, capture bounded output, manage child processes. |
 | `Env`, `Cli` | Environment values, script arguments/options, terminal detection, prompts, and bounded stdin records with `Cli::readLine`. |
 | `System` | Platform, CPU sampling, system memory, disk usage, and host details. |
-| `Date`, `Log` | UTC timestamps, parsing, sleep, and redacted local JSON logs. |
+| `Date`, `Log` | Unix timestamps, UTC/local/named-zone formatting with bundled timezone data, parsing, sleep, and redacted UTC JSON logs. |
 | `Clock` | Monotonic elapsed-time measurement with fractional milliseconds, independent of calendar time. |
 | `Socket` | TCP listeners/clients, UDP endpoints, half-close, options, and OS readiness polling. |
 | `Stream` | Bounded binary file and HTTP streams, connected TCP, and UDP datagrams. |
@@ -575,6 +575,11 @@ functions, return values, native objects, limits, and errors.
 | `Math` | Type-preserving abs, min/max, floor, ceil, and round (ties away from zero). |
 | `List`, `Map` | End operations, splice, chunks, search, aggregation, comparisons, record columns, and map merge/construction helpers. |
 | Global functions | Explicit conversions, `type`, `len`, and cancellable `sleep`. |
+
+Format local dates with `Date::format(Date::now(), "%Y-%m-%d %H:%M:%S %:z", "local")`,
+or pass an IANA name such as `"America/New_York"`. Omitting the timezone keeps UTC.
+Timezone rules ship in the executable; see [dates](docs/standard-library.md#dates)
+and the [timezone example](examples/timezones.scripta).
 
 Local script reuse uses `require "lib/helpers.scripta"` or
 `require_once "lib/config.scripta"`. Relative paths resolve against the including file;
