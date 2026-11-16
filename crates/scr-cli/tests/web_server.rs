@@ -2072,3 +2072,365 @@ fn shipped_observability_configuration_runs_application_and_private_probes() {
     assert_eq!(metrics["requests"], 1);
     assert_eq!(metrics["responsesComplete"], 1);
 }
+
+#[cfg(unix)]
+fn terminate(server: &Server) {
+    assert!(
+        Command::new("kill")
+            .args(["-TERM", &server.child.id().to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+#[cfg(unix)]
+fn wait_stopped(server: &mut Server) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(status) = server.child.try_wait().unwrap() {
+            assert!(status.success());
+            return;
+        }
+        assert!(Instant::now() < deadline, "shutdown exceeded its allowance");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn shutdown_closes_idle_keepalive_and_partial_headers_promptly() {
+    use std::io::BufRead;
+    let mut server = Server::start("<?scripta echo \"ok\";", &["--drain-timeout-ms", "5000"]);
+    let mut idle = TcpStream::connect(server.address).unwrap();
+    idle.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    idle.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let mut idle = std::io::BufReader::new(idle);
+    loop {
+        let mut line = String::new();
+        assert_ne!(idle.read_line(&mut line).unwrap(), 0);
+        if line == "\r\n" {
+            break;
+        }
+    }
+    let mut body = [0; 2];
+    idle.read_exact(&mut body).unwrap();
+    assert_eq!(&body, b"ok");
+    let mut partial = TcpStream::connect(server.address).unwrap();
+    partial
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    partial.write_all(b"GET / HTTP/1.1\r\nHost:").unwrap();
+    let start = Instant::now();
+    terminate(&server);
+    assert_eq!(idle.read(&mut body).unwrap(), 0);
+    let mut output = vec![];
+    if let Err(error) = partial.read_to_end(&mut output) {
+        assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset);
+    }
+    assert!(output.is_empty());
+    wait_stopped(&mut server);
+    assert!(start.elapsed() < Duration::from_secs(2));
+}
+
+#[cfg(unix)]
+#[test]
+fn shutdown_drains_admitted_queue_and_active_keepalive_but_rejects_pipeline() {
+    let mut server = Server::start(
+        r#"<?scripta
+$r=Web::request();
+if ($r->path === "/hold") {File::writeAtomic("running","yes");while (!File::exists("continue")) {Date::sleep(5);}}
+if ($r->path === "/late") {File::writeAtomic("late","bad");}
+echo $r->path;
+"#,
+        &[
+            "--log-format",
+            "json",
+            "--health-address",
+            "127.0.0.1:0",
+            "--drain-timeout-ms",
+            "2000",
+        ],
+    );
+    let mut active = TcpStream::connect(server.address).unwrap();
+    active
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    active.write_all(b"GET /hold HTTP/1.1\r\nHost: localhost\r\n\r\nGET /late HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !server.directory.path().join("running").exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    let mut queued = TcpStream::connect(server.address).unwrap();
+    queued
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    queued
+        .write_all(b"GET /queued HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    loop {
+        let metrics: serde_json::Value =
+            serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+        if metrics["queuedRequests"] == 1 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{metrics}");
+        thread::sleep(Duration::from_millis(5));
+    }
+    terminate(&server);
+    wait_event(&server, |e| e["event"] == "server_draining");
+    terminate(&server); // Repeated signals neither force exit nor extend the budget.
+    fs::write(server.directory.path().join("continue"), "yes").unwrap();
+    let mut output = vec![];
+    active.read_to_end(&mut output).unwrap();
+    assert_eq!(parse(&output).0, 200);
+    assert!(output.windows(5).any(|w| w == b"/hold"));
+    assert_eq!(
+        String::from_utf8_lossy(&output).matches("HTTP/1.1").count(),
+        1
+    );
+    output.clear();
+    queued.read_to_end(&mut output).unwrap();
+    assert_eq!(parse(&output).0, 200);
+    assert!(output.windows(7).any(|w| w == b"/queued"));
+    assert!(!server.directory.path().join("late").exists());
+    wait_stopped(&mut server);
+}
+
+#[cfg(unix)]
+#[test]
+fn drain_expiry_interrupts_stream_reaps_child_cleans_spools_and_keeps_saved_session() {
+    let storage = tempfile::tempdir().unwrap();
+    let sessions = storage.path().join("sessions");
+    let mut server = Server::start(
+        r#"<?scripta Session::start();Session::set("count",7);File::writeAtomic("pid",str(Process::currentId()));echo "saved";flush();Date::sleep(10000);echo "late";"#,
+        &[
+            "--session-dir",
+            sessions.to_str().unwrap(),
+            "--upload-temp-dir",
+            "spools",
+            "--log-format",
+            "json",
+            "--timeout-ms",
+            "20000",
+            "--drain-timeout-ms",
+            "200",
+        ],
+    );
+    let mut stream = StreamingResponse::request(
+        &server,
+        "POST",
+        "/",
+        b"owned upload",
+        "application/octet-stream",
+    );
+    let id = response_session_id(&stream.headers);
+    assert_eq!(stream.chunk(), b"saved");
+    let pid = fs::read_to_string(server.directory.path().join("pid")).unwrap();
+    assert!(
+        fs::read_dir(server.directory.path().join("spools"))
+            .unwrap()
+            .next()
+            .is_some()
+    );
+    terminate(&server);
+    wait_event(&server, |e| e["event"] == "server_draining");
+    terminate(&server);
+    wait_stopped(&mut server);
+    let mut remaining = vec![];
+    let _ = stream.reader.read_to_end(&mut remaining);
+    assert!(!remaining.windows(4).any(|w| w == b"late"));
+    assert!(
+        !remaining.ends_with(b"0\r\n\r\n"),
+        "truncated stream reported successful completion"
+    );
+    uploads_clean(&server);
+    assert!(
+        !Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    );
+    let replacement = Server::start(
+        "<?scripta Session::start();echo str(Session::get(\"count\",0));",
+        &["--session-dir", sessions.to_str().unwrap()],
+    );
+    assert_eq!(replacement.session_request("/", Some(&id)).2, b"7");
+}
+
+#[cfg(unix)]
+#[test]
+fn replacement_readiness_frontend_switch_and_old_instance_drain() {
+    let mut old = Server::start(
+        r#"<?scripta if (Web::request()->path === "/hold") {echo "old";flush();while (!File::exists("continue")) {Date::sleep(5);}}else {echo "old";}"#,
+        &[
+            "--workers",
+            "2",
+            "--health-address",
+            "127.0.0.1:0",
+            "--log-format",
+            "json",
+        ],
+    );
+    let mut held = StreamingResponse::start(&old, "/hold");
+    assert_eq!(held.chunk(), b"old");
+    let replacement = Server::start(
+        "<?scripta echo \"new\";",
+        &["--health-address", "127.0.0.1:0", "--log-format", "json"],
+    );
+    assert_eq!(health(&replacement, "/readyz").0, 200);
+    // A controlled front-end fixture forwards to the selected backend. Switching
+    // this target models a proxy reload without installing a system service.
+    let front = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = front.local_addr().unwrap();
+    let targets = [old.address, replacement.address];
+    let proxy = thread::spawn(move || {
+        for target in targets {
+            let (mut client, _) = front.accept().unwrap();
+            client
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = vec![];
+            let mut byte = [0];
+            while !request.ends_with(b"\r\n\r\n") {
+                client.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            let mut backend = TcpStream::connect(target).unwrap();
+            backend
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            backend.write_all(&request).unwrap();
+            std::io::copy(&mut backend, &mut client).unwrap();
+        }
+    });
+    let probe = || {
+        let mut client = TcpStream::connect(address).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut response = vec![];
+        client.read_to_end(&mut response).unwrap();
+        parse(&response)
+    };
+    assert_eq!(probe().2, b"old");
+    assert_eq!(probe().2, b"new");
+    terminate(&old);
+    wait_event(&old, |e| e["event"] == "server_draining");
+    assert_eq!(health(&old, "/readyz").0, 503);
+    fs::write(old.directory.path().join("continue"), "yes").unwrap();
+    assert!(held.chunk().is_empty());
+    wait_stopped(&mut old);
+    assert_eq!(replacement.request("GET", "/", b"", "text/plain").2, b"new");
+    proxy.join().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn drain_expiry_discards_queued_and_partial_bodies_and_uncommitted_session_changes() {
+    let storage = tempfile::tempdir().unwrap();
+    let sessions = storage.path().join("sessions");
+    let mut server = Server::start(
+        r#"<?scripta
+$r=Web::request();
+if ($r->path === "/queued") {File::writeAtomic("unexpected","bad");exit 0;}
+Session::start();
+if ($r->path === "/seed") {Session::set("count",1);}
+if ($r->path === "/hold") {Session::set("count",999);File::writeAtomic("running","yes");Date::sleep(10000);}
+echo str(Session::get("count",0));
+"#,
+        &[
+            "--session-dir",
+            sessions.to_str().unwrap(),
+            "--upload-temp-dir",
+            "spools",
+            "--health-address",
+            "127.0.0.1:0",
+            "--log-format",
+            "json",
+            "--timeout-ms",
+            "20000",
+            "--drain-timeout-ms",
+            "200",
+        ],
+    );
+    let seed = server.session_request("/seed", None);
+    assert_eq!(seed.2, b"1");
+    let id = response_session_id(&seed.1);
+    let mut active = TcpStream::connect(server.address).unwrap();
+    active
+        .write_all(
+            format!(
+                "GET /hold HTTP/1.1\r\nHost: localhost\r\nCookie: SCRIPTA_SESSION={id}\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !server.directory.path().join("running").exists() {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    let mut queued = TcpStream::connect(server.address).unwrap();
+    queued
+        .write_all(b"POST /queued HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\ndata")
+        .unwrap();
+    let mut partial = TcpStream::connect(server.address).unwrap();
+    partial
+        .write_all(b"POST /partial HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1000\r\n\r\npart")
+        .unwrap();
+    loop {
+        let metrics: serde_json::Value =
+            serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+        // Queue gauges include body-reception reservations. Ensure both requests
+        // crossed admission before signaling, without waiting for the partial body.
+        if metrics["queuedRequests"] == 2 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "{metrics}");
+        thread::sleep(Duration::from_millis(5));
+    }
+    terminate(&server);
+    wait_stopped(&mut server);
+    uploads_clean(&server);
+    assert!(!server.directory.path().join("unexpected").exists());
+    let replacement = Server::start(
+        "<?scripta Session::start();echo str(Session::get(\"count\",0));",
+        &["--session-dir", sessions.to_str().unwrap()],
+    );
+    assert_eq!(replacement.session_request("/", Some(&id)).2, b"1");
+}
+
+#[test]
+fn shipped_deployment_configs_serve_with_private_local_fixture_storage() {
+    for config in [
+        include_str!("../../../examples/deploy/blue.toml"),
+        include_str!("../../../examples/deploy/green.toml"),
+    ] {
+        let server = Server::start_config(
+            include_str!("../../../examples/web-proxy.scripta"),
+            Some(config),
+            &[
+                "--health-address",
+                "127.0.0.1:0",
+                "--session-dir",
+                "sessions",
+                "--upload-temp-dir",
+                "spools",
+            ],
+        );
+        assert_eq!(health(&server, "/readyz").0, 200);
+        let response = parse(
+            &server.raw(b"GET / HTTP/1.1\r\nHost: app.example.com\r\nConnection: close\r\n\r\n"),
+        );
+        assert_eq!(response.0, 200);
+        assert!(server.directory.path().join("sessions").is_dir());
+        uploads_clean(&server);
+    }
+}

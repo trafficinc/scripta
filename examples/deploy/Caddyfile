@@ -1,0 +1,8 @@
+# Replace the domain; start with blue (8080), switch to green (8081) only
+# after its private readiness and application probes succeed.
+app.example.com {
+    reverse_proxy 127.0.0.1:8080 {
+        # Preserve streaming latency. No automatic application retry is enabled.
+        flush_interval -1
+    }
+}
