@@ -2434,3 +2434,232 @@ fn shipped_deployment_configs_serve_with_private_local_fixture_storage() {
         uploads_clean(&server);
     }
 }
+
+#[test]
+fn worker_recycling_counts_completed_requests_and_preserves_the_source_snapshot() {
+    let server = Server::start(
+        "<?scripta echo str(Process::currentId());",
+        &["--worker-max-requests", "2", "--log-format", "json"],
+    );
+    let first = server.request("GET", "/", b"", "text/plain");
+    assert_eq!(first.0, 200);
+    assert_eq!(first.2, server.request("GET", "/", b"", "text/plain").2);
+    wait_event(&server, |e| e["event"] == "worker_recycled");
+    fs::write(
+        server.directory.path().join("app.scripta"),
+        "<?scripta echo \"changed\";",
+    )
+    .unwrap();
+    let next = server.request("GET", "/", b"", "text/plain");
+    assert_eq!(next.0, 200);
+    assert_ne!(first.2, next.2);
+    assert_ne!(next.2, b"changed");
+    assert_eq!(next.2, server.request("GET", "/", b"", "text/plain").2);
+}
+
+#[test]
+fn recycling_waits_for_a_successful_stream_and_releases_its_upload() {
+    let server = Server::start(
+        r#"<?scripta echo "first";flush();while (!File::exists("continue")) {Date::sleep(5);}echo "last";"#,
+        &[
+            "--worker-max-requests",
+            "1",
+            "--upload-temp-dir",
+            "spools",
+            "--health-address",
+            "127.0.0.1:0",
+            "--log-format",
+            "json",
+        ],
+    );
+    let mut response = StreamingResponse::request(
+        &server,
+        "POST",
+        "/",
+        b"upload owned by this request",
+        "text/plain",
+    );
+    assert_eq!(response.chunk(), b"first");
+    let metrics: serde_json::Value =
+        serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+    assert_eq!(metrics["workerRecycles"], 0);
+    assert_eq!(metrics["busyWorkers"], 1);
+    fs::write(server.directory.path().join("continue"), "yes").unwrap();
+    assert_eq!(response.chunk(), b"last");
+    assert!(response.chunk().is_empty());
+    wait_event(&server, |e| e["event"] == "worker_recycled");
+    uploads_clean(&server);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while health(&server, "/readyz").0 != 200 {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+    let metrics: serde_json::Value =
+        serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+    assert_eq!(metrics["workerRecycles"], 1);
+    assert_eq!(metrics["workerRestarts"], 1);
+}
+
+#[cfg(unix)]
+fn kill_worker(pid: u64) {
+    assert!(
+        Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn all_idle_workers_recover_without_an_application_request_and_backoff_failed_starts() {
+    use std::os::unix::fs::PermissionsExt;
+    let server = Server::start(
+        "<?scripta echo str(Process::currentId());",
+        &[
+            "--workers",
+            "2",
+            "--session-dir",
+            "sessions",
+            "--log-format",
+            "json",
+            "--health-address",
+            "127.0.0.1:0",
+        ],
+    );
+    let sessions = server.directory.path().join("sessions");
+    fs::set_permissions(&sessions, fs::Permissions::from_mode(0o755)).unwrap();
+    let pids: Vec<_> = json_events(&server)
+        .iter()
+        .filter(|e| e["event"] == "worker_started")
+        .map(|e| e["workerPid"].as_u64().unwrap())
+        .collect();
+    assert_eq!(pids.len(), 2);
+    for pid in &pids {
+        kill_worker(*pid);
+    }
+    wait_event(&server, |e| e["event"] == "worker_startup_failed");
+    assert_eq!(health(&server, "/readyz").0, 503);
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        let metrics: serde_json::Value =
+            serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+        assert_eq!(metrics["requests"], 0);
+        assert_eq!(metrics["configuredWorkers"], 2);
+        assert_eq!(metrics["readyWorkers"], 0);
+        assert_eq!(metrics["recoveringWorkers"], 2);
+        if metrics["workerStartupFailures"].as_u64().unwrap() >= 6 {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    let delays: Vec<_> = json_events(&server)
+        .iter()
+        .filter(|e| e["event"] == "worker_recovering")
+        .map(|e| e["delayMs"].as_u64().unwrap())
+        .collect();
+    assert!(
+        delays.contains(&100)
+            && delays.contains(&200)
+            && delays.contains(&400)
+            && delays.contains(&800),
+        "{delays:?}"
+    );
+    fs::set_permissions(&sessions, fs::Permissions::from_mode(0o700)).unwrap();
+    loop {
+        let metrics: serde_json::Value =
+            serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+        if metrics["readyWorkers"] == 2 && metrics["recoveringWorkers"] == 0 {
+            assert_eq!(metrics["requests"], 0);
+            break;
+        }
+        assert!(Instant::now() < deadline, "{metrics}");
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(health(&server, "/readyz").0, 200);
+    let response = server.request("GET", "/", b"", "text/plain");
+    assert_eq!(response.0, 200);
+    let pid = std::str::from_utf8(&response.2)
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    let before = json_events(&server).len();
+    kill_worker(pid);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(event) = json_events(&server)[before..]
+            .iter()
+            .find(|e| e["event"] == "worker_recovering")
+        {
+            assert_eq!(event["delayMs"], 100);
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn shutdown_cancels_pending_worker_recovery_without_a_late_restart() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut server = Server::start(
+        "<?scripta echo \"ok\";",
+        &[
+            "--session-dir",
+            "sessions",
+            "--log-format",
+            "json",
+            "--health-address",
+            "127.0.0.1:0",
+            "--drain-timeout-ms",
+            "100",
+        ],
+    );
+    let pid = wait_event(&server, |e| e["event"] == "worker_started")["workerPid"]
+        .as_u64()
+        .unwrap();
+    fs::set_permissions(
+        server.directory.path().join("sessions"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    kill_worker(pid);
+    wait_event(&server, |e| e["event"] == "worker_startup_failed");
+    terminate(&server);
+    wait_stopped(&mut server);
+    let events = json_events(&server);
+    let draining = events
+        .iter()
+        .position(|e| e["event"] == "server_draining")
+        .unwrap();
+    assert!(
+        !events[draining..]
+            .iter()
+            .any(|e| e["event"] == "worker_started")
+    );
+    let stopped = events
+        .iter()
+        .find(|e| e["event"] == "server_stopped")
+        .unwrap();
+    assert_eq!(stopped["readyWorkers"], 0);
+    assert_eq!(stopped["recoveringWorkers"], 0);
+}
+
+#[test]
+fn request_count_recycling_preserves_committed_sessions_between_workers() {
+    let server = Server::start(SESSION_APP, &["--worker-max-requests", "1"]);
+    let first = server.session_request("/increment", None);
+    assert_eq!(first.0, 200);
+    let id = response_session_id(&first.1);
+    let second = server.session_request("/increment", Some(&id));
+    assert_eq!(second.0, 200);
+    assert_eq!(response_session_id(&second.1), id);
+    let first: serde_json::Value = serde_json::from_slice(&first.2).unwrap();
+    let second: serde_json::Value = serde_json::from_slice(&second.2).unwrap();
+    assert_eq!(first["count"], 1);
+    assert_eq!(second["count"], 2);
+    assert_ne!(first["pid"], second["pid"]);
+}

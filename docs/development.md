@@ -440,3 +440,15 @@ behavior. Deployment/service templates and an operator command sequence live in
 [web hosting](web-servers.md#deployment-and-service-management) and
 [`examples/deploy`](../examples/deploy/). The front-end fixture validates backend
 replacement behavior; it does not run Caddy or install a service manager job.
+
+Worker resilience coverage uses `scr-web --lib` for backoff cap/reset/overflow,
+unexpected worker-loop panic recovery, and synthetic malformed/truncated/out-of-order
+IPC through local child pipes. The CLI configuration suite checks default/disabled,
+exact maximum, out-of-range, type, and precedence behavior for
+`worker-max-requests`. The HTTP suite checks count-based recycling and cached
+source, stream/spool and session preservation, all idle children lost without an
+application request, repeated startup failures, growing retry delays, restored
+capacity/readiness, reset after successful service, and shutdown during backoff.
+Failure fixtures use private local storage and restore safe permissions before
+recovery; signal/Unix-permission cases are Unix-gated. No public network services
+or production-only fault-injection knobs are used.

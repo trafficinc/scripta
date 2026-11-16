@@ -52,6 +52,11 @@ pub(crate) struct Stats {
     pub worker_failures: AtomicU64,
     pub worker_starts: AtomicU64,
     pub worker_restarts: AtomicU64,
+    pub configured_workers: AtomicU64,
+    pub recovering_workers: AtomicU64,
+    pub worker_startup_failures: AtomicU64,
+    pub worker_recycles: AtomicU64,
+    pub worker_loop_failures: AtomicU64,
     pub rejected_connections: AtomicU64,
     pub connection_timeouts: AtomicU64,
     pub connection_errors: AtomicU64,
@@ -164,6 +169,8 @@ impl Observer {
             "responsesFailed":load(&s.failed),"responsesInterrupted":load(&s.interrupted),"timeouts":load(&s.timeouts),
             "overload":load(&s.overload),"serverErrors":load(&s.server_errors),"bodyBytes":load(&s.bytes),
             "queuedRequests":load(&s.queued),"busyWorkers":load(&s.busy),"readyWorkers":load(&s.workers),
+            "configuredWorkers":load(&s.configured_workers),"recoveringWorkers":load(&s.recovering_workers),
+            "workerStartupFailures":load(&s.worker_startup_failures),"workerRecycles":load(&s.worker_recycles),"workerLoopFailures":load(&s.worker_loop_failures),
             "workerFailures":load(&s.worker_failures),"workerStarts":load(&s.worker_starts),"workerRestarts":load(&s.worker_restarts),
             "rejectedConnections":load(&s.rejected_connections),"connectionTimeouts":load(&s.connection_timeouts),"connectionErrors":load(&s.connection_errors)})
     }
@@ -250,6 +257,7 @@ pub(crate) enum GaugeKind {
     Queue,
     Busy,
     Worker,
+    Recovering,
 }
 impl Gauge {
     pub fn new(observer: &Arc<Observer>, kind: GaugeKind) -> Self {
@@ -265,6 +273,7 @@ impl Gauge {
             GaugeKind::Queue => &self.observer.stats.queued,
             GaugeKind::Busy => &self.observer.stats.busy,
             GaugeKind::Worker => &self.observer.stats.workers,
+            GaugeKind::Recovering => &self.observer.stats.recovering_workers,
         }
     }
 }

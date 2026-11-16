@@ -25,6 +25,8 @@ struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     workers: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    worker_max_requests: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     queue: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_connections: Option<usize>,
@@ -103,6 +105,9 @@ impl Settings {
         }
         if let Some(value) = self.workers {
             config.workers = value;
+        }
+        if let Some(value) = self.worker_max_requests {
+            config.worker_max_requests = value;
         }
         if let Some(value) = self.queue {
             config.queue = value;
@@ -279,6 +284,14 @@ impl Options {
                             .to_str()
                             .and_then(|s| s.parse::<usize>().ok())
                             .ok_or("invalid value for --max-connections")?,
+                    )
+                }
+                "--worker-max-requests" => {
+                    settings.worker_max_requests = Some(
+                        value
+                            .to_str()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .ok_or("invalid value for --worker-max-requests")?,
                     )
                 }
                 "--max-body-bytes" => {
@@ -484,7 +497,7 @@ fn read_settings(path: &Path) -> Result<Settings, Error> {
                 }),
                 "host" | "log-format" | "health-address" => value.is_str(),
                 "port" => value.as_integer().is_some_and(|n| n >= 0),
-                "workers" => value.as_integer().is_some_and(|n| n >= 0),
+                "workers" | "worker-max-requests" => value.as_integer().is_some_and(|n| n >= 0),
                 "queue" => value.as_integer().is_some_and(|n| n >= 0),
                 "max-connections" => value.as_integer().is_some_and(|n| n >= 0),
                 "max-body-bytes" => value.as_integer().is_some_and(|n| n >= 0),
@@ -551,6 +564,7 @@ pub(super) fn inspect(config: &scr_web::Config) -> Result<String, Error> {
         allowed_hosts: Some(config.allowed_hosts.clone()),
         port: Some(config.port),
         workers: Some(config.workers),
+        worker_max_requests: Some(config.worker_max_requests),
         queue: Some(config.queue),
         max_connections: Some(config.max_connections),
         max_body_bytes: Some(config.max_body_bytes),

@@ -124,6 +124,7 @@ service replacement for consistent multi-file deployments.
 | `--host` | `127.0.0.1` | IP address; use a local reverse proxy for public HTTPS. |
 | `--port` | `8080` | 0–65535; 0 selects an available port and prints it to stderr. |
 | `--workers` | CPU count, capped at 4 | 1–64 persistent processes; one active request per worker. |
+| `--worker-max-requests` | `0` | 0 disables request-count recycling; 1–1000000 completed request exchanges per worker before replacement. |
 | `--queue` | `32` | 1–4096 waiting requests, including reservations while receiving bodies. |
 | `--max-connections` | `128` | 1–4096 open HTTP connections. Excess connections close immediately. |
 | `--max-body-bytes` | `1048576` | 0–67108864, checked for both fixed and chunked bodies. |
@@ -146,8 +147,47 @@ values are rejected on input; request bodies can contain arbitrary bytes.
 The server reserves queue capacity before buffering bodies. Overload returns
 `503`, oversized bodies `413`, malformed requests `400`, worker transport failures
 `502`, and request deadlines `504`. A worker that fails or exceeds its deadline is
-terminated and replaced lazily for subsequent work. Queued requests that expire
+terminated and replaced automatically with bounded backoff. Queued requests that expire
 are discarded. Already completed external side effects are not rolled back.
+
+Worker recovery runs independently of application traffic and health probes.
+Idle child exit, closed output, or unsolicited IPC invalidates its ready lease and
+schedules replacement; a worker lost during a request fails that request without
+replaying it. Each slot retries after 100, 200, 400, 800, 1600, 3200, then 5000 ms,
+remaining at 5000 ms on repeated failure. Replacement startup has a 30-second
+handshake ceiling in addition to the retry delay. A completed request exchange
+(including a normal buffered application-error response), or 30 seconds of
+survival observed on the next idle/dispatch event, resets that slot's backoff.
+A successful handshake alone does not reset failure history. Unexpected Rust
+worker-loop task termination is detected by the supervisor's accept loop within
+its 100 ms polling interval and restores a slot with a separate backoff using the
+same bounds; 30 seconds without another loop termination resets that history.
+Initial startup still fails if any configured worker cannot initialize; retries
+apply after initial startup, not to invalid configuration or initial bind errors.
+
+Set `worker-max-requests` in TOML or `--worker-max-requests` on the CLI to recycle
+workers after a bounded request count. The default `0` preserves unlimited
+request reuse. Counts increase only when the worker finishes the full protocol
+exchange; queue cancellations and incomplete/failed streams do not count. A
+flushed stream continues until execution and the worker exchange finish, subject
+to existing deadlines. Recycling then stops the idle child and schedules its
+replacement without interrupting response bytes already handed to the supervisor.
+The same cached entry-source snapshot is used; recycling does not deploy changed
+source. Includes still follow the immutable-release rule. Persistent sessions
+retain their configured store, and per-request state/spools retain their normal
+cleanup. Recycling a sole worker can temporarily make readiness false and queue
+requests while its replacement starts.
+
+Readiness requires at least one known healthy worker, rather than all configured
+slots. Recovery never reserves an application queue slot. Requests waiting while
+capacity recovers keep their original request deadlines and admission limits;
+recovery does not replay failed work or extend request timeouts. Once draining is
+observed, pending recovery is cancelled (the shutdown flag is polled at most every
+25 ms while waiting/starting); no further replacements or count-based recycling
+are initiated. Healthy workers can continue admitted queue work until the shared
+drain deadline. If lost capacity prevents completion, remaining work expires or
+is interrupted at the applicable deadline. OS spawn/reaping and blocked stderr
+can still delay observation; this is not a process-heap or availability guarantee.
 
 Each request defaults to one million execution checkpoints, 16 MiB per logical
 value, and 4096 scopes. `SCR_MAX_STEPS`, `SCR_MAX_VALUE_BYTES`, `SCR_MAX_SCOPES`, and
@@ -379,20 +419,29 @@ Snapshots contain server-lifetime saturating counters: `requests`,
 `responsesComplete`, `responsesFailed`, `responsesInterrupted`, `timeouts`
 (dispatch/worker request deadlines, deduplicated per request), `overload`
 (admission rejections), `serverErrors` (statuses 500 and above), `bodyBytes`,
-`workerFailures` (failed/cancelled/timed-out worker requests requiring replacement),
-`workerStarts`, `workerRestarts`, `rejectedConnections`, `connectionTimeouts`
+`workerFailures` (failed/cancelled/timed-out worker requests and idle worker failures),
+`workerStarts` (successful initial/replacement handshakes), `workerRestarts`
+(successful replacement handshakes), `workerRecycles` (count-triggered retirements),
+`workerStartupFailures` (failed replacement startup attempts), `workerLoopFailures`
+(unexpected worker-loop task terminations), `rejectedConnections`, `connectionTimeouts`
 (header/total connection deadlines), and `connectionErrors`. Gauges are
 `activeRequests`, `queuedRequests` (including reserved body reception),
-`busyWorkers`, and `readyWorkers`; booleans are `ready`, `starting`, and `draining`.
+`busyWorkers`, `readyWorkers` (healthy handshake leases, including busy workers),
+`configuredWorkers` (target capacity), and `recoveringWorkers` (slots waiting for
+retry or replacement startup); booleans are `ready`, `starting`, and `draining`.
 Snapshots read counters independently and are approximate under concurrency.
 There is no per-client/URL label, retained request history, or process heap metric.
 
-Worker readiness currently reflects ready-handshake leases and failures observed
-while dispatching requests. An idle process exit may not be discovered until its
-next request. Existing replacement is lazy: when all workers have been lost,
-readiness stays false until an application request attempts recovery. Proactive
-worker supervision/recovery is planned separately; health probes deliberately do
-not start application work or test database dependencies.
+Idle child exits and unexpected IPC are monitored without waiting for an
+application request. Readiness can briefly lag OS exit until the worker loop is
+scheduled and the dead child is reaped; successful startup restores leases.
+When all leases are lost, readiness is false throughout backoff/startup and
+recovers when any replacement becomes usable. Probes themselves do not start
+application work or test database dependencies. Logs distinguish `worker_idle_failure`,
+`worker_recovering` (with bounded `delayMs`), `worker_startup_failed`,
+`worker_loop_failed`, and `worker_recycled`; successful handshakes retain the
+`worker_started` event. These events contain no script/error contents or storage
+paths and use no per-client labels.
 
 Try the [observability settings](../examples/observe-serve.toml):
 
