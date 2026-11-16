@@ -40,6 +40,48 @@ hashes. Record migration results against the source and packages actually tested
 
 ## Automatic publication on tag pushes
 
+To prepare a new version locally, run from the workspace root:
+
+```sh
+python3 scripts/prepare_release.py
+# With all Cargo dependencies cached:
+python3 scripts/prepare_release.py --offline
+```
+
+The script uses the pinned toolchain and its native host target. It runs formatting,
+Python tooling tests, collection tests, default/all-feature workspace tests,
+minimal-build SQLite tests, Clippy with warnings denied, and `git diff --check`.
+After every check succeeds, it prompts for **patch**, **minor**, **major**, or
+**cancel** (the default). From 0.1.0 these choices produce 0.1.1, 0.2.0, or 1.0.0.
+It updates `Cargo.toml` and the workspace package entries in `Cargo.lock`, preserves
+dependency pins, and verifies the lockfile with a locked Cargo resolve. Failed lockfile
+validation restores the original version files. A failed test or cancellation
+does not bump the version. Existing working-tree edits are allowed; review the
+complete intended source before committing.
+
+The script does not commit, tag, push, build local distribution packages, or
+publish. Review the version changes and update release notes, commit the intended
+source, and push your branch. Then run `python3 scripts/github_release.py` to
+validate all four platforms in Actions before creating a tag. GitHub CLI must be
+authenticated and the updated workflow must be present on the default branch.
+The working tree must be clean and the remote branch must match the local commit.
+After successful validation, type the matching tag when prompted to create and
+push it on the validated commit. Enter cancels. Failed validation offers at most
+two explicit retries per invocation for temporary failures; code fixes need a new
+commit and validation. Resume an interrupted run with `--run-id RUN_ID`; the
+script verifies its repository, workflow, event, commit, and all four job results.
+Use `--remote NAME` to select a remote other than `origin`.
+
+Manual validation creates Actions artifacts without publishing a GitHub Release.
+The script does not commit or push your branch. A failed tag push leaves any newly
+created local tag available for inspection or retry, and existing remote tags are
+never replaced. Pushing the confirmed tag triggers the workflow below, which
+rebuilds packages and repeats validation on the bumped version,
+runs dist-profile tests, and creates the packages in **GitHub Releases**. Local
+checks establish results only for the current host; other native platforms remain
+pending until their workflow jobs pass. Python 3.8 or newer, Git, Rustup, and a C
+compiler for bundled SQLite are required.
+
 The [tag workflow](development.md#tag-triggered-builds-and-releases) builds Linux
 x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon. When all native tests
 and package checks pass, it publishes downloadable archives and evidence to a

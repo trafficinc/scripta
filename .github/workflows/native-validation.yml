@@ -1,6 +1,17 @@
 name: Native builds and releases
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Pre-release validation {0}', inputs.request_id) || format('Release {0}', github.ref_name) }}
 
 on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Identifier used by the release helper to find this run
+        required: true
+        type: string
+      expected_revision:
+        description: Full commit SHA selected for validation
+        required: true
+        type: string
   push:
     tags:
       - '**'
@@ -34,7 +45,14 @@ jobs:
             target: x86_64-pc-windows-msvc
             python: python
     steps:
-      - name: Check out tagged source
+      - name: Check selected revision
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ inputs.expected_revision }}
+        run: test "$GITHUB_SHA" = "$EXPECTED_REVISION"
+
+      - name: Check out selected source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -59,6 +77,7 @@ jobs:
 
   publish:
     name: Publish release downloads
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs: validate
     runs-on: ubuntu-22.04
     timeout-minutes: 15
