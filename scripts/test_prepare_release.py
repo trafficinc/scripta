@@ -10,7 +10,7 @@ from prepare_release import Preparation, choose_version, next_version, prepare, 
 
 
 class PreparationTests(unittest.TestCase):
-    def fixture(self, root):
+    def fixture(self, root, newline='\n'):
         (root / 'rust-toolchain.toml').write_text('[toolchain]\nchannel = "1.99.1"\n')
         (root / 'Cargo.toml').write_text(
             '[workspace.package]\nversion = "0.1.0"\nedition = "2024"\n'
@@ -19,6 +19,10 @@ class PreparationTests(unittest.TestCase):
             'version = 4\n\n[[package]]\nname = "scr-cli"\nversion = "0.1.0"\n'
             'dependencies = [\n "external",\n]\n\n[[package]]\nname = "external"\n'
             'version = "0.1.0"\nsource = "registry+https://example.invalid"\nchecksum = "abc"\n')
+        # Explicit bytes exercise Windows checkouts even when tests run on Unix.
+        for name in ('Cargo.toml', 'Cargo.lock'):
+            path = root / name
+            path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', newline.encode()))
         snapshots = {root / name: (root / name).read_bytes() for name in ('Cargo.toml', 'Cargo.lock')}
         preparation = Preparation(root)
         preparation.cargo = Mock(return_value=Mock(stdout=json.dumps({
@@ -114,6 +118,25 @@ class PreparationTests(unittest.TestCase):
                 with self.assertRaises(type(failure)):
                     preparation.bump(snapshots, '0.1.0', '0.1.1')
                 self.assertEqual({path: path.read_bytes() for path in snapshots}, snapshots)
+
+    def test_crlf_bump_preserves_line_endings_dependency_pins_and_manifest_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            preparation, snapshots = self.fixture(root, newline='\r\n')
+            self.assertEqual(preparation.bump(snapshots, '0.1.0', '0.1.1'), 'v0.1.1')
+            self.assertEqual((root / 'Cargo.toml').read_bytes(), snapshots[root / 'Cargo.toml'].replace(
+                b'version = "0.1.0"', b'version = "0.1.1"', 1))
+            self.assertEqual((root / 'Cargo.lock').read_bytes(), snapshots[root / 'Cargo.lock'].replace(
+                b'name = "scr-cli"\r\nversion = "0.1.0"', b'name = "scr-cli"\r\nversion = "0.1.1"'))
+
+    def test_failed_crlf_bump_restores_original_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            preparation, snapshots = self.fixture(Path(directory), newline='\r\n')
+            preparation.cargo.side_effect = [preparation.cargo.return_value,
+                                            subprocess.CalledProcessError(1, ['cargo', 'metadata'])]
+            with self.assertRaises(subprocess.CalledProcessError):
+                preparation.bump(snapshots, '0.1.0', '0.1.1')
+            self.assertEqual({path: path.read_bytes() for path in snapshots}, snapshots)
 
     def test_checks_use_native_target_pin_toolchain_and_stop_on_first_failure(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -90,6 +90,15 @@ See the
 [release preparation instructions](releases.md#automatic-publication-on-tag-pushes)
 for cancellation, offline use, and the subsequent tag push.
 
+Github CLI needs to be available:
+
+Install it using GitHub’s installation command, then sign in and retry:
+
+```sh
+brew install gh
+gh auth login
+```
+
 After reviewing, committing, and pushing the version changes on your branch, run:
 
 ```sh

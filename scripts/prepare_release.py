@@ -102,13 +102,13 @@ class Preparation:
         lock = self.root / 'Cargo.lock'
         updated_manifest = replace_workspace_version(snapshots[manifest].decode('utf-8'), candidate)
         # Change only local workspace package versions, preserving dependency pins.
-        blocks = re.split(r'(?=^\[\[package\]\]$)', snapshots[lock].decode('utf-8'), flags=re.M)
+        blocks = re.split(r'(?=^\[\[package\]\]\r?$)', snapshots[lock].decode('utf-8'), flags=re.M)
         found = set()
         for index, block in enumerate(blocks):
-            name = re.search(r'^name = "([^"]+)"$', block, re.M)
+            name = re.search(r'^name = "([^"]+)"\r?$', block, re.M)
             if not name or name[1] not in names or re.search(r'^source\s*=', block, re.M):
                 continue
-            old = re.search(r'^version = "([^"]+)"$', block, re.M)
+            old = re.search(r'^version = "([^"]+)"\r?$', block, re.M)
             if not old or old[1] != version or name[1] in found:
                 raise ValueError('Unexpected workspace package version in Cargo.lock')
             found.add(name[1])
