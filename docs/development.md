@@ -75,9 +75,50 @@ do not establish Linux or Windows validation.
 
 ## Tag-triggered builds and releases
 
+From the workspace root, run:
+
+```sh
+python3 scripts/prepare_release.py
+```
+
+This runs local checks and then prompts for a patch/minor/major version bump or
+cancellation. It updates the workspace manifest and lockfile only after checks
+pass; it does not commit, tag, or push. Anyone with a checkout and the required
+development tools can run it on a supported native target. Publishing to this
+repository's GitHub Releases requires permission to push a tag to this repository.
+See the
+[release preparation instructions](releases.md#automatic-publication-on-tag-pushes)
+for cancellation, offline use, and the subsequent tag push.
+
+After reviewing, committing, and pushing the version changes on your branch, run:
+
+```sh
+python3 scripts/github_release.py
+```
+
+This requires GitHub CLI (`gh auth login`), permission to run Actions and push tags,
+and a clean working tree on a pushed branch. The updated workflow must already be
+on the repository's default branch to enable manual dispatch. The script starts
+four-platform validation for the committed version and waits for results. Only
+after all four native jobs pass does it ask you to type the matching version tag
+to create and push it on that exact commit. Enter cancels. Temporary failures can
+be explicitly retried at most twice per invocation; code fixes require a new
+commit and validation. To resume after interruption, use the printed command:
+
+```sh
+python3 scripts/github_release.py --run-id RUN_ID
+```
+
+The default repository comes from `origin`; use `--remote NAME` for another GitHub
+remote. Manual runs retain packages as Actions artifacts and do not publish.
+Pushing the confirmed tag triggers a fresh native build/validation run that
+publishes the release only after all checks pass. The script prints links to the
+release workflow and prospective release, without waiting for this final rebuild.
+
 [Native builds and releases](../.github/workflows/native-validation.yml) runs on
-**every tag push**, including validation/prerelease tags. Branch pushes and pull
-requests do not trigger it. The tagged commit must contain the workflow and its
+**every tag push**, including validation/prerelease tags, and on explicit manual
+dispatch for pre-release validation. Branch pushes and pull requests do not
+trigger it. The selected commit must contain the workflow and its
 [Python validation runner](../scripts/validate_native.py).
 
 Four native jobs use Ubuntu 22.04 x86-64, Ubuntu 22.04 ARM64, Windows Server 2022
@@ -95,7 +136,7 @@ archives/checksums, compares identical-input repacks, and smoke-tests extracted
 packages. Full evidence is retained as Actions artifacts for seven days, including
 failure logs. Jobs do not cancel one another.
 
-After **all four jobs succeed**, a separate publisher job downloads this run's
+For tag pushes, after **all four jobs succeed**, a separate publisher job downloads this run's
 current target artifacts and verifies target coverage, source revision, version,
 test results, archive hashes, and package smoke records. It creates a draft
 GitHub Release, uploads all assets, then publishes it. Only this job has
