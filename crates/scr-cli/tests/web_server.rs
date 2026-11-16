@@ -1917,6 +1917,34 @@ fn disconnected_streams_and_timeouts_have_correlated_events_and_deduplicated_cou
             "250",
         ],
     );
+    // Recovery is proactive. Probe a stable state after each failure instead of
+    // assuming a health request beats the replacement timer on every platform.
+    let recovered = |restarts| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let metrics: serde_json::Value =
+                serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+            if metrics["ready"] == true
+                && metrics["readyWorkers"] == 1
+                && metrics["workerRestarts"] == restarts
+                && [
+                    "activeRequests",
+                    "queuedRequests",
+                    "busyWorkers",
+                    "recoveringWorkers",
+                ]
+                .iter()
+                .all(|name| metrics[*name] == 0)
+            {
+                return metrics;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "recovery did not finish: {metrics}"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+    };
     let mut response = StreamingResponse::start(&server, "/stream");
     assert_eq!(response.chunk(), b"first");
     let id = response_id(&response.headers);
@@ -1929,19 +1957,21 @@ fn disconnected_streams_and_timeouts_have_correlated_events_and_deduplicated_cou
         e["event"] == "worker_failure" && e["requestId"] == id
     });
     assert_eq!(event["reason"], "client_disconnect");
-    assert_eq!(health(&server, "/readyz").0, 503);
+    let metrics = recovered(1);
+    assert_eq!(metrics["timeouts"], 0);
+    assert_eq!(metrics["workerFailures"], 1);
     assert_eq!(server.request("GET", "/ok", b"", "text/plain").0, 200);
     let response = server.request("GET", "/slow", b"", "text/plain");
     assert_eq!(response.0, 504);
     let id = response_id(&response.1);
-    wait_event(&server, |e| {
+    let event = wait_event(&server, |e| {
         e["event"] == "worker_failure" && e["requestId"] == id
     });
-    let metrics: serde_json::Value =
-        serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+    assert_eq!(event["reason"], "timeout");
+    let metrics = recovered(2);
     assert_eq!(metrics["timeouts"], 1);
     assert_eq!(metrics["responsesInterrupted"], 1);
-    assert_eq!(metrics["workerRestarts"], 1);
+    assert_eq!(metrics["workerFailures"], 2);
 }
 #[test]
 fn explicit_application_logs_are_escaped_bounded_and_correlated() {

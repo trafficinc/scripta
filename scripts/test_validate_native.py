@@ -29,6 +29,7 @@ class EvidenceTests(unittest.TestCase):
             'examples/report.scripta': b'<?scripta\necho "ok";\n',
             'playground/report.scta': b'<?scripta\necho "ok";\n',
             'examples/legacy.scr': b'<?scr\necho "ok";\n',
+            'examples/watch/message.inc': b'<?scripta\n$message = "watch";\n',
             'crates/scr-cli/tests/snapshots/formatter/newlines.input.scripta': b'<?scr\r\necho "first\r\nsecond";\n',
             'crates/scr-cli/tests/snapshots/formatter/newlines.expected.scripta': b'<?scr\necho "first\r\nsecond";\n',
             'benchmarks/fixtures/newlines.scripta': b'<?scripta\r\necho "ok";\n',

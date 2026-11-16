@@ -3,6 +3,7 @@
 *.scripta text eol=lf
 *.scta text eol=lf
 *.scr text eol=lf
+*.inc text eol=lf
 
 # Formatter snapshots intentionally contain exact and mixed newline bytes.
 # These overrides must follow the general source rules.
