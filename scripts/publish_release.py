@@ -88,7 +88,7 @@ def prepare(inputs, output, revision, tag, version):
         for archive, smoke, name, target, variant in packages:
             shutil.copyfile(archive, output / name)
             checksum = digest(output / name)
-            (evidence / (name + '.sha256')).write_text(f'{checksum}  {name}\n', encoding='utf-8')
+            (evidence / (name + '.sha256')).write_bytes(f'{checksum}  {name}\n'.encode('utf-8'))
             shutil.copyfile(smoke, evidence / (name + '.validation.json'))
             manifest['packages'].append({'asset': name, 'target': target, 'variant': variant,
                                          'archive_sha256': checksum, 'extensions': ['sqlite']})
@@ -101,13 +101,13 @@ def prepare(inputs, output, revision, tag, version):
         manifest['files'] = {p.name: digest(p) for p in sorted(output.iterdir())}
         manifest['files'].update({p.relative_to(evidence).as_posix(): digest(p)
                                   for p in sorted(evidence.rglob('*')) if p.is_file()})
-        (evidence / 'release-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+        (evidence / 'release-manifest.json').write_bytes((json.dumps(manifest, indent=2) + '\n').encode('utf-8'))
         with zipfile.ZipFile(output / 'validation-evidence.zip', 'w', zipfile.ZIP_DEFLATED) as bundle:
             for path in sorted(evidence.rglob('*')):
                 if path.is_file():
                     bundle.write(path, path.relative_to(evidence).as_posix())
     checksums = [f'{digest(path)}  {path.name}\n' for path in sorted(output.iterdir())]
-    (output / 'SHA256SUMS').write_text(''.join(checksums), encoding='utf-8')
+    (output / 'SHA256SUMS').write_bytes(''.join(checksums).encode('utf-8'))
     notes = [f'Scripta {version}', '', f'Tag: `{tag}`', f'Source: `{revision}`', '',
              'Native validation passed on Linux x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon.',
              'Default/all-feature debug/dist suites, minimal-build compatibility tests, Clippy, dependency inspection, archive verification,',
@@ -118,7 +118,7 @@ def prepare(inputs, output, revision, tag, version):
              'The evidence ZIP contains individual checksums, native/smoke records, logs, and release-manifest.json.',
              'Candidates have no publisher signatures or macOS notarization.']
     notes_path = output.parent / (output.name + '-notes.md')
-    notes_path.write_text('\n'.join(notes) + '\n', encoding='utf-8')
+    notes_path.write_bytes(('\n'.join(notes) + '\n').encode('utf-8'))
     return manifest, notes_path
 
 
