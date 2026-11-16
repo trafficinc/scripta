@@ -65,6 +65,7 @@ pub(crate) struct Observer {
     pub stats: Stats,
     pub startup_done: AtomicBool,
     pub shutdown: Arc<AtomicBool>,
+    pub reloading: AtomicBool,
     format: LogFormat,
     writer: Mutex<Box<dyn Write + Send>>,
     prefix: String,
@@ -77,6 +78,7 @@ impl Observer {
             stats: Stats::default(),
             startup_done: AtomicBool::new(false),
             shutdown,
+            reloading: AtomicBool::new(false),
             format,
             writer: Mutex::new(Box::new(io::stderr())),
             prefix: format!(
@@ -155,16 +157,19 @@ impl Observer {
             state: Mutex::new(RequestState::default()),
         }))
     }
+    pub fn stopping(&self) -> bool {
+        self.shutdown.load(Ordering::Acquire) || self.reloading.load(Ordering::Acquire)
+    }
     pub fn ready(&self) -> bool {
         self.startup_done.load(Ordering::Acquire)
-            && !self.shutdown.load(Ordering::Acquire)
+            && !self.stopping()
             && self.stats.workers.load(Ordering::Relaxed) > 0
             && self.stats.queued.load(Ordering::Relaxed) < self.queue_limit as u64
     }
     pub fn snapshot(&self) -> Value {
         let s = &self.stats;
         let load = |n: &AtomicU64| n.load(Ordering::Relaxed);
-        json!({"ready":self.ready(),"starting":!self.startup_done.load(Ordering::Acquire),"draining":self.shutdown.load(Ordering::Acquire),
+        json!({"ready":self.ready(),"starting":!self.startup_done.load(Ordering::Acquire),"draining":self.stopping(),"reloading":self.reloading.load(Ordering::Acquire),
             "requests":load(&s.requests),"activeRequests":load(&s.active),"responsesComplete":load(&s.complete),
             "responsesFailed":load(&s.failed),"responsesInterrupted":load(&s.interrupted),"timeouts":load(&s.timeouts),
             "overload":load(&s.overload),"serverErrors":load(&s.server_errors),"bodyBytes":load(&s.bytes),

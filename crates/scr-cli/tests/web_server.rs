@@ -16,9 +16,22 @@ impl Server {
         Self::start_config(source, None, options)
     }
     fn start_config(source: &str, config: Option<&str>, options: &[&str]) -> Self {
+        Self::start_files(source, config, options, &[])
+    }
+    fn start_files(
+        source: &str,
+        config: Option<&str>,
+        options: &[&str],
+        files: &[(&str, &str)],
+    ) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("app.scripta");
         fs::write(&path, source).unwrap();
+        for (name, text) in files {
+            let path = directory.path().join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        }
         if let Some(config) = config {
             fs::write(directory.path().join("server.toml"), config).unwrap();
         }
@@ -2662,4 +2675,267 @@ fn request_count_recycling_preserves_committed_sessions_between_workers() {
     assert_eq!(first["count"], 1);
     assert_eq!(second["count"], 2);
     assert_ne!(first["pid"], second["pid"]);
+}
+
+#[test]
+fn watch_reloads_entry_and_includes_and_retains_the_last_good_generation() {
+    let server = Server::start_files(
+        "<?scripta require \"part.inc\";echo $version;",
+        None,
+        &[
+            "--watch",
+            "--watch-debounce-ms",
+            "100",
+            "--log-format",
+            "json",
+        ],
+        &[("part.inc", "<?scripta $version=\"old\";")],
+    );
+    assert_eq!(server.request("GET", "/", b"", "text/plain").2, b"old");
+    fs::write(
+        server.directory.path().join("part.inc"),
+        "<?scripta echo ; // PRIVATE_SOURCE",
+    )
+    .unwrap();
+    let failure = wait_event(&server, |e| e["event"] == "reload_failed");
+    assert_eq!(failure["reason"], "source_validation");
+    assert!(failure["diagnostic"].as_str().unwrap().contains("part.inc"));
+    assert!(!failure.to_string().contains("PRIVATE_SOURCE"));
+    assert_eq!(server.request("GET", "/", b"", "text/plain").2, b"old");
+    fs::write(
+        server.directory.path().join("part.inc"),
+        "<?scripta $version=\"new\";",
+    )
+    .unwrap();
+    fs::write(
+        server.directory.path().join("app.scripta"),
+        "<?scripta require \"part.inc\";echo \"entry-\" . $version;",
+    )
+    .unwrap();
+    wait_event(&server, |e| e["event"] == "reload_ready");
+    assert_eq!(
+        server.request("GET", "/", b"", "text/plain").2,
+        b"entry-new"
+    );
+    assert_eq!(
+        json_events(&server)
+            .iter()
+            .filter(|e| e["event"] == "reload_ready")
+            .count(),
+        1
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn watch_drains_inflight_requests_using_their_original_includes_and_cleans_snapshots() {
+    let mut server = Server::start_files(
+        r#"<?scripta echo "first";flush();File::writeAtomic("running","yes");while (!File::exists("continue")) {Date::sleep(5);}require "part.inc";echo $version;"#,
+        None,
+        &[
+            "--watch",
+            "--watch-debounce-ms",
+            "50",
+            "--log-format",
+            "json",
+            "--health-address",
+            "127.0.0.1:0",
+            "--upload-temp-dir",
+            "spools",
+            "--drain-timeout-ms",
+            "2000",
+        ],
+        &[("part.inc", "<?scripta $version=\"old\";")],
+    );
+    let root = wait_event(&server, |e| e["event"] == "watch_ready")["snapshotRoot"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut held = StreamingResponse::request(&server, "POST", "/", b"body", "text/plain");
+    assert_eq!(held.chunk(), b"first");
+    fs::write(
+        server.directory.path().join("part.inc"),
+        "<?scripta $version=\"new\";",
+    )
+    .unwrap();
+    fs::write(
+        server.directory.path().join("app.scripta"),
+        "<?scripta require \"part.inc\";echo $version;",
+    )
+    .unwrap();
+    wait_event(&server, |e| e["event"] == "reload_draining");
+    assert_eq!(health(&server, "/readyz").0, 503);
+    assert_eq!(health(&server, "/livez").0, 200);
+    fs::write(server.directory.path().join("continue"), "yes").unwrap();
+    assert_eq!(held.chunk(), b"old");
+    assert!(held.chunk().is_empty());
+    let next = wait_event(&server, |e| e["event"] == "reload_ready");
+    assert_eq!(server.request("GET", "/", b"", "text/plain").2, b"new");
+    assert!(!std::path::Path::new(&root).exists());
+    uploads_clean(&server);
+    let next_root = next["snapshotRoot"].as_str().unwrap();
+    terminate(&server);
+    wait_stopped(&mut server);
+    assert!(!std::path::Path::new(next_root).exists());
+}
+
+#[test]
+fn ordinary_serve_has_no_watcher_or_snapshot_and_keeps_explicit_entry_reload() {
+    let server = Server::start_files(
+        "<?scripta require \"part.inc\";echo \"entry-\" . $version;",
+        None,
+        &["--log-format", "json"],
+        &[("part.inc", "<?scripta $version=\"old\";")],
+    );
+    assert_eq!(
+        server.request("GET", "/", b"", "text/plain").2,
+        b"entry-old"
+    );
+    fs::write(
+        server.directory.path().join("app.scripta"),
+        "<?scripta echo \"changed\";",
+    )
+    .unwrap();
+    fs::write(
+        server.directory.path().join("part.inc"),
+        "<?scripta $version=\"new\";",
+    )
+    .unwrap();
+    thread::sleep(Duration::from_millis(400));
+    assert_eq!(
+        server.request("GET", "/", b"", "text/plain").2,
+        b"entry-new"
+    );
+    assert!(!json_events(&server).iter().any(|e| matches!(
+        e["event"].as_str(),
+        Some("watch_ready" | "reload_ready" | "reload_draining")
+    )));
+}
+
+#[cfg(unix)]
+#[test]
+fn watch_failed_worker_startup_keeps_old_generation_and_another_edit_retries() {
+    use std::os::unix::fs::PermissionsExt;
+    let server = Server::start(
+        "<?scripta echo \"old\";",
+        &[
+            "--watch",
+            "--watch-debounce-ms",
+            "50",
+            "--session-dir",
+            "sessions",
+            "--log-format",
+            "json",
+        ],
+    );
+    let sessions = server.directory.path().join("sessions");
+    fs::set_permissions(&sessions, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        server.directory.path().join("app.scripta"),
+        "<?scripta echo \"candidate\";",
+    )
+    .unwrap();
+    wait_event(&server, |e| {
+        e["event"] == "reload_failed" && e["reason"] == "worker_startup"
+    });
+    assert_eq!(
+        json_events(&server)
+            .iter()
+            .filter(|e| e["event"] == "worker_started")
+            .count(),
+        1
+    );
+    fs::set_permissions(&sessions, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(server.request("GET", "/", b"", "text/plain").2, b"old");
+    fs::write(
+        server.directory.path().join("app.scripta"),
+        "<?scripta echo \"recovered\";",
+    )
+    .unwrap();
+    wait_event(&server, |e| e["event"] == "reload_ready");
+    assert_eq!(
+        server.request("GET", "/", b"", "text/plain").2,
+        b"recovered"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn shutdown_during_watch_drain_reaps_staged_children_and_removes_snapshot() {
+    let mut server = Server::start(
+        "<?scripta echo \"first\";flush();Date::sleep(10000);",
+        &[
+            "--watch",
+            "--watch-debounce-ms",
+            "50",
+            "--drain-timeout-ms",
+            "300",
+            "--log-format",
+            "json",
+        ],
+    );
+    let root = wait_event(&server, |e| e["event"] == "watch_ready")["snapshotRoot"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut stream = StreamingResponse::start(&server, "/");
+    assert_eq!(stream.chunk(), b"first");
+    fs::write(
+        server.directory.path().join("app.scripta"),
+        "<?scripta echo \"next\";",
+    )
+    .unwrap();
+    wait_event(&server, |e| e["event"] == "reload_draining");
+    terminate(&server);
+    wait_stopped(&mut server);
+    assert!(!std::path::Path::new(&root).exists());
+    for event in json_events(&server)
+        .iter()
+        .filter(|e| e["event"] == "worker_started")
+    {
+        let pid = event["workerPid"].as_u64().unwrap();
+        assert!(
+            !Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .stderr(Stdio::null())
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    assert!(
+        !json_events(&server)
+            .iter()
+            .any(|e| e["event"] == "reload_ready")
+    );
+}
+
+#[test]
+fn shipped_watch_example_executes_an_include_edit_with_configured_polling() {
+    let source = include_str!("../../../examples/watch/main.scripta");
+    let helper = include_str!("../../../examples/watch/message.inc");
+    for text in [source, helper] {
+        assert_eq!(scr_cli::formatter::format(text).unwrap(), text);
+    }
+    let server = Server::start_files(
+        source,
+        Some(include_str!("../../../examples/watch/serve.toml")),
+        &["--health-address", "127.0.0.1:0"],
+        &[("message.inc", helper)],
+    );
+    assert_eq!(
+        server.request("GET", "/", b"", "text/plain").2,
+        b"Edit message.inc, save, then refresh.\n"
+    );
+    fs::write(
+        server.directory.path().join("message.inc"),
+        "<?scripta\n$message = \"Reloaded.\\n\";\n",
+    )
+    .unwrap();
+    wait_event(&server, |e| e["event"] == "reload_ready");
+    assert_eq!(
+        server.request("GET", "/", b"", "text/plain").2,
+        b"Reloaded.\n"
+    );
+    assert_eq!(health(&server, "/readyz").0, 200);
 }

@@ -95,6 +95,9 @@ fn invalid_files_fail_with_safe_diagnostics_and_no_side_effects() {
         "workers = 'DO_NOT_PRINT_ME'",
         "workers = 1\nworkers = 'DO_NOT_PRINT_ME'",
         "workers = 65",
+        "watch = 'DO_NOT_PRINT_ME'",
+        "watch-debounce-ms = 49",
+        "watch-debounce-ms = 5001",
         "worker-max-requests = 1000001",
         "worker-max-requests = -1",
         "worker-max-requests = 'DO_NOT_PRINT_ME'",
@@ -397,4 +400,62 @@ fn worker_recycling_settings_preserve_defaults_bounds_and_cli_precedence() {
         );
     }
     assert!(!root.path().join("executed").exists());
+}
+
+#[test]
+fn watch_is_opt_in_and_cli_can_disable_file_configuration_without_side_effects() {
+    let root = fixture();
+    fs::write(
+        root.path().join("server.toml"),
+        "watch=true\nwatch-debounce-ms=50\n",
+    )
+    .unwrap();
+    let text = success(
+        command(root.path())
+            .args(["--config", "server.toml", "--no-watch", "--print-config"])
+            .output()
+            .unwrap(),
+    );
+    let config: toml::Table = toml::from_str(&text).unwrap();
+    assert_eq!(config["watch"].as_bool(), Some(false));
+    assert_eq!(config["watch-debounce-ms"].as_integer(), Some(50));
+    let text = success(
+        command(root.path())
+            .args(["--watch", "--watch-debounce-ms", "5000", "--print-config"])
+            .output()
+            .unwrap(),
+    );
+    let config: toml::Table = toml::from_str(&text).unwrap();
+    assert_eq!(config["watch"].as_bool(), Some(true));
+    assert!(
+        !command(root.path())
+            .args(["--watch", "--no-watch", "--check-config"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(!root.path().join("executed").exists());
+}
+
+#[test]
+fn watch_startup_syntax_diagnostics_are_local_and_explicitly_opt_in() {
+    let root = fixture();
+    fs::write(
+        root.path().join("app.scripta"),
+        "<?scripta echo ; // LOCAL_SOURCE_MARKER",
+    )
+    .unwrap();
+    let normal = command(root.path()).arg("--check-config").output().unwrap();
+    assert!(!normal.status.success());
+    assert!(!String::from_utf8_lossy(&normal.stderr).contains("LOCAL_SOURCE_MARKER"));
+    let watched = command(root.path())
+        .args(["--watch", "--check-config"])
+        .output()
+        .unwrap();
+    assert!(!watched.status.success());
+    let diagnostic = String::from_utf8_lossy(&watched.stderr);
+    assert!(diagnostic.contains("app.scripta:1:"), "{diagnostic}");
+    assert!(diagnostic.contains("error["));
+    assert!(!diagnostic.contains("LOCAL_SOURCE_MARKER"));
 }

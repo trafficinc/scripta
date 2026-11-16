@@ -384,3 +384,12 @@ read-only `WebRequest.requestId`; use `None` if unknown. Its bytes contribute to
 the request payload budget. `scripta serve` generates bounded IDs itself and
 correlates worker diagnostics in the supervisor; it never trusts an incoming
 request-ID header. Custom hosts own their ID and diagnostic privacy policies.
+
+The standalone host's opt-in development mode uses the existing
+`Runtime::set_module_policy` interface to confine includes to its per-generation
+source snapshot. Ordinary embeddings and production serving retain their existing
+module resolver/policy behavior. Construct host settings through
+`scr_web::Config::new`, then set `watch`/`watch_debounce` when needed; generation
+snapshot ownership is internal to the host. See
+[development watch mode](web-servers.md#development-watch-mode) for supported
+include paths and limits.

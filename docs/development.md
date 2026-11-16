@@ -452,3 +452,16 @@ capacity/readiness, reset after successful service, and shutdown during backoff.
 Failure fixtures use private local storage and restore safe permissions before
 recovery; signal/Unix-permission cases are Unix-gated. No public network services
 or production-only fault-injection knobs are used.
+
+For interactive server development, run the isolated
+[`examples/watch`](../examples/watch/) application as documented in
+[development watch mode](web-servers.md#development-watch-mode). `scr-web --lib`
+regressions cover polling selection/exclusions, symlinks, cancellation, exact/
+over-limit entry and byte budgets, depth, invalid snapshots, and RAII cleanup.
+The CLI suites cover opt-in/override/bounds, masked local startup diagnostics,
+entry/include edits, coalesced rapid saves, failed syntax/startup retaining the
+old generation, stable listener reuse, old-stream include isolation, readiness,
+spool/snapshot cleanup, ordinary serving without polling, and shutdown with staged
+children. The shipped watch script/configuration executes a controlled include
+edit over real local HTTP, with source syntax/format checks. Unix-specific signal
+and symlink cases remain platform-gated.

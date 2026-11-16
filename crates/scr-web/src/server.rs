@@ -45,6 +45,9 @@ pub struct Config {
     pub port: u16,
     pub workers: usize,
     pub worker_max_requests: u64,
+    pub watch: bool,
+    pub watch_debounce: Duration,
+    pub(crate) generation: Option<Arc<crate::dev::Snapshot>>,
     pub queue: usize,
     pub max_connections: usize,
     pub max_body_bytes: usize,
@@ -71,6 +74,9 @@ impl Config {
                 .map_or(2, usize::from)
                 .min(4),
             worker_max_requests: 0,
+            watch: false,
+            watch_debounce: Duration::from_millis(200),
+            generation: None,
             queue: 32,
             max_connections: 128,
             max_body_bytes: 1024 * 1024,
@@ -105,6 +111,7 @@ impl Config {
         if self.worker_max_requests > 1_000_000 {
             return Err(io::Error::other("worker-max-requests must be 0..1000000"));
         }
+        crate::dev::validate(self)?;
         self.uploads.validate()?;
         self.sessions
             .validate()
@@ -248,6 +255,9 @@ impl Worker {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
+        if let Some(generation) = &config.generation {
+            command.arg(generation.root());
+        }
         // Console termination reaches only the supervisor, which drains requests
         // before stopping its workers.
         #[cfg(unix)]
@@ -263,7 +273,7 @@ impl Worker {
             if read_frame(&mut output, 16).await? != b"ready" {
                 return Err(io::Error::other("worker initialization failed"));
             }
-            if observer.shutdown.load(Ordering::Acquire) {
+            if observer.stopping() {
                 return Err(io::Error::other("server draining"));
             }
             Ok(())
@@ -445,8 +455,8 @@ impl Backoff {
         self.failures = 0;
     }
 }
-async fn wait_shutdown(flag: &AtomicBool) {
-    while !flag.load(Ordering::Acquire) {
+async fn wait_shutdown(observer: &Observer) {
+    while !observer.stopping() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
@@ -465,7 +475,7 @@ async fn worker_loop(
             break;
         }
         if worker.is_none() {
-            if observer.shutdown.load(Ordering::Acquire) {
+            if observer.stopping() {
                 break;
             }
             let _recovering = Gauge::new(&observer, GaugeKind::Recovering);
@@ -479,7 +489,7 @@ async fn worker_loop(
             let result = tokio::select! {
                 biased;
                 _ = force_stop.changed() => break,
-                () = wait_shutdown(&observer.shutdown) => break,
+                () = wait_shutdown(&observer) => break,
                 result = async {
                     tokio::time::sleep(delay).await;
                     timeout(Duration::from_secs(30), Worker::start(&config, &observer)).await
@@ -601,7 +611,7 @@ async fn worker_loop(
         }
         if config.worker_max_requests != 0
             && completed >= config.worker_max_requests
-            && !observer.shutdown.load(Ordering::Acquire)
+            && !observer.stopping()
         {
             add(&observer.stats.worker_recycles, 1);
             observer.event(
@@ -630,7 +640,7 @@ fn supervise_workers(
     backoff: &mut Backoff,
 ) {
     while workers.try_join_next().is_some() {
-        if observer.shutdown.load(Ordering::Acquire) {
+        if observer.stopping() {
             continue;
         }
         add(&observer.stats.worker_loop_failures, 1);
@@ -650,7 +660,7 @@ fn supervise_workers(
             tokio::select! {
                 biased;
                 _ = force_stop.changed() => return,
-                () = wait_shutdown(&observer.shutdown) => return,
+                () = wait_shutdown(&observer) => return,
                 () = tokio::time::sleep(delay) => {},
             }
             drop(recovering);
@@ -671,7 +681,7 @@ fn plain(status: u16, text: &'static str) -> HttpResponse {
 async fn dispatch(request: Request<Incoming>, peer: SocketAddr, host: Host) -> HttpResponse {
     // Hyper may already have buffered a pipelined request when shutdown begins.
     // Only requests whose service began before the flag are admitted to drain.
-    if host.observer.shutdown.load(Ordering::Acquire) {
+    if host.observer.stopping() {
         let mut response = plain(503, "Server draining\n");
         response
             .headers_mut()
@@ -941,8 +951,8 @@ async fn run(
         &config.allowed_hosts,
     )?);
     let budget = Budget::new(config.uploads.max_disk_bytes, Some(observer.clone()));
-    let config = Arc::new(config);
-    let listener = TcpListener::bind(SocketAddr::new(config.host, config.port)).await?;
+    let mut config = Arc::new(config);
+    let mut listener = Some(TcpListener::bind(SocketAddr::new(config.host, config.port)).await?);
     let health_stop = Arc::new(AtomicBool::new(false));
     let health = if let Some(address) = config.health_address {
         let listener = TcpListener::bind(address).await?;
@@ -955,163 +965,275 @@ async fn run(
     } else {
         None
     };
-    let (queue, receiver) = mpsc::channel(config.queue);
-    let receiver = Arc::new(Mutex::new(receiver));
-    let (force_stop, force_receiver) = watch::channel(false);
-    let mut workers = JoinSet::new();
-    for _ in 0..config.workers {
-        if shutdown.load(Ordering::Relaxed) {
-            return Ok(());
-        }
-        let worker = timeout(Duration::from_secs(30), Worker::start(&config, &observer)).await??;
-        workers.spawn(worker_loop(
-            Some(worker),
-            config.clone(),
-            receiver.clone(),
-            observer.clone(),
-            force_receiver.clone(),
-        ));
-    }
-    observer.startup_done.store(true, Ordering::Release);
-    observer.listening(listener.local_addr()?, config.workers, false);
-    let host = Host {
-        config: config.clone(),
-        proxy,
-        queue: queue.clone(),
-        budget,
-        observer: observer.clone(),
+    let mut watcher = if config.watch {
+        let (snapshot, watcher) = crate::dev::start(&config, observer.clone()).await?;
+        let mut next = (*config).clone();
+        next.path = snapshot.entry.clone();
+        next.source = Arc::new(snapshot.source.clone());
+        next.generation = Some(snapshot);
+        config = Arc::new(next);
+        Some(watcher)
+    } else {
+        None
     };
-    let slots = Arc::new(Semaphore::new(config.max_connections));
-    let (draining, _) = watch::channel(false);
-    let mut connections = JoinSet::new();
-    let mut task_backoff = Backoff::default();
-    let mut task_healthy_since = Deadline::now();
-    while !shutdown.load(Ordering::Relaxed) {
-        if task_healthy_since.elapsed() >= Duration::from_secs(30) {
-            task_backoff.reset();
-            task_healthy_since = Deadline::now();
+    let mut prepared: Vec<Worker> = vec![];
+    let mut generation_id = 0u64;
+    loop {
+        observer.reloading.store(false, Ordering::Release);
+        let mut candidate = None;
+        let (queue, receiver) = mpsc::channel(config.queue);
+        let receiver = Arc::new(Mutex::new(receiver));
+        let (force_stop, force_receiver) = watch::channel(false);
+        let mut workers = JoinSet::new();
+        for _ in 0..config.workers {
+            if shutdown.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            let worker = if let Some(mut worker) = prepared.pop() {
+                worker._lease = Gauge::new(&observer, GaugeKind::Worker);
+                add(&observer.stats.worker_starts, 1);
+                worker
+            } else {
+                timeout(Duration::from_secs(30), Worker::start(&config, &observer)).await??
+            };
+            workers.spawn(worker_loop(
+                Some(worker),
+                config.clone(),
+                receiver.clone(),
+                observer.clone(),
+                force_receiver.clone(),
+            ));
         }
-        let failures = observer.stats.worker_loop_failures.load(Ordering::Relaxed);
-        supervise_workers(
-            &mut workers,
-            &config,
-            &receiver,
-            &observer,
-            &force_receiver,
-            &mut task_backoff,
+        observer.startup_done.store(true, Ordering::Release);
+        if let Some(snapshot) = &config.generation {
+            observer.event(
+                if generation_id == 0 {
+                    "watch_ready"
+                } else {
+                    "reload_ready"
+                },
+                None,
+                json!({"generation":generation_id,"snapshotRoot":snapshot.root()}),
+                "development source generation ready",
+            );
+        }
+        observer.listening(
+            listener.as_ref().unwrap().local_addr()?,
+            config.workers,
+            false,
         );
-        if observer.stats.worker_loop_failures.load(Ordering::Relaxed) != failures {
-            task_healthy_since = Deadline::now();
-        }
-        while connections.try_join_next().is_some() {}
-        match timeout(Duration::from_millis(100), listener.accept()).await {
-            Err(_) => continue,
-            Ok(Err(error)) => return Err(error.into()),
-            Ok(Ok((stream, peer))) => {
-                let Ok(slot) = slots.clone().try_acquire_owned() else {
-                    add(&observer.stats.rejected_connections, 1);
-                    drop(stream);
-                    continue;
-                };
-                let host = host.clone();
-                let mut drain = draining.subscribe();
-                connections.spawn(async move {
-                    let _slot = slot;
-                    let connection_timeout = host.config.connection_timeout;
-                    let header_timeout = host.config.header_timeout;
-                    let observer = host.observer.clone();
-                    let admitted = Arc::new(AtomicBool::new(false));
-                    let request_admitted = admitted.clone();
-                    let service = service_fn(move |request| {
-                        let host = host.clone();
-                        request_admitted.store(true, Ordering::Release);
-                        async move { Ok::<_, Infallible>(dispatch(request, peer, host).await) }
-                    });
-                    let mut builder = http1::Builder::new();
-                    builder
-                        .timer(TokioTimer::new())
-                        .header_read_timeout(header_timeout)
-                        .max_buf_size(HEADER_LIMIT)
-                        .max_headers(100);
-                    let connection = builder.serve_connection(TokioIo::new(stream), service);
-                    // Also bound slow response readers and idle persistent connections.
-                    tokio::pin!(connection);
-                    let lifetime = tokio::time::sleep(connection_timeout);
-                    tokio::pin!(lifetime);
-                    let result = tokio::select! {
-                        biased;
-                        _ = drain.changed() => {
-                            if !admitted.load(Ordering::Acquire) {
-                                // Hyper can wait for an incomplete initial header
-                                // during graceful shutdown. No service has run here,
-                                // so dropping this connection cannot lose a response.
-                                return;
+        let host = Host {
+            config: config.clone(),
+            proxy: proxy.clone(),
+            queue: queue.clone(),
+            budget: budget.clone(),
+            observer: observer.clone(),
+        };
+        let slots = Arc::new(Semaphore::new(config.max_connections));
+        let (draining, _) = watch::channel(false);
+        let mut connections = JoinSet::new();
+        let mut task_backoff = Backoff::default();
+        let mut task_healthy_since = Deadline::now();
+        while !shutdown.load(Ordering::Relaxed) {
+            if let Some(watcher) = watcher.as_mut() {
+                if watcher.changes.has_changed().unwrap_or(false) {
+                    let snapshot = watcher.changes.borrow_and_update().clone();
+                    if let Some(snapshot) = snapshot {
+                        let mut next = (*config).clone();
+                        next.path = snapshot.entry.clone();
+                        next.source = Arc::new(snapshot.source.clone());
+                        next.generation = Some(snapshot);
+                        let staging =
+                            Observer::new(config.log_format, config.queue, shutdown.clone());
+                        let result = tokio::select! {
+                        () = wait_shutdown(&observer) => false,
+                        result = timeout(Duration::from_secs(30), async {
+                            for _ in 0..next.workers {
+                                if shutdown.load(Ordering::Acquire) {
+                                    return Err(io::Error::other("server stopping"));
+                                }
+                                prepared.push(Worker::start(&next, &staging).await?);
                             }
-                            connection.as_mut().graceful_shutdown();
-                            tokio::select! {
-                                result = &mut connection => Ok(result),
-                                _ = &mut lifetime => Err(()),
-                            }
+                            Ok::<_, io::Error>(())
+                        }) => matches!(result, Ok(Ok(()))),
+                        };
+                        if result && !shutdown.load(Ordering::Acquire) {
+                            candidate = Some(Arc::new(next));
+                            break;
                         }
-                        result = &mut connection => Ok(result),
-                        _ = &mut lifetime => Err(()),
-                    };
-                    let failure = match result {
-                        Err(_) => Some(("connection_lifetime", true)),
-                        Ok(Err(error)) => Some((
-                            if error.is_timeout() {
-                                "header_timeout"
-                            } else {
-                                "http_connection"
-                            },
-                            error.is_timeout(),
-                        )),
-                        Ok(Ok(())) => None,
-                    };
-                    if let Some((reason, timed_out)) = failure {
-                        add(
-                            if timed_out {
-                                &observer.stats.connection_timeouts
-                            } else {
-                                &observer.stats.connection_errors
-                            },
-                            1,
-                        );
+                        while let Some(worker) = prepared.pop() {
+                            worker.stop().await;
+                        }
                         observer.event(
-                            "connection_failure",
+                            "reload_failed",
                             None,
-                            json!({"reason":reason}),
-                            "connection failed",
+                            json!({"reason":"worker_startup"}),
+                            "reload worker startup failed; retaining current generation; verify private storage permissions, source limits, and --check-config",
                         );
                     }
-                });
+                }
+            }
+            if task_healthy_since.elapsed() >= Duration::from_secs(30) {
+                task_backoff.reset();
+                task_healthy_since = Deadline::now();
+            }
+            let failures = observer.stats.worker_loop_failures.load(Ordering::Relaxed);
+            supervise_workers(
+                &mut workers,
+                &config,
+                &receiver,
+                &observer,
+                &force_receiver,
+                &mut task_backoff,
+            );
+            if observer.stats.worker_loop_failures.load(Ordering::Relaxed) != failures {
+                task_healthy_since = Deadline::now();
+            }
+            while connections.try_join_next().is_some() {}
+            match timeout(
+                Duration::from_millis(100),
+                listener.as_ref().unwrap().accept(),
+            )
+            .await
+            {
+                Err(_) => continue,
+                Ok(Err(error)) => return Err(error.into()),
+                Ok(Ok((stream, peer))) => {
+                    let Ok(slot) = slots.clone().try_acquire_owned() else {
+                        add(&observer.stats.rejected_connections, 1);
+                        drop(stream);
+                        continue;
+                    };
+                    let host = host.clone();
+                    let mut drain = draining.subscribe();
+                    connections.spawn(async move {
+                        let _slot = slot;
+                        let connection_timeout = host.config.connection_timeout;
+                        let header_timeout = host.config.header_timeout;
+                        let observer = host.observer.clone();
+                        let admitted = Arc::new(AtomicBool::new(false));
+                        let request_admitted = admitted.clone();
+                        let service = service_fn(move |request| {
+                            let host = host.clone();
+                            request_admitted.store(true, Ordering::Release);
+                            async move { Ok::<_, Infallible>(dispatch(request, peer, host).await) }
+                        });
+                        let mut builder = http1::Builder::new();
+                        builder
+                            .timer(TokioTimer::new())
+                            .header_read_timeout(header_timeout)
+                            .max_buf_size(HEADER_LIMIT)
+                            .max_headers(100);
+                        let connection = builder.serve_connection(TokioIo::new(stream), service);
+                        // Also bound slow response readers and idle persistent connections.
+                        tokio::pin!(connection);
+                        let lifetime = tokio::time::sleep(connection_timeout);
+                        tokio::pin!(lifetime);
+                        let result = tokio::select! {
+                            biased;
+                            _ = drain.changed() => {
+                                if !admitted.load(Ordering::Acquire) {
+                                    // Hyper can wait for an incomplete initial header
+                                    // during graceful shutdown. No service has run here,
+                                    // so dropping this connection cannot lose a response.
+                                    return;
+                                }
+                                connection.as_mut().graceful_shutdown();
+                                tokio::select! {
+                                    result = &mut connection => Ok(result),
+                                    _ = &mut lifetime => Err(()),
+                                }
+                            }
+                            result = &mut connection => Ok(result),
+                            _ = &mut lifetime => Err(()),
+                        };
+                        let failure = match result {
+                            Err(_) => Some(("connection_lifetime", true)),
+                            Ok(Err(error)) => Some((
+                                if error.is_timeout() {
+                                    "header_timeout"
+                                } else {
+                                    "http_connection"
+                                },
+                                error.is_timeout(),
+                            )),
+                            Ok(Ok(())) => None,
+                        };
+                        if let Some((reason, timed_out)) = failure {
+                            add(
+                                if timed_out {
+                                    &observer.stats.connection_timeouts
+                                } else {
+                                    &observer.stats.connection_errors
+                                },
+                                1,
+                            );
+                            observer.event(
+                                "connection_failure",
+                                None,
+                                json!({"reason":reason}),
+                                "connection failed",
+                            );
+                        }
+                    });
+                }
             }
         }
-    }
-    observer.event("server_draining", None, json!({}), "server draining");
-    drop(listener);
-    let drain_deadline = Deadline::now() + config.drain_timeout;
-    // Wake every connection, including idle/partial-header connections.
-    draining.send_replace(true);
-    let drain = async {
-        while let Some(result) = connections.join_next().await {
-            let _ = result;
+        observer
+            .reloading
+            .store(candidate.is_some(), Ordering::Release);
+        if candidate.is_some() {
+            observer.startup_done.store(false, Ordering::Release);
         }
-    };
-    let _ = timeout_at(drain_deadline, drain).await;
-    connections.abort_all();
-    while connections.join_next().await.is_some() {}
-    drop(host);
-    drop(queue);
-    let _ = timeout_at(drain_deadline, async {
+        observer.event(
+            if candidate.is_some() {
+                "reload_draining"
+            } else {
+                "server_draining"
+            },
+            None,
+            json!({}),
+            "server draining",
+        );
+        if candidate.is_none() {
+            drop(listener.take());
+        }
+        let drain_deadline = Deadline::now() + config.drain_timeout;
+        // Wake every connection, including idle/partial-header connections.
+        draining.send_replace(true);
+        let drain = async {
+            while let Some(result) = connections.join_next().await {
+                let _ = result;
+            }
+        };
+        let _ = timeout_at(drain_deadline, drain).await;
+        connections.abort_all();
+        while connections.join_next().await.is_some() {}
+        drop(host);
+        drop(queue);
+        let _ = timeout_at(drain_deadline, async {
+            while workers.join_next().await.is_some() {}
+        })
+        .await;
+        // Terminate and reap children explicitly before dropping queued spools or
+        // temporary stores. No second request/drain allowance is granted here.
+        force_stop.send_replace(true);
         while workers.join_next().await.is_some() {}
-    })
-    .await;
-    // Terminate and reap children explicitly before dropping queued spools or
-    // temporary stores. No second request/drain allowance is granted here.
-    force_stop.send_replace(true);
-    while workers.join_next().await.is_some() {}
-    drop(receiver);
+        drop(receiver);
+        if let Some(next) = candidate {
+            if !shutdown.load(Ordering::Acquire) {
+                config = next;
+                generation_id = generation_id.saturating_add(1);
+                continue;
+            }
+        }
+        while let Some(worker) = prepared.pop() {
+            worker.stop().await;
+        }
+        break;
+    }
+    drop(listener);
+    drop(watcher);
     health_stop.store(true, Ordering::Release);
     if let Some(health) = health {
         let _ = health.await;

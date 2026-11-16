@@ -23,7 +23,7 @@ fn register(runtime: &mut scr_runtime::Runtime) -> scr_runtime::NativeResult<()>
 }
 pub(crate) fn worker(arguments: Vec<OsString>) -> ExitCode {
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-        if arguments.len() != 8 {
+        if !matches!(arguments.len(), 8 | 9) {
             return Err("invalid internal worker arguments".into());
         }
         let output = arguments[1]
@@ -55,7 +55,24 @@ pub(crate) fn worker(arguments: Vec<OsString>) -> ExitCode {
             crate::entry::limits()?,
             sessions,
             arguments[7].clone().into(),
-            register,
+            |runtime| {
+                register(runtime)?;
+                if let Some(root) = arguments.get(8) {
+                    let root = std::fs::canonicalize(root)?;
+                    runtime.set_module_policy(move |path| {
+                        let path = std::fs::canonicalize(path)?;
+                        if path.starts_with(&root) {
+                            Ok(())
+                        } else {
+                            Err(scr_runtime::NativeError::new(
+                                "ModuleError",
+                                "watch includes must belong to the source snapshot",
+                            ))
+                        }
+                    });
+                }
+                Ok(())
+            },
         )
     })();
     if let Err(error) = result {
@@ -88,16 +105,24 @@ fn config(
     }
     let path = std::fs::canonicalize(PathBuf::from(path))?;
     let source = crate::entry::read_source(&path, crate::entry::limits()?.max_source_bytes)?;
-    if crate::pipeline::check(&source).is_err() {
+    let options = settings::Options::parse(arguments)?;
+    let mode = options.mode;
+    let mut config = scr_web::Config::new(path, source);
+    options.apply(&mut config)?;
+    if let Err(errors) = crate::pipeline::check(&config.source) {
+        if config.watch {
+            for error in errors {
+                eprintln!(
+                    "{}",
+                    error.render(&config.path.to_string_lossy(), &config.source)
+                );
+            }
+        }
         return Err(
             "entry script failed validation; run scripta check locally for detailed diagnostics"
                 .into(),
         );
     }
-    let mut config = scr_web::Config::new(path, source);
-    let options = settings::Options::parse(arguments)?;
-    let mode = options.mode;
-    options.apply(&mut config)?;
     Ok((config, mode))
 }
 
