@@ -465,3 +465,51 @@ spool/snapshot cleanup, ordinary serving without polling, and shutdown with stag
 children. The shipped watch script/configuration executes a controlled include
 edit over real local HTTP, with source syntax/format checks. Unix-specific signal
 and symlink cases remain platform-gated.
+
+## HTTP measurement and native validation
+
+The standalone-server workload and bounds are defined before measurement in
+[`benchmarks/serve.md`](../benchmarks/serve.md). The standard-library Python driver
+validates response contents/statuses, separates successful throughput and latency
+from rejection speed, records resident memory and fixed server gauges, and checks
+recovery/spool/child cleanup. It uses private local fixtures and never public HTTP.
+Its short functional run is separate from the optimized measurement:
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo build -p scr-cli --profile dist --locked --offline --target aarch64-apple-darwin
+python3 -m unittest discover -s benchmarks -p 'test_*.py'
+python3 benchmarks/serve.py --scripta target/aarch64-apple-darwin/dist/scripta --seconds 1 --soak-seconds 10 --output /private/tmp/scripta-http-functional-new.json
+python3 benchmarks/serve.py --scripta target/aarch64-apple-darwin/dist/scripta --output /private/tmp/scripta-http-measured-new.json
+```
+
+Use new output paths; do not overwrite retained evidence. Keep builds/tests idle
+during measurement. The default maximum soak window is 60 seconds, with a separate
+100000-request ceiling; inspect actual duration and the cap flag. The retained
+macOS observation ended at the request ceiling after 55.061 seconds. Results,
+hashes, counts, RSS caveats, and the [JSON receipt](../benchmarks/evidence/serve-macos-arm64-20261115.json)
+are summarized in [HTTP performance](performance.md#standalone-http-hosting--2026-11-15).
+Performance is observational; correctness and cleanup determine driver success.
+
+For this milestone, native local validation used macOS 27.0.1 ARM64, pinned Rust
+1.99.1 compiler host/target `aarch64-apple-darwin`, explicit targets and deployment
+setting 15.0. Run the following separately from measurements:
+
+```sh
+cargo fmt --all -- --check
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo test -p scr-stdlib --lib collections --locked --offline --target aarch64-apple-darwin
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo test -p scr-stdlib --test collections --locked --offline --target aarch64-apple-darwin
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo test --workspace --all-features --locked --offline --target aarch64-apple-darwin
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo test --workspace --locked --offline --target aarch64-apple-darwin
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo test -p scr-cli --test web_server --test serve_config --test sqlite_extension --no-default-features --locked --offline --target aarch64-apple-darwin
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo clippy --workspace --all-targets --all-features --locked --offline --target aarch64-apple-darwin -- -D warnings
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo +1.85.0 check --workspace --all-targets --all-features --locked --offline --target aarch64-apple-darwin
+```
+
+Results are recorded in the temporary improvement plan's Section 7 evidence.
+The minimum-Rust command checks compilation, not runtime tests. The benchmark
+requires SQLite; minimal-feature behavior is covered by separate native tests.
+No Linux/Windows/native macOS 15 host was available for this milestone. Retain
+those validations as pending and preserve historical compatibility receipts.
+A deployment target alone is not execution on macOS 15. Full native release
+support additionally requires the dist tests, inspection, packaging, and extracted
+smoke steps in [releases](releases.md); this work publishes no release assets.

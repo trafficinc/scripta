@@ -6,7 +6,7 @@ isolated worker processes and deployment behind an HTTPS reverse proxy.
 
 ## Progress and approval rules
 
-Current position: **Sections 1–5 accepted; Section 6 complete and validated, awaiting acceptance and explicit OK to begin Section 7.**
+Current position: **Sections 1–6 accepted; Section 7 complete with local measurement/native evidence and explicit platform gaps, awaiting final milestone acceptance.**
 
 | Section | Scope | Status |
 | --- | --- | --- |
@@ -15,8 +15,8 @@ Current position: **Sections 1–5 accepted; Section 6 complete and validated, a
 | 3 | Logs and health checks | Accepted |
 | 4 | Deployment and shutdown | Accepted |
 | 5 | Worker resilience | Accepted |
-| 6 | Development workflow | Complete; awaiting acceptance |
-| 7 | Performance and platform evidence | Not started |
+| 6 | Development workflow | Accepted |
+| 7 | Performance and platform evidence | Complete; awaiting final acceptance |
 
 For each section:
 
@@ -642,35 +642,140 @@ Validation evidence (2026-11-15):
   No zero-downtime or performance claim was added. Section 7 remains unstarted
   pending explicit approval.
 
-Acceptance / OK to proceed: pending.
+Acceptance / OK to proceed: user replied “ok”, accepting Section 6 and approving Section 7.
 
 ## Section 7 — Performance and platform evidence
 
-- [ ] Explicit approval to begin recorded.
-- [ ] Define reproducible local workloads and bounded benchmark durations before
+- [x] Explicit approval to begin recorded: user replied “ok” after Section 6 was presented.
+- [x] Define reproducible local workloads and bounded benchmark durations before
       measuring; record source revision/working-tree state and host/toolchain.
-- [ ] Measure small JSON, SQLite, password hashing, binary upload/download,
+- [x] Measure small JSON, SQLite, password hashing, binary upload/download,
       streaming, slow clients, and overload/recovery with controlled fixtures.
-- [ ] Record throughput, latency distributions, memory observations, queue/worker
+- [x] Record throughput, latency distributions, memory observations, queue/worker
       behavior, and cleanup/recovery results; distinguish OS memory from logical
       runtime value budgets.
-- [ ] Run sustained-load tests for leaks, worker recycling, client disconnects,
+- [x] Run sustained-load tests for leaks, worker recycling, client disconnects,
       and repeated failures without depending on public HTTP endpoints.
-- [ ] Optimize only demonstrated bottlenecks, preserving semantics and adding
+- [x] Optimize only demonstrated bottlenecks, preserving semantics and adding
       meaningful regressions; rerun affected measurements after changes.
-- [ ] Run native validation on available supported hosts using explicit target
+- [x] Run native validation on available supported hosts using explicit target
       triples and repository guidance. Mark unavailable platforms as pending.
-- [ ] Report minimum-Rust and feature coverage accurately. Keep compatibility
+- [x] Report minimum-Rust and feature coverage accurately. Keep compatibility
       claims unchanged without the evidence required by release documentation.
-- [ ] Publish reproducible commands/results in repository development docs;
+- [x] Publish reproducible commands/results in repository development docs;
       do not publish releases or external artifacts as part of this section.
-- [ ] Present final results, limitations, and the completed milestone for acceptance.
+- [x] Present final results, limitations, and the completed milestone for acceptance.
 
 Completion criteria: repeatable measurements and recovery evidence exist; platform
 results clearly distinguish verified behavior from pending validation. Missing
 native hosts do not justify invented success or weakened assertions.
 
-Validation evidence: pending.
+Implemented contract:
+
+- Defined bounded workloads and timing before measurement in
+  [`benchmarks/serve.md`](../benchmarks/serve.md). Added a stdlib-only Python
+  loopback driver, formatted Scripta fixture, and regression checks for output
+  validation, expected status handling, and nearest-rank percentile boundaries.
+  No runtime/dependency/feature changes or speculative optimizations.
+- The driver owns temporary SQLite/binary/source/spool fixtures, validates every
+  successful body, records success versus rejection throughput/latencies and
+  first-body-byte distributions, samples OS RSS and fixed health metrics, and
+  checks recovery/spools/worker disappearance after graceful shutdown. New JSON
+  output filenames are required to preserve receipts.
+- Published reproducible commands and local results in development/performance
+  docs, linked the protocol from the benchmark guide, and retained the measured
+  [JSON report](../benchmarks/evidence/serve-macos-arm64-20261115.json).
+  Compatibility/release receipts and platform support claims remain unchanged.
+
+Validation evidence (2026-11-15 America/New_York):
+
+- Base revision `df6607e38bda822248e9b53396aef1a0fdfd5fc1` plus benchmark/plan
+  working-tree changes recorded at measurement start. The retained report began
+  at 2026-11-16 01:18:52 UTC (November 15 locally). It contains compiler/native
+  host, parameters, dirty paths, tracked-diff hash, binary/driver/fixture/protocol
+  hashes, counters, distributions, RSS samples, and cleanup. Driver/fixture/
+  protocol hashes were rechecked against the retained source files and match.
+- Native host macOS 27.0.1 ARM64, eight logical CPUs, Python 3.9.6, pinned Rust
+  1.99.1 host/target `aarch64-apple-darwin`. `file` confirmed a Mach-O ARM64
+  executable. Cargo build/test/lint used explicit native target and
+  `MACOSX_DEPLOYMENT_TARGET=15.0`; this is not execution on macOS 15.
+- Built the default SQLite-enabled optimized executable with `cargo build
+  -p scr-cli --profile dist --locked --offline --target aarch64-apple-darwin`.
+  Size 8,366,000 bytes; SHA-256
+  `f5a2e7617bc3263095bcef9a18e8a1cda10728d268c33b5138e999f02353cd98`.
+- Used the environment approval mechanism for controlled localhost/worker/
+  fixture-process tests and measurement. Python bytecode compilation initially
+  hit the sandbox's system-cache write restriction; reran through approval and
+  passed. No assertions were weakened or external network services used.
+- An initial short functional driver run (`--seconds 1 --soak-seconds 10`) passed
+  all eight workloads, repeated faults, recycling, and cleanup. The retained
+  default run used two workers, queue eight, four normal clients, 16 overload
+  clients, three-second issuance windows, 750 ms deadlines, count recycling at
+  200, and JSON stderr logs. No builds/tests ran during the retained timing run.
+- Successful responses/s: JSON 1925.83; SQLite UPDATE/SELECT 1267.36; default
+  password hash+verify 63.39; 256 KiB upload/echo 1186.63; binary download 1432.84;
+  streaming with four 5 ms sleeps 72.85; paced reader 23.61. Exact bodies and
+  password verification passed; SQLite persisted exactly 3808 updates including
+  two warmups. Full p50/p95/p99 and timing caveats are in performance docs.
+- Overload completed 66 successful responses and 13349 expected 503 rejections,
+  with success throughput 18.97/s and success p95 618.66 ms. Queue/busy observed
+  maxima were eight/two; every phase recovered two healthy idle workers and
+  zero owned spools. Rejection speed was not called application throughput.
+- The default soak had a 60-second maximum and 100000-request ceiling. It reached
+  that ceiling after 55.061 seconds with 100000 checked JSON 200 responses
+  (1816.16/s; p50/p95/p99 1.02/1.44/60.91 ms), plus 25 controlled application
+  failures, 24 timeouts, and 24 early disconnects carrying raw upload spools.
+- Across the whole run, 131443 requests accounted exactly for timed load,
+  18 warmups, and 73 faults; 24 deadlines and 24 interrupted bodies matched
+  injected timeouts/disconnects. Observed 579 count retirements, 627 replacements,
+  and 629 worker PIDs, without startup/loop failures. Final recovery had two
+  workers; graceful exit was zero with no active/queued/busy/worker/recovering
+  gauges, spools, or surviving observed workers.
+- Collected 153 OS RSS/metrics samples at about 0.5-second intervals. Maximum
+  observed supervisor RSS was 12.03 MiB; aggregate worker RSS 58.11 MiB during
+  hashing. Soak first/last ten-sample supervisor medians were 12.016/12.031 MiB.
+  Comparing only two-child samples, first/last five-sample aggregate worker
+  medians were 17.44/17.55 MiB. These are resident observations, potentially
+  counting shared pages, not heap/peak/unique memory or logical value limits.
+  The bounded soak and cleanup checks do not prove absence of long-term leaks.
+- `python3 -m unittest discover -s benchmarks -p 'test_*.py'`: seven passed,
+  including three new measurement regressions. `python3 -m unittest discover
+  -s scripts -p 'test_*.py'`: 11 passed. Python bytecode compilation passed.
+- Explicit native collection checks passed: `cargo test -p scr-stdlib --lib
+  collections --locked --offline --target aarch64-apple-darwin` (six tests),
+  and `cargo test -p scr-stdlib --test collections --locked --offline --target
+  aarch64-apple-darwin` (21 tests).
+- Full `cargo test --workspace --all-features --locked --offline --target
+  aarch64-apple-darwin` and `cargo test --workspace --locked --offline --target
+  aarch64-apple-darwin`: each passed 639 tests, zero failures/ignored.
+- `cargo test -p scr-cli --test web_server --test serve_config --test
+  sqlite_extension --no-default-features --locked --offline --target
+  aarch64-apple-darwin`: 80 passed, including explicit SQLite absence. The
+  benchmark itself requires SQLite; minimal behavior was tested separately.
+- `cargo clippy --workspace --all-targets --all-features --locked --offline
+  --target aarch64-apple-darwin -- -D warnings`, formatting, Markdown paths,
+  new-file whitespace, and `git diff --check` passed. Benchmark Scripta fixture
+  `check`/`fmt --check` passed and executed through the measured local server.
+- `cargo +1.85.0 check --workspace --all-targets --all-features --locked
+  --offline --target aarch64-apple-darwin` passed; compilation only, not
+  minimum-Rust runtime tests. Validation logs remain locally under
+  `/private/tmp/scripta-section7-*.log` for this session.
+- Linux x86-64/ARM64, Windows Server 2022, and native macOS 15 baseline hosts were
+  unavailable for this milestone; their current-source validation remains
+  pending. Historical compatibility receipts were not reclassified. No dist
+  workspace tests, dependency/archive inspection, packaging, extracted smoke,
+  public TLS/proxy test, or release publication was performed in this section.
+  The optimized build/load test is not a replacement for release qualification.
+- No hot-path optimization was justified by these short shared-host synthetic
+  observations. Frequent recycling is intentionally configured, Python/client
+  and logger/sampler costs are included, and no CPU profile isolates a server
+  bottleneck. No throughput parity, cross-platform speed, zero-downtime,
+  production capacity, or process-memory-ceiling promise was added.
+
+All seven implementation sections are presented with the available local evidence
+and explicit remaining native/release limitations. Final milestone acceptance is
+pending. Keep this temporary plan until the user directs removal or archival;
+no commits, tags, services, external artifacts, or releases were created.
 
 Acceptance / final OK: pending.
 

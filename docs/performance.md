@@ -224,3 +224,104 @@ See [benchmark instructions](../benchmarks/README.md). Raw evidence includes
 The JSON includes individual observations, executable identities and fixture hashes.
 Preserved local benchmark executables are ignored by Git; no binary is required
 for rerunning the optimized fixtures from source.
+
+## Standalone HTTP hosting — 2026-11-15
+
+This local observation covers the serve-improvement milestone through Section 6,
+on base revision `df6607e38bda822248e9b53396aef1a0fdfd5fc1`, plus the benchmark
+fixture/driver/protocol and temporary-plan working-tree changes recorded in the
+[retained JSON report](../benchmarks/evidence/serve-macos-arm64-20261115.json).
+The report started at 2026-11-16 01:18:52 UTC (November 15 in America/New_York).
+The [protocol](../benchmarks/serve.md) was defined before measurement; reproduce
+it with the commands there and a new output filename. Do not run builds or tests
+concurrently with timing. The driver and fixture SHA-256 hashes in the report
+identify the uncommitted measurement sources; its tracked-diff hash and dirty
+paths identify the rest of that working-tree context.
+
+Measured on macOS 27.0.1 ARM64, eight logical CPUs, Rust 1.99.1 native host/target
+`aarch64-apple-darwin`, Python 3.9.6. The default-feature executable includes
+SQLite, built with the optimized `dist` profile, explicit target, and
+`MACOSX_DEPLOYMENT_TARGET=15.0`. Executable size was 8,366,000 bytes; SHA-256
+`f5a2e7617bc3263095bcef9a18e8a1cda10728d268c33b5138e999f02353cd98`.
+This is a local optimized build measurement, not release-package certification.
+
+Two workers served four closed-loop HTTP/1.1 clients, with queue eight and a
+750 ms request deadline. Request-count recycling was intentionally enabled at
+200 completed exchanges to exercise churn; production defaults leave it disabled.
+The client and sampler share the host with the server, so these numbers include
+Python/client, loopback, scheduling, and recycling costs. Each normal window
+issued work for three seconds, then completed its admitted client requests.
+Success latency below is the checked complete response; all units are milliseconds.
+
+| Workload | Successful responses | Successes/s | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Small JSON | 5,780 | 1,925.83 | 0.99 | 1.39 | 4.39 |
+| SQLite UPDATE + SELECT | 3,806 | 1,267.36 | 2.19 | 5.09 | 27.43 |
+| Default password hash + verify | 194 | 63.39 | 61.83 | 67.87 | 107.73 |
+| 256 KiB binary upload + echo | 3,562 | 1,186.63 | 2.19 | 2.99 | 106.34 |
+| 256 KiB binary download | 4,301 | 1,432.84 | 1.62 | 2.05 | 107.40 |
+| Four flushed chunks + four 5 ms sleeps | 222 | 72.85 | 54.47 | 61.12 | 63.34 |
+| Paced binary reader (intentional client delay) | 72 | 23.61 | 166.64 | 202.39 | 206.40 |
+| Overload: 16 clients, 100 ms script sleep | 66 | 18.97 | 510.61 | 618.66 | 624.45 |
+
+All successful outputs were validated. Binary bodies matched all 256 byte values
+repeated to 256 KiB, password verification returned true, and the persisted SQLite
+counter was exactly 3,808 (measured requests plus two warmups). Streaming first-body
+byte p50/p95/p99 was 28.09/32.74/34.91 ms, distinct from full-body completion.
+The stream also includes queue wait behind the second worker's request and OS
+sleep scheduling. The paced reader intentionally limits client consumption;
+its latency is not backend-only execution time.
+
+The overload window returned 13,349 expected `503` responses as well as 66
+successes, ending after 3.479 seconds including admitted work. Its overall
+responses/s is dominated by rejection speed; the table deliberately reports only
+successful throughput/latency. Recovery returned to two healthy idle workers,
+zero queued/active/busy/recovering gauges, and no owned spools after every phase.
+Observed queue and busy maxima were eight and two. Readiness/ready-worker samples
+reached zero during simultaneous recycling and recovered; these are observed
+leases, not an availability guarantee.
+
+The soak had a 60-second maximum and a 100,000-request ceiling; it reached the
+request ceiling after **55.061 seconds**, completing all 100,000 JSON responses
+with status 200 (1,816.16 successful responses/s). Its success latency p50/p95/p99
+was 1.02/1.44/60.91 ms. A fifth client completed 25 controlled buffered application
+failures, 24 execution timeouts, and 24 early client disconnects from an 8 MiB
+flushed response carrying a raw upload spool. No automatic request replay was
+used. Across the complete measurement run:
+
+- 131,443 application requests accounted exactly for timed responses, 18 warmups,
+  and 73 injected faults. There were 24 deadline events, 24 interrupted bodies,
+  and 48 failed-worker exchanges corresponding to timeouts/disconnects.
+- 579 request-count retirements and 627 successful replacements produced 629
+  observed worker PIDs, with no worker startup or worker-loop failures. This
+  repeated-failure run complements the explicit startup/panic recovery regressions.
+- Final recovered capacity was two workers. Graceful stop exited zero, all
+  request/queue/busy/worker/recovering gauges were zero, no spools remained, and
+  none of the 629 observed workers survived the supervisor.
+
+There were 153 RSS/metrics observations at approximately 0.5-second intervals.
+Maximum observed supervisor RSS was 12.03 MiB; maximum aggregate worker RSS was
+58.11 MiB during hashing. These are sampled resident values, not OS peak RSS,
+unique memory, allocator bytes, or the language's logical value budget. The sum
+can count shared pages repeatedly, and hashing uses native working memory.
+
+Within the soak, supervisor RSS median over the first ten samples was 12.016 MiB,
+and over the last ten was 12.031 MiB. Restricting worker comparisons to samples
+with two OS children, the first/last five-sample medians were 17.44/17.55 MiB
+aggregate. Other samples had zero or one child during replacement; unconditioned
+worker-RSS medians would confuse churn with memory growth. The observed interval
+showed bounded queues and successful resource cleanup. It does not prove absence
+of long-term leaks, establish a process heap cap, or predict a production workload.
+
+No hot-path optimization was made: the short local measurements, shared Python
+client, deliberate recycling, and synthetic fault/sleep workloads do not isolate
+an implementation bottleneck that justifies changing language or hosting semantics.
+There is no PHP/other-language parity, public-TLS/proxy, multi-host, cold-cache,
+long-duration capacity, or Linux/Windows speed claim. Repeat on a quiet native
+host before using these observations for capacity decisions.
+
+Native macOS 27.0.1 checks are recorded in [development validation](development.md#http-measurement-and-native-validation).
+Linux x86-64/ARM64, Windows Server 2022, and the native macOS 15 baseline were not
+available for this milestone run. Historical compatibility/release receipts remain
+unchanged; debug tests and the optimized measurement binary do not replace native
+dist-test, dependency-inspection, archive, and extracted-package smoke evidence.
