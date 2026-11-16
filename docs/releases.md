@@ -54,7 +54,8 @@ minimal-build SQLite tests, Clippy with warnings denied, and `git diff --check`.
 After every check succeeds, it prompts for **patch**, **minor**, **major**, or
 **cancel** (the default). From 0.1.0 these choices produce 0.1.1, 0.2.0, or 1.0.0.
 It updates `Cargo.toml` and the workspace package entries in `Cargo.lock`, preserves
-dependency pins, and verifies the lockfile with a locked Cargo resolve. Failed lockfile
+dependency pins and LF/CRLF line endings, and verifies the lockfile with a locked
+Cargo resolve. Failed lockfile
 validation restores the original version files. A failed test or cancellation
 does not bump the version. Existing working-tree edits are allowed; review the
 complete intended source before committing.
