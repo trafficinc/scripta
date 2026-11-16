@@ -119,25 +119,19 @@ fn modes_permissions_roots_symlinks_and_result_budgets_fail_before_mutation() {
             b"keep"
         );
     }
-    let mut permissions = fs::metadata(directory.path().join("original"))
+    let original_permissions = fs::metadata(directory.path().join("original"))
         .unwrap()
         .permissions();
+    let mut permissions = original_permissions.clone();
     permissions.set_readonly(true);
-    fs::set_permissions(directory.path().join("original"), permissions.clone()).unwrap();
+    fs::set_permissions(directory.path().join("original"), permissions).unwrap();
     assert!(
         run(&mut runtime, "Stream::open(\"original\",\"w\");")
             .unwrap_err()
             .message
             .contains("read-only")
     );
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        permissions.set_mode(0o600);
-    }
-    #[cfg(windows)]
-    permissions.set_readonly(false);
-    fs::set_permissions(directory.path().join("original"), permissions).unwrap();
+    fs::set_permissions(directory.path().join("original"), original_permissions).unwrap();
     let mut small = super_runtime(
         directory.path(),
         RuntimeOptions {
