@@ -157,3 +157,19 @@ worker path. RSS is not sampled during timing trials. No elapsed-time or RSS
 thresholds are enforced: establish repeated native baselines before selecting limits.
 The timings cannot establish a hard pause guarantee, and the ordinary workload
 cannot establish GC-on versus GC-off overhead without a suitable reference build.
+
+## Standalone HTTP hosting
+
+Use the bounded [HTTP protocol](serve.md) and standard-library-only driver:
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo build -p scr-cli --profile dist --locked --offline --target aarch64-apple-darwin
+python3 benchmarks/serve.py --scripta target/aarch64-apple-darwin/dist/scripta --output /private/tmp/scripta-http-new-run.json
+python3 -m unittest discover -s benchmarks -p 'test_*.py'
+```
+
+Use the matching native target on each host. The driver exercises SQLite, default
+password hashing, checked binary transfers, streaming, paced readers, overload,
+recycling, repeated failures/disconnects, RSS sampling, and cleanup. Reports never
+overwrite existing files. Retained local evidence and limitations are in
+[the HTTP measurements](../docs/performance.md#standalone-http-hosting--2026-11-15).

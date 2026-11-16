@@ -1,0 +1,49 @@
+<?scripta
+$request = Web::request();
+if ($request->path === "/json") {
+    Web::header("Content-Type", "application/json");
+    echo Json::encode(["ok" => true, "path" => "/json"]);
+} elseif ($request->path === "/sqlite") {
+    $db = Sqlite::open("work.sqlite", false, 500);
+    try {
+        Sqlite::execute($db, "UPDATE visits SET total = total + 1 WHERE id = 1");
+        $rows = Sqlite::query($db, "SELECT total FROM visits WHERE id = 1");
+        echo Json::encode($rows[0]);
+    } finally {
+        Sqlite::close($db);
+    }
+} elseif ($request->path === "/hash") {
+    $hash = Password::hash("public benchmark password");
+    echo Json::encode(["verified" => Password::verify("public benchmark password", $hash)]);
+} elseif ($request->path === "/upload") {
+    Web::header("Content-Type", "application/octet-stream");
+    Web::write($request->bytes());
+} elseif ($request->path === "/download") {
+    $file = Stream::open("payload.bin", "r");
+    try {
+        Web::download($file, "payload.bin");
+    } finally {
+        Stream::close($file);
+    }
+} elseif ($request->path === "/stream") {
+    for ($i = 0; $i < 4; $i += 1) {
+        echo "chunk-" . str($i) . "\n";
+        flush();
+        Date::sleep(5);
+    }
+} elseif ($request->path === "/slow") {
+    Date::sleep(100);
+    echo "ok";
+} elseif ($request->path === "/failure") {
+    throw "controlled benchmark error";
+} elseif ($request->path === "/timeout") {
+    Date::sleep(3000);
+} elseif ($request->path === "/abandon") {
+    $chunk = File::read("chunk.txt");
+    for ($i = 0; $i < 128; $i += 1) {
+        echo $chunk;
+        flush();
+    }
+} else {
+    Web::status(404);
+}
