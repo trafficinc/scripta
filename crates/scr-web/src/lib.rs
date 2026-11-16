@@ -1,5 +1,6 @@
 //! Bounded HTTP hosting with persistent, supervised interpreter processes.
 #![forbid(unsafe_code)]
+mod dev;
 mod health;
 mod observe;
 mod proxy;

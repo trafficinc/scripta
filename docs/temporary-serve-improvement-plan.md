@@ -6,7 +6,7 @@ isolated worker processes and deployment behind an HTTPS reverse proxy.
 
 ## Progress and approval rules
 
-Current position: **Sections 1–4 accepted; Section 5 complete and validated, awaiting acceptance and explicit OK to begin Section 6.**
+Current position: **Sections 1–5 accepted; Section 6 complete and validated, awaiting acceptance and explicit OK to begin Section 7.**
 
 | Section | Scope | Status |
 | --- | --- | --- |
@@ -14,8 +14,8 @@ Current position: **Sections 1–4 accepted; Section 5 complete and validated, a
 | 2 | Trusted reverse proxies | Accepted |
 | 3 | Logs and health checks | Accepted |
 | 4 | Deployment and shutdown | Accepted |
-| 5 | Worker resilience | Complete; awaiting acceptance |
-| 6 | Development workflow | Not started |
+| 5 | Worker resilience | Accepted |
+| 6 | Development workflow | Complete; awaiting acceptance |
 | 7 | Performance and platform evidence | Not started |
 
 For each section:
@@ -527,29 +527,120 @@ Validation evidence (2026-11-15):
   delays remain separate from request deadlines. Section 6 remains unstarted
   pending explicit approval.
 
-Acceptance / OK to proceed: pending.
+Acceptance / OK to proceed: user replied “ok”, accepting Section 5 and approving Section 6.
 
 ## Section 6 — Development workflow
 
-- [ ] Explicit approval to begin recorded.
-- [ ] Add explicit opt-in development/watch mode with documented watch roots,
+- [x] Explicit approval to begin recorded: user replied “ok” after Section 5 was presented.
+- [x] Add explicit opt-in development/watch mode with documented watch roots,
       exclusions, debounce, symlink behavior, and bounded watch resources.
-- [ ] Reload entry scripts and includes through a coherent worker generation;
+- [x] Reload entry scripts and includes through a coherent worker generation;
       do not let one request mix runtime state from different generations.
-- [ ] Define failed-reload behavior, in-flight request draining, and detection of
+- [x] Define failed-reload behavior, in-flight request draining, and detection of
       multi-file edits. Do not imply arbitrary filesystem edits are transactional.
-- [ ] Show actionable local syntax/startup errors without exposing diagnostics
+- [x] Show actionable local syntax/startup errors without exposing diagnostics
       to public HTTP clients by default.
-- [ ] Ensure ordinary production mode retains its existing explicit deployment
+- [x] Ensure ordinary production mode retains its existing explicit deployment
       behavior and does not start a file watcher.
-- [ ] Test entry/include edits, rapid edits, invalid source, generation isolation,
+- [x] Test entry/include edits, rapid edits, invalid source, generation isolation,
       cleanup, and watch shutdown; execute the local developer workflow.
-- [ ] Run checks, record evidence, and present for acceptance before Section 7.
+- [x] Run checks, record evidence, and present for acceptance before Section 7.
 
 Completion criteria: developers can refresh entry scripts and includes reliably
 without enabling watch behavior in ordinary deployments.
 
-Validation evidence: pending.
+Implemented contract:
+
+- Added explicit `--watch`/`--no-watch`, TOML `watch`, and configurable
+  `watch-debounce-ms` (default 200, bounds 50–5000). CLI overrides files;
+  check/print modes create neither watcher nor snapshots. Ordinary serving
+  remains explicit deployment mode without source polling.
+- New `scr-web::dev` polls bytes every 100 ms under the canonical entry's parent.
+  Watches visible `.scripta`/`.scta`/`.scr`/`.inc` sources; excludes hidden names,
+  `target`, `node_modules`, and symlink files/directories. Bounds scans to 4096
+  encountered entries, depth 32, 1 MiB of relative paths, and 16 MiB of selected
+  source bytes, with metadata checks and bounded reads. No watcher dependency.
+- Debounce requires a later unchanged scan. Candidate sources are UTF-8/syntax
+  checked and copied into a private per-generation temporary tree, explicitly
+  0700 on Unix before writing sources. Entry and includes share that tree;
+  CLI worker registration applies the existing public canonical module policy
+  to confine includes. No runtime backend/API or native exports changed.
+- Candidate workers stage before old admission stops, with one 30-second startup
+  allowance. Failed validation/startup retains the old generation. Successful
+  staging marks readiness false, drains old connections/queued work/streams
+  within the configured budget, then activates the new pool on the same bound
+  listener/session store. At most two configured worker pools coexist. Ordinary
+  termination still closes its listener before draining.
+- Added watch/reload-ready, reload-draining, and bounded failure diagnostics.
+  Initial explicit-watch syntax errors use existing masked local line/column
+  rendering; reload errors give relative file/byte/code guidance. HTTP errors
+  remain generic. Source-content changes retry failed candidates; configuration,
+  environment, and unchanged saves do not trigger reload.
+- Documented non-transactional multi-file saves, temporary admission pauses,
+  supported relative/vendored includes, snapshot source paths, live ordinary
+  file I/O, limits, cleanup, and platform gaps. Added formatted/executed
+  `examples/watch/` with entry, include, and TOML settings. Updated help,
+  hosting, architecture, development, extension, and example references.
+
+Validation evidence (2026-11-15):
+
+- Base revision `bff21b7` plus Section 6 working-tree changes. Native macOS
+  27.0.1 arm64; pinned Rust 1.99.1 compiler host/target
+  `aarch64-apple-darwin`; Cargo build/test/lint commands used
+  `MACOSX_DEPLOYMENT_TARGET=15.0`. No dependencies/lockfile changes, commit, tag,
+  release, service installation, or public deployment.
+- `cargo test -p scr-web --lib --locked --offline --target
+  aarch64-apple-darwin`: 19 passed. New coverage includes source selection,
+  excluded trees, symlink files/directories, cancellation, exact 4096-entry and
+  16 MiB byte limits and limit-plus-one, depth rejection, invalid syntax,
+  snapshot removal, and explicit Unix private permissions. Final full runs
+  include the permission assertion added during review.
+- `cargo test -p scr-cli --test web_server --test serve_config --locked
+  --offline --target aarch64-apple-darwin`: 80 passed (71 HTTP, nine config).
+  New tests cover opt-in/disable/preference/bounds, masked local startup errors,
+  entry/include edits, rapid multi-file save coalescing, last-good syntax/startup
+  fallback, unchanged ordinary serving, and real source generation isolation.
+- A held streaming request first executed its include only after the editor
+  saved a new include/entry pair and replacement workers staged. It still read
+  the old snapshot, while readiness was 503 during draining; the next request
+  read the new generation. Tests verified old snapshot removal and upload spool
+  cleanup. Termination during watch drain reaped both old and staged children
+  and removed the old snapshot without activating the staged generation.
+- Failed-start fixture temporarily made its private session directory invalid,
+  verified no candidate worker became usable, restored the directory before
+  probing old service, and changed source again to trigger successful retry.
+  This preserves session storage validation instead of bypassing it.
+- Used the environment approval mechanism for localhost/subprocess/signal tests.
+  Initial watch tests found a real macOS `/var` versus `/private/var` canonical
+  include-boundary mismatch; canonicalized that boundary and reran successfully.
+  Corrected fixture assumptions about masked comments and invalid shared storage.
+  Review found default TempDir permissions were not a private-directory contract;
+  added explicit 0700 and reran full validation after that change.
+- Final `cargo test --workspace --all-features --locked --offline --target
+  aarch64-apple-darwin` and `cargo test --workspace --locked --offline --target
+  aarch64-apple-darwin`: each passed 639 tests, zero failures/ignored.
+- Final `cargo test -p scr-cli --test web_server --test serve_config
+  --no-default-features --locked --offline --target aarch64-apple-darwin`:
+  79 passed, including the watch example, reload, failure, and shutdown scenarios.
+- `cargo clippy --workspace --all-targets --all-features --locked --offline
+  --target aarch64-apple-darwin -- -D warnings`, `cargo fmt --all -- --check`,
+  Markdown reference paths, new-file whitespace, and `git diff --check` passed.
+- `cargo +1.85.0 check -p scr-cli --locked --offline --target
+  aarch64-apple-darwin` passed; compilation only, not minimum-Rust tests.
+- `cargo run -p scr-cli --locked --offline --target aarch64-apple-darwin --`
+  followed by `check` and `fmt --check` for both `examples/watch/main.scripta`
+  and `examples/watch/message.inc` passed. The shipped TOML/example executed
+  actual local HTTP before/after a controlled include edit in fixture storage;
+  repository example files were preserved. Logs are retained locally under
+  `/private/tmp/scripta-section6-*.log` for this session.
+- Linux/Windows and native macOS 15 baseline execution remain pending. Unix
+  symlink/permission/signal tests do not establish Windows behavior. Watch mode
+  deliberately confines source includes to a small snapshot tree; arbitrary
+  absolute/external/package/non-source includes retain full behavior only in
+  ordinary serving. Filesystem reads are not transactional and are not a hostile
+  filesystem sandbox; blocking filesystem/OS/log-sink work can add stop overhead.
+  No zero-downtime or performance claim was added. Section 7 remains unstarted
+  pending explicit approval.
 
 Acceptance / OK to proceed: pending.
 

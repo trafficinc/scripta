@@ -115,8 +115,8 @@ every request. Required/imported scripts are still loaded per request; the entry
 script cache is an AST cache, not bytecode or a JIT.
 
 The parent keeps one startup snapshot of the entry script, also used by replacement
-workers. Restart the service to deploy entry-script changes. Includes and data
-files are not snapshotted: use an immutable application directory and a graceful
+workers. In ordinary production mode, restart the service to deploy entry-script
+changes. Includes and data files are not snapshotted: use an immutable application directory and a graceful
 service replacement for consistent multi-file deployments.
 
 | Option | Default | Bounds / meaning |
@@ -124,6 +124,8 @@ service replacement for consistent multi-file deployments.
 | `--host` | `127.0.0.1` | IP address; use a local reverse proxy for public HTTPS. |
 | `--port` | `8080` | 0–65535; 0 selects an available port and prints it to stderr. |
 | `--workers` | CPU count, capped at 4 | 1–64 persistent processes; one active request per worker. |
+| `--watch` / `--no-watch` | disabled | Opt into local source polling/snapshots, or override a file setting to disable them. |
+| `--watch-debounce-ms` | `200` | 50–5000 ms of observed stable source content before building a candidate. |
 | `--worker-max-requests` | `0` | 0 disables request-count recycling; 1–1000000 completed request exchanges per worker before replacement. |
 | `--queue` | `32` | 1–4096 waiting requests, including reservations while receiving bodies. |
 | `--max-connections` | `128` | 1–4096 open HTTP connections. Excess connections close immediately. |
@@ -240,6 +242,93 @@ explicitly saved uploads and completed filesystem/database/network side effects
 cannot be rolled back. External forced kills or machine failure may leave
 persistent-directory debris requiring operator cleanup. Worker stdin monitoring
 also exits workers when their parent pipe closes, including during native work.
+
+## Development watch mode
+
+Run the dedicated [watch example](../examples/watch/main.scripta):
+
+```sh
+scripta serve examples/watch/main.scripta --config examples/watch/serve.toml
+# In another terminal, edit examples/watch/message.inc, save, then refresh:
+curl --fail http://127.0.0.1:8080/
+curl --fail http://127.0.0.1:9090/readyz
+```
+
+Use bare `--watch` or TOML `watch = true` to opt in; `--no-watch` overrides a
+file-configured watcher. Normal serving starts no polling task and retains its
+explicit production deployment behavior. Check/print configuration modes do not
+start a watcher or create snapshots. The canonical entry's parent is the single
+watch root; use a dedicated small application directory. There is no implicit
+repository-wide watch or external-root discovery. Configuration files, environment
+changes, package manifests, and service settings require an explicit restart.
+
+The host polls source contents every 100 ms. Visible `.scripta`, `.scta`, `.scr`,
+and `.inc` files are included recursively; comparisons use bytes, so a same-size
+or timestamp-preserving edit is detected. Hidden names, `target`, and `node_modules`
+subtrees are excluded, and symlink files/directories are skipped. Other files are
+not copied. The existing entry argument is canonicalized first; a symlink entry
+therefore chooses its target directory as the root. New visible source files and
+deletions are detected. Replacing files with editor rename saves works on the
+next successful scan.
+
+Watch scans are bounded to 4096 encountered directory entries (including excluded
+names at visited levels), directory depth 32, 1 MiB of relative path bytes, and
+16 MiB of selected source contents per scan. Known sizes are checked before
+reading, then reads remain bounded against growth. Existing per-source/runtime
+limits still apply. Polling retains bounded current/previous contents and one
+latest candidate notification, with at most an active, staged, and newer pending
+snapshot on disk. These are source budgets, not a process heap cap. The source
+root is trusted developer input; skipping symlinks is not a defense against
+hostile concurrent filesystem replacement or a hung filesystem.
+
+A content change restarts the debounce interval (`watch-debounce-ms`, default
+200 ms, bounds 50–5000), and an unchanged later scan must observe that interval
+before validation. This coalesces rapid saves but does not make arbitrary multi-file
+edits transactional. If edits span a quiet interval, an intermediate valid
+combination can become a generation. Coordinate larger edits outside the watched
+root and replace them together, or stop the server while editing.
+
+Each validated candidate is copied into a private temporary source tree. Its
+workers use that tree for both entry and includes, including includes first
+executed after an editor save. Includes must resolve within that snapshot;
+absolute paths into the original root, parent traversal outside it, symlinked
+sources, externally installed packages, and non-source includes are unavailable.
+Vendor required source under the root with relative includes for this workflow.
+Host-provided script/source paths refer to the snapshot. Ordinary relative
+file I/O keeps the process working directory and is not snapshotted; keep data,
+uploads, sessions, databases, and application writes outside source snapshots.
+Application code must not modify its snapshot files. For full filesystem or
+package semantics, use ordinary serving with immutable releases.
+
+Before changing admission, the host starts a candidate worker pool with a shared
+30-second startup allowance. Failure retains the old generation. Successful
+staging marks readiness false, closes old keep-alive connections, and drains old
+admitted requests/streams under `drain-timeout-ms`; requests cannot mix entry and
+include generations. The existing listener stays bound, but the accept loop
+pauses during candidate startup/drain. New TCP connections may wait in the OS
+backlog; this is a development restart with possible closed connections or
+truncated streams at deadline, not a zero-downtime promise. At most two configured
+worker pools coexist during staging/drain. The same host session store survives
+reload; completed side effects still cannot be rolled back.
+
+`watch_ready` and `reload_ready` report the generation and local snapshot root;
+`reload_draining` marks the pause. `reload_failed` reports scan, syntax, or worker
+startup failure locally. Reload syntax diagnostics contain a relative source path,
+byte offset, and parser code where available, without source excerpts; run
+`scripta check` on that file for the full masked diagnostic. Initial entry errors
+with explicit watch mode show the normal local masked diagnostic with line/column.
+HTTP clients retain generic error bodies; no source diagnostics endpoint exists.
+These extra local path diagnostics are specific to opt-in watch mode.
+
+An invalid edit leaves the last good snapshot running. A failed startup also
+retains the old pool; repair storage/privacy/source-limit problems before probing
+it, since those failures can independently affect serving. Another source-content
+change retries reload; unchanged saves/timestamps or restored non-source settings
+alone do not. Scan failures log once per continuous failure and resume checking
+when scans succeed. Termination cancels pending polling and candidate startup,
+drains admitted work within the existing deadline, terminates staged children,
+and removes owned snapshots/spools. Blocking filesystem work, OS reaping, and log
+sinks can add shutdown overhead. Native platform validation remains separate.
 
 ## Deployment and service management
 
@@ -428,7 +517,8 @@ Snapshots contain server-lifetime saturating counters: `requests`,
 `activeRequests`, `queuedRequests` (including reserved body reception),
 `busyWorkers`, `readyWorkers` (healthy handshake leases, including busy workers),
 `configuredWorkers` (target capacity), and `recoveringWorkers` (slots waiting for
-retry or replacement startup); booleans are `ready`, `starting`, and `draining`.
+retry or replacement startup); booleans are `ready`, `starting`, `draining`, and `reloading`. During a development
+generation drain, readiness is false and `reloading` is true.
 Snapshots read counters independently and are approximate under concurrency.
 There is no per-client/URL label, retained request history, or process heap metric.
 

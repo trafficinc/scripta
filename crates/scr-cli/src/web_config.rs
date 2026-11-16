@@ -27,6 +27,10 @@ struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     worker_max_requests: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    watch: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    watch_debounce_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     queue: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_connections: Option<usize>,
@@ -108,6 +112,12 @@ impl Settings {
         }
         if let Some(value) = self.worker_max_requests {
             config.worker_max_requests = value;
+        }
+        if let Some(value) = self.watch {
+            config.watch = value;
+        }
+        if let Some(value) = self.watch_debounce_ms {
+            config.watch_debounce = Duration::from_millis(value);
         }
         if let Some(value) = self.queue {
             config.queue = value;
@@ -224,6 +234,13 @@ impl Options {
                 };
                 continue;
             }
+            if matches!(key, "--watch" | "--no-watch") {
+                if settings.watch.is_some() {
+                    return Err("--watch and --no-watch are mutually exclusive".into());
+                }
+                settings.watch = Some(key == "--watch");
+                continue;
+            }
             let value = args
                 .next()
                 .ok_or_else(|| format!("missing value for {key}"))?;
@@ -285,6 +302,14 @@ impl Options {
                             .and_then(|s| s.parse::<usize>().ok())
                             .ok_or("invalid value for --max-connections")?,
                     )
+                }
+                "--watch-debounce-ms" => {
+                    settings.watch_debounce_ms = Some(
+                        value
+                            .to_str()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .ok_or("invalid watch-debounce-ms")?,
+                    );
                 }
                 "--worker-max-requests" => {
                     settings.worker_max_requests = Some(
@@ -497,7 +522,10 @@ fn read_settings(path: &Path) -> Result<Settings, Error> {
                 }),
                 "host" | "log-format" | "health-address" => value.is_str(),
                 "port" => value.as_integer().is_some_and(|n| n >= 0),
-                "workers" | "worker-max-requests" => value.as_integer().is_some_and(|n| n >= 0),
+                "watch" => value.is_bool(),
+                "workers" | "worker-max-requests" | "watch-debounce-ms" => {
+                    value.as_integer().is_some_and(|n| n >= 0)
+                }
                 "queue" => value.as_integer().is_some_and(|n| n >= 0),
                 "max-connections" => value.as_integer().is_some_and(|n| n >= 0),
                 "max-body-bytes" => value.as_integer().is_some_and(|n| n >= 0),
@@ -565,6 +593,8 @@ pub(super) fn inspect(config: &scr_web::Config) -> Result<String, Error> {
         port: Some(config.port),
         workers: Some(config.workers),
         worker_max_requests: Some(config.worker_max_requests),
+        watch: Some(config.watch),
+        watch_debounce_ms: Some(config.watch_debounce.as_millis() as u64),
         queue: Some(config.queue),
         max_connections: Some(config.max_connections),
         max_body_bytes: Some(config.max_body_bytes),

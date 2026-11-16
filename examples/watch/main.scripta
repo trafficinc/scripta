@@ -1,0 +1,4 @@
+<?scripta
+require "message.inc";
+Web::header("Content-Type", "text/plain; charset=utf-8");
+echo $message;

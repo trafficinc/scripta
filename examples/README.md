@@ -97,3 +97,12 @@ then request the application on port 8080 and `/livez`, `/readyz`, or `/metrics`
 on port 9090. These management paths never execute application code. See
 [logs and health checks](../docs/web-servers.md#logs-and-health-checks) for privacy,
 resource limits, and the current readiness/recovery limitations.
+
+The dedicated `watch/` application demonstrates opt-in development reloads:
+
+```sh
+scripta serve examples/watch/main.scripta --config examples/watch/serve.toml
+```
+
+Edit `watch/message.inc`, wait for `reload_ready`, and refresh the application.
+See [watch roots, limits, and generation semantics](../docs/web-servers.md#development-watch-mode).

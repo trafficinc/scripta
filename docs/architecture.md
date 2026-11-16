@@ -458,3 +458,14 @@ fixed connection/header/time bounds. Readiness uses startup/drain flags, known
 worker leases, and admission capacity; probes do not initiate worker recovery or
 check application dependencies. Body completion records mean handoff to Hyper,
 not proof of remote receipt. See [hosting observability](web-servers.md#logs-and-health-checks).
+
+Opt-in development polling and source snapshots live in `scr-web::dev`. Production
+serving never starts that task. Bounded recursive scans compare source bytes and
+debounce changes before validating/copying a private generation tree. Candidate
+workers are staged before the old pool's connection/worker drain; a stable
+application listener and session store survive generation changes. The CLI worker
+registration installs a snapshot-root include policy through the existing public
+runtime interface, preserving canonical include identity and fresh request state
+without adding a runtime filesystem backend. Reload failure retains the old pool;
+shutdown owns polling cancellation, staged children, and snapshot cleanup. See
+[watch semantics and limits](web-servers.md#development-watch-mode).
