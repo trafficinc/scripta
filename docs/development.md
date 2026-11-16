@@ -505,7 +505,14 @@ MACOSX_DEPLOYMENT_TARGET=15.0 cargo clippy --workspace --all-targets --all-featu
 MACOSX_DEPLOYMENT_TARGET=15.0 cargo +1.85.0 check --workspace --all-targets --all-features --locked --offline --target aarch64-apple-darwin
 ```
 
-Results are recorded in the temporary improvement plan's Section 7 evidence.
+Validation on 2026-11-15 (America/New_York), against base revision
+`df6607e38bda822248e9b53396aef1a0fdfd5fc1` plus the recorded measurement changes,
+passed 639 tests each with default and all features, 80 minimal-feature tests,
+six collection unit tests, and 21 collection integration tests. Formatting,
+all-target/all-feature Clippy with warnings denied, and the Rust 1.85.0
+all-target/all-feature workspace compile check passed. The benchmark Python
+suite passed seven tests; the validation/publication Python suite passed 11.
+The benchmark fixture passed syntax/format checks and real local HTTP execution.
 The minimum-Rust command checks compilation, not runtime tests. The benchmark
 requires SQLite; minimal-feature behavior is covered by separate native tests.
 No Linux/Windows/native macOS 15 host was available for this milestone. Retain
