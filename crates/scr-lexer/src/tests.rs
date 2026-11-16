@@ -107,17 +107,27 @@ fn every_operator_and_punctuation() {
 }
 
 #[test]
-fn missing_tag_and_executable_preamble() {
+fn opening_tags_are_optional_but_malformed_and_embedded_tags_are_rejected() {
     for source in [
         "",
-        "echo 1;",
-        "<?php echo 1;",
-        "<?script",
-        "text <?scr",
+        " \r\n",
+        "// comment",
+        "/* comment */",
+        "#!/usr/bin/env scripta",
+        "\u{feff}",
         "?>",
-        "// comment\n<?scr",
     ] {
+        let tokens = lex(source).unwrap();
+        assert_eq!(tokens.len(), 1, "{source}");
+        assert_eq!(tokens[0].kind, TokenKind::Eof);
+        assert_eq!(tokens[0].span, Span::new(source.len(), source.len()));
+    }
+    assert_eq!(lex("echo 1;").unwrap()[0].kind, TokenKind::Echo);
+    for source in ["<?php echo 1;", "<?script", "<?"] {
         fails(source, LexerErrorKind::MissingOpeningTag);
+    }
+    for source in ["text <?scr", "// comment\n<?scr", "echo 'x'; <?scripta"] {
+        fails(source, LexerErrorKind::InvalidOperator);
     }
 }
 
@@ -139,12 +149,11 @@ fn bom_shebang_and_opening_tag() {
             SourcePosition::at(&source, tokens[0].span.start)
         );
     }
-    fails("#!/usr/bin/env scripta", LexerErrorKind::MissingOpeningTag);
     fails(
         " \n#!/usr/bin/env scripta\n<?scr",
-        LexerErrorKind::MissingOpeningTag,
+        LexerErrorKind::InvalidOperator,
     );
-    fails("\u{feff}\u{feff}<?scr", LexerErrorKind::MissingOpeningTag);
+    fails("\u{feff}\u{feff}<?scr", LexerErrorKind::InvalidCharacter);
 }
 
 #[test]
@@ -378,7 +387,7 @@ fn source_positions_remain_valid_over_a_small_adversarial_corpus() {
 #[test]
 fn canonical_and_legacy_opening_tags_have_identical_tokens_and_correct_spans() {
     let mut expected = None;
-    for tag in ["<?scripta", "<?scr"] {
+    for tag in ["", "<?scripta", "<?scr"] {
         for preamble in [
             "",
             "\u{feff}",
@@ -429,13 +438,31 @@ fn opening_tag_boundaries_reject_typos_and_diagnostics_recommend_canonical_tag()
         let error = fails(source, LexerErrorKind::MissingOpeningTag);
         let diagnostic: Diagnostic = error.into();
         let rendered = diagnostic.render("test.scripta", source);
-        assert!(
-            rendered.contains("expected opening tag <?scripta"),
-            "{rendered}"
+        assert!(rendered.contains("invalid opening tag"), "{rendered}");
+        assert!(rendered.contains("omit the opening tag"), "{rendered}");
+    }
+}
+
+#[test]
+fn tag_free_comments_and_preambles_keep_original_source_positions() {
+    for ending in ["\n", "\r\n", "\r"] {
+        let source = format!(
+            "\u{feff}#!/usr/bin/env scripta{ending}// <?scripta stays in a comment{ending}\techo \"世界 <?scr ?>\";"
         );
-        assert!(
-            rendered.contains("legacy <?scr is also accepted"),
-            "{rendered}"
-        );
+        let tokens = lex(&source).unwrap();
+        assert_eq!(tokens[0].span.start, source.find("echo").unwrap());
+        assert_eq!((tokens[0].start.line, tokens[0].start.column), (3, 2));
+        assert_eq!(tokens[1].kind, TokenKind::String("世界 <?scr ?>".into()));
+        for token in tokens {
+            assert_eq!(token.start, SourcePosition::at(&source, token.span.start));
+            assert_eq!(token.end, SourcePosition::at(&source, token.span.end));
+        }
+    }
+    for source in [
+        "echo 'ok'; ?> trailing",
+        "echo 'ok'; ?> // comment",
+        "?> ?>",
+    ] {
+        fails(source, LexerErrorKind::ContentAfterClosingTag);
     }
 }

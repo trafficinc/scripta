@@ -90,6 +90,7 @@ pub struct Token {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LexerErrorKind {
+    /// Historical name retained for malformed optional opening tags.
     MissingOpeningTag,
     ContentAfterClosingTag,
     InvalidVariable,
@@ -122,7 +123,7 @@ impl From<LexerError> for Diagnostic {
     fn from(error: LexerError) -> Self {
         let help = match error.kind {
             LexerErrorKind::MissingOpeningTag => {
-                "start every script with <?scripta (legacy <?scr is also accepted)"
+                "omit the opening tag, or use <?scripta (legacy <?scr is also accepted)"
             }
             LexerErrorKind::ContentAfterClosingTag => {
                 "move script content before ?> or omit the closing tag"
@@ -232,18 +233,22 @@ impl<'a> Lexer<'a> {
             .into_iter()
             .find(|tag| self.rest().starts_with(tag))
         else {
-            return Err(self.error(
-                LexerErrorKind::MissingOpeningTag,
-                start,
-                "expected opening tag <?scripta (legacy <?scr is also accepted)",
-            ));
+            if self.rest().starts_with("<?") {
+                self.consume("<?");
+                return Err(self.error(
+                    LexerErrorKind::MissingOpeningTag,
+                    start,
+                    "invalid opening tag; use <?scripta or legacy <?scr, or omit it",
+                ));
+            }
+            return Ok(());
         };
         self.consume(tag);
         if self.peek().is_some_and(identifier_continue) {
             return Err(self.error(
                 LexerErrorKind::MissingOpeningTag,
                 start,
-                "expected opening tag <?scripta (legacy <?scr is also accepted)",
+                "invalid opening tag; use <?scripta or legacy <?scr, or omit it",
             ));
         }
         Ok(())

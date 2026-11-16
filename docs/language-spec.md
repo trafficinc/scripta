@@ -9,16 +9,17 @@ The official source extension is `.scripta`; `.scta` is an accepted shorthand.
 The `scr` command and `.scr` files remain compatible. Execution, syntax checking,
 formatting, and local includes accept explicit filenames without restricting
 extensions or guessing missing suffixes. Both command names use the same parser
-and runtime. Use the canonical opening tag `<?scripta`; legacy `<?scr` remains
-accepted in every supported file extension, including `.scta`. The formatter
-preserves the opening spelling already present in a file.
+and runtime. Scripts may start directly with code. Optional `<?scripta` and legacy
+`<?scr` opening tags remain accepted in every supported file extension, including
+`.scta`. The formatter preserves an existing opening spelling and does not add
+a tag to tag-free source.
 
 ## Final language decisions
 
 | Feature | Decision |
 | --- | --- |
 | Language / executable / extension | Scripta / `scripta` / `.scripta` |
-| Opening tag | Required `<?scripta` or legacy `<?scr` |
+| Opening tag | Optional `<?scripta` or legacy `<?scr`; standalone source needs neither |
 | Closing tag | Optional `?>` |
 | Execution | Synchronous, sequential, top to bottom |
 | Variables | `$name` |
@@ -43,12 +44,17 @@ describes the implemented grammar and runtime semantics.
 ## Implemented subset
 
 Source is UTF-8. An optional BOM may appear at byte zero, followed by an optional
-first-line Unix shebang (`#!/usr/bin/env scripta`). Whitespace may precede the required
-`<?scripta` tag (or legacy `<?scr`); executable content and comments may not precede it. An empty script
-containing only the opening tag is valid. The tag may be immediately followed by
-whitespace, comments, or punctuation, but not an identifier continuation
-(`<?script` and `<?scriptaExtra` are invalid). Tags are case-sensitive. A closing `?>` permits only whitespace afterward, even
-excluding comments. Scripta never emits surrounding text as a template.
+first-line Unix shebang (`#!/usr/bin/env scripta`). After that preamble and any
+whitespace, source can begin directly with code or comments. An optional opening
+`<?scripta` or legacy `<?scr` may instead appear before all code and comments.
+Empty, whitespace-only, comment-only, and shebang-only programs are valid.
+
+Opening tags are recognized only in that initial position. A tag may be followed
+immediately by whitespace, comments, or punctuation, but not an identifier
+continuation (`<?script` and `<?scriptaExtra` are invalid). Tags are case-sensitive.
+The optional closing `?>` is accepted in tagged and tag-free source and permits
+only whitespace afterward, excluding comments. Text outside statements is never
+emitted as template output. Tag-like text inside strings or comments stays literal.
 
 Whitespace, `//` and `#` line comments, and non-nesting `/* ... */` block comments
 are ignored between tokens. Tags inside comments or strings are inert. A block
@@ -647,8 +653,8 @@ require_once "lib/config.scripta";
 an optional unquoted alias: `require_once expression as Helpers;`, with calls as
 `Helpers::functionName(...)`. The expression
 must evaluate to a nonempty string naming a local UTF-8 file. Every file is lexed
-independently and must start with `<?scripta` or legacy `<?scr` under the normal opening-tag rules
-(including the existing BOM/shebang handling). Each file is fully parsed before
+independently under the same optional-tag and BOM/shebang rules as entry scripts.
+Tagged and tag-free files can include one another. Each file is fully parsed before
 any of its statements execute. Dependencies are loaded only when their require
 statement executes; syntax checking a parent does not recursively open dependencies.
 

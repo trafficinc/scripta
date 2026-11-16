@@ -168,7 +168,7 @@ fn include_failures_cycles_retry_and_traces_retain_original_files() {
         "ModuleError",
     );
     let bad = dir.path().join("bad.scripta");
-    std::fs::write(&bad, "echo 'missing tag';").unwrap();
+    std::fs::write(&bad, "echo 'missing semicolon'").unwrap();
     let failure = error(
         &mut runtime,
         r#"require_once "bad.scripta";"#,
@@ -701,4 +701,29 @@ fn http_duration_includes_redirects_and_streamed_body_and_is_frozen() {
     error(&mut runtime, "$r->durationMs = 0.0;", "PropertyError");
     run(&mut runtime, "$again = $r->durationMs;").unwrap();
     assert_eq!(runtime.get_global("again"), Some(&Value::Float(duration)));
+}
+
+#[test]
+fn tag_free_entry_and_includes_share_scope_with_tagged_sources() {
+    let directory = tempfile::tempdir().unwrap();
+    let main = directory.path().join("main.scripta");
+    std::fs::write(
+        directory.path().join("legacy.scr"),
+        "<?scr $shared = $shared . ' legacy';",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.path().join("modern.scripta"),
+        "# include\n$shared = 'tag free'; require 'legacy.scr';",
+    )
+    .unwrap();
+    let mut runtime = runtime(Some(&main));
+    let mut output = Vec::new();
+    runtime
+        .execute_source(
+            "require_once 'modern.scripta'; require_once 'modern.scripta'; echo $shared;",
+            &mut output,
+        )
+        .unwrap();
+    assert_eq!(output, b"tag free legacy");
 }

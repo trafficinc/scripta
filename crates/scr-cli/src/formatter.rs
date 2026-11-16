@@ -99,7 +99,7 @@ struct Writer {
 }
 impl Writer {
     fn newline(&mut self) {
-        if !self.text.is_empty() && !self.text.ends_with('\n') {
+        if !self.text.is_empty() && self.text != "\u{feff}" && !self.text.ends_with('\n') {
             self.text.push('\n');
         }
         self.pending = false;

@@ -119,8 +119,8 @@ cargo run -p scr-cli --locked -- run examples/data-handling.scripta
 Use `scripta` as the primary command and `.scripta` for new source files. `.scta`
 is a shorthand; retain the `scr` command and `.scr` file compatibility. Keep
 internal `scr-*` crate names and existing `SCR_*` configuration names. Use
-`<?scripta` for new source, keep legacy `<?scr` accepted, and preserve the
-existing opening spelling when formatting.
+tag-free source for new scripts; keep optional `<?scripta` and legacy `<?scr`
+accepted, and preserve existing opening spellings or tag absence when formatting.
 New project manifests explicitly declare `main.scripta`; omitted entries in
 legacy manifests still resolve to `main.scr`. Preserve historical validation
 receipts and hashes when updating names.

@@ -574,3 +574,18 @@ Run the full workspace checks, the minimum-Rust check, and native platform check
 after dependency or feature changes. Follow the [release procedure](releases.md)
 for dependency notices, archive verification, and extracted-package smoke. Local
 success does not establish other-platform support.
+
+## Optional opening tags
+
+Standalone source, stdin, includes, installed packages, and web entries share the
+lexer's optional-opening-tag rule. The lexer consumes a BOM, first-line shebang,
+and optional opening spelling without inserting source bytes or shifting spans.
+Missing tags are valid; the public `MissingOpeningTag` error kind retains its
+historical name for malformed optional tags. Closing tags retain their existing
+whitespace-only suffix rule. See the [language specification](language-spec.md#implemented-subset).
+
+The formatter preserves tag presence/absence, comments, and preambles, including
+BOM-only and shebang-only files. New `scripta init` projects get a tag-free starter;
+existing source files and manifests are not overwritten. Regression coverage in
+`scr-lexer`, CLI language/tooling/pipeline/package/web tests, and the include suite
+checks tagged/tag-free interoperability, diagnostics, and exact source budgets.

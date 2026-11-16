@@ -69,8 +69,9 @@ because they have no source location.
 errors include byte spans plus start/end positions in the original source.
 `LexerErrorKind` supports structured handling, and `LexerError` converts to the
 shared `Diagnostic`. Numeric tokens retain their source spelling; parsing and
-range checks belong to the parser. Tags, comments, and whitespace are consumed
-as trivia. A single EOF token is emitted at the original source's end.
+range checks belong to the parser. Optional opening/closing tags, comments, and whitespace are consumed as trivia.
+Tag-free source uses the same lexer; no synthetic prefix or source remapping is
+introduced for execution, checking, formatting, stdin, includes, or web entries. A single EOF token is emitted at the original source's end.
 
 Statements use `Statement { kind: StatementKind, span }`; their ranges include
 terminating semicolons or complete bodies. Blocks, variable bindings, parameter

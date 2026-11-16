@@ -3,7 +3,9 @@
 Scripta can receive HTTP requests with `scripta serve` and execute one fixed entry
 script for each request. `Http::get` and related functions remain outgoing HTTP
 clients. The `Web` module is available only inside request execution; CLI scripts
-continue to work as before. No new language syntax is needed.
+continue to work as before. Entry scripts and their includes can start directly
+with code; optional opening tags follow the same
+[source rules](language-spec.md#implemented-subset) as standalone scripts.
 
 ## Run a local application
 
