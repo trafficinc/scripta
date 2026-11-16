@@ -12,8 +12,9 @@ locations as a filename, one-based line, and one-based character column.
 | scr-parser | Tokens to AST; precedence and syntax errors | ast, diagnostics, lexer |
 | scr-runtime | Values, environment, evaluation, native registry | ast, diagnostics, lexer, parser |
 | scr-stdlib | Native function implementation and registration | runtime |
+| scr-ext-sqlite | SQLite connection policy, native database handles, and registration | runtime |
 | scr-web | Bounded HTTP host, worker supervision, cached entry programs, framed worker IPC | runtime, stdlib, ast, lexer, parser |
-| scr-cli | CLI arguments, file loading, shared pipeline, stdout/stderr, exit codes | All pipeline crates |
+| scr-cli | CLI commands, package management, web configuration, playground launching, shared pipeline, and diagnostics | Pipeline crates, web, SQLite extension (default-enabled feature) |
 | scr-release | Maintainer archive/checksum/license verification and offline package smoke | None (standalone build tool) |
 
 ## Executable names
@@ -27,11 +28,15 @@ and an identical compatibility copy, covered by the release inventory.
 ## Public application interfaces
 
 `scr_cli::args::parse` consumes arguments excluding the executable name and
-returns `Result<Command, UsageError>`. `Command` has web `Serve` / internal `WebWorker` variants plus `Help`, `CommandHelp`, `RunStdin { arguments }`, `Version`,
-`Run { path: PathBuf, arguments: Vec<OsString> }`, `Check(PathBuf)`, and
-`Format { path: PathBuf, check: bool }` variants. Parsing performs no I/O and never
-exits the process. `args::HELP` is the shared CLI usage text. File paths preserve
-their native OS encoding.
+returns `Result<Command, UsageError>`. `Command` represents file execution
+(`Run`), source from stdin (`RunStdin`), `Check`, `Format`, `Help`, `CommandHelp`,
+`Version`, and `VersionVerbose`. It also carries arguments for public `Serve`,
+`Playground`, and `Package` commands, plus the internal `WebWorker` entry point.
+The package dispatcher handles `init`, `add`, `install`, and `update`; playground
+launching resolves the separate companion executable. Parsing performs no I/O
+and never exits the process. `args::HELP` is the shared CLI usage text. File paths
+preserve their native OS encoding. See [package management](packages.md),
+[web hosting](web-servers.md), and [playground installation](install.md#optional-local-browser-playground).
 
 `scr_cli::pipeline::check(source: &str)` returns
 `Result<(), Vec<scr_diagnostics::Diagnostic>>` after lexing and complete statement

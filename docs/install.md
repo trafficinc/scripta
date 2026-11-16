@@ -1,18 +1,23 @@
 # Installation and uninstallation
 
-## Choose a verified release candidate
+## Choose a platform package
 
-Use an archive whose target is marked verified in the release's compatibility
-matrix and whose associated native test records show passing results. See
-[compatibility.md](compatibility.md) for the current evidence; configured targets
-that are still pending are not supported-download promises. This work prepares
-release candidates; successful tag workflows publish the validated downloads
-to [GitHub Releases](https://github.com/trafficinc/scripta/releases).
+Select a release from [GitHub Releases](https://github.com/trafficinc/scripta/releases)
+and choose the archive for your OS and architecture. Consult the
+[platform baselines](compatibility.md) and the selected release's native records
+for its tested environment.
 
-Download the matching archive and its `.sha256` sidecar from the same trusted
-release. `SHA256SUMS` also lists all published candidate archives. A checksum
-checks file integrity; it does not replace trust in the release source/signing.
-There is no curl-to-shell installer or automatic privileged installation.
+Download the platform archive, `SHA256SUMS`, and `validation-evidence.zip` from
+that same release. `SHA256SUMS` covers the four platform packages and the evidence
+ZIP. Individual `.sha256` files, native/smoke records, logs, and the release
+manifest are bundled inside the ZIP; they are not separate release downloads.
+The commands below select the checksum entry for the archive being installed,
+so other platform archives need not be downloaded. They require exactly one
+matching checksum entry and stop before extraction if verification fails.
+
+A checksum checks file integrity; obtain both the archive and checksums from a
+trusted release source. Consult that release's notes for signing or notarization
+details. Installation uses per-user paths and ordinary archive tools.
 
 The extracted directory contains the standalone executable, LICENSE, dependency
 notices, examples, runnable playgrounds and their fixtures, reference
@@ -47,18 +52,25 @@ any PATH/environment entry to uninstall it.
 
 ## Linux x86-64 / ARM64
 
-After the corresponding native release is verified, select the appropriate target:
+Run these commands beside the downloaded archive and `SHA256SUMS`. Replace
+`REPLACE_WITH_RELEASE_VERSION` with the version in the archive filename:
 
 ```sh
-# x86-64; substitute aarch64-unknown-linux-gnu for a verified ARM64 release.
-archive=scripta-0.1.0-x86_64-unknown-linux-gnu.tar.gz
-sha256sum -c "$archive.sha256"
+release_version=REPLACE_WITH_RELEASE_VERSION
+# For ARM64, use aarch64-unknown-linux-gnu.
+package="scripta-${release_version}-x86_64-unknown-linux-gnu"
+archive="$package.tar.gz"
+checksum_entry=$(awk -v archive="$archive" '
+  $2 == archive && NF == 2 && length($1) == 64 && $1 !~ /[^0-9a-f]/ { print; found++ }
+  END { if (found != 1) exit 1 }
+' SHA256SUMS) || exit 1
+printf '%s\n' "$checksum_entry" | sha256sum -c - || exit 1
 tar -xzf "$archive"
 mkdir -p "$HOME/.local/bin"
-install -m 755 scripta-0.1.0-x86_64-unknown-linux-gnu/scripta "$HOME/.local/bin/scripta"
+install -m 755 "$package/scripta" "$HOME/.local/bin/scripta"
 export PATH="$HOME/.local/bin:$PATH"
 scripta version --verbose
-scripta run scripta-0.1.0-x86_64-unknown-linux-gnu/examples/hello.scripta
+scripta run "$package/examples/hello.scripta"
 ```
 
 Add the PATH export to your shell startup file if needed. Check the glibc/platform
@@ -66,48 +78,60 @@ baseline in the matrix. Do not use the GNU/Linux artifact on musl/Alpine.
 
 ## macOS Apple Silicon (M-series)
 
+Run beside the downloaded archive and `SHA256SUMS`, substituting its version:
+
 ```sh
-archive=scripta-0.1.0-aarch64-apple-darwin.tar.gz
-shasum -a 256 -c "$archive.sha256"
+release_version=REPLACE_WITH_RELEASE_VERSION
+package="scripta-${release_version}-aarch64-apple-darwin"
+archive="$package.tar.gz"
+checksum_entry=$(awk -v archive="$archive" '
+  $2 == archive && NF == 2 && length($1) == 64 && $1 !~ /[^0-9a-f]/ { print; found++ }
+  END { if (found != 1) exit 1 }
+' SHA256SUMS) || exit 1
+printf '%s\n' "$checksum_entry" | shasum -a 256 -c - || exit 1
 tar -xzf "$archive"
 mkdir -p "$HOME/.local/bin"
-install -m 755 scripta-0.1.0-aarch64-apple-darwin/scripta "$HOME/.local/bin/scripta"
+install -m 755 "$package/scripta" "$HOME/.local/bin/scripta"
 export PATH="$HOME/.local/bin:$PATH"
 scripta version --verbose
-scripta run scripta-0.1.0-aarch64-apple-darwin/examples/hello.scripta
+scripta run "$package/examples/hello.scripta"
 ```
 
-Candidates are not Developer-ID-signed or notarized. A downloaded executable may
-require manual approval through macOS security settings after verification. The
-release does not claim Developer ID signing or notarization. Use an archive for
-Apple Silicon Macs; Intel Macs are not supported.
+A downloaded executable may require approval through macOS security settings.
+Review its source and the release's signing/notarization details before approval.
+Use the Apple Silicon archive for M-series Macs.
 
 ## Windows x86-64 (PowerShell)
 
-Run this only for a verified Windows candidate:
+Run beside the downloaded ZIP and `SHA256SUMS`, substituting its version:
 
 ```powershell
-$archive = 'scripta-0.1.0-x86_64-pc-windows-msvc.zip'
-$expected = ((Get-Content "$archive.sha256").Trim() -split '\s+')[0]
+$releaseVersion = 'REPLACE_WITH_RELEASE_VERSION'
+$package = "scripta-$releaseVersion-x86_64-pc-windows-msvc"
+$archive = "$package.zip"
+$pattern = '^[0-9a-f]{64}  ' + [regex]::Escape($archive) + '$'
+$entries = @(Get-Content -LiteralPath 'SHA256SUMS' | Where-Object { $_ -cmatch $pattern })
+if ($entries.Count -ne 1) { throw 'Expected one archive entry in SHA256SUMS' }
+$expected = $entries[0].Substring(0, 64)
 $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw 'Archive checksum mismatch' }
 Expand-Archive -LiteralPath $archive -DestinationPath .
 $install = Join-Path $env:LOCALAPPDATA 'Scripta\bin'
 New-Item -ItemType Directory -Force $install | Out-Null
-Copy-Item '.\scripta-0.1.0-x86_64-pc-windows-msvc\scripta.exe' $install
+Copy-Item -LiteralPath (Join-Path $package 'scripta.exe') -Destination $install
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if (($userPath -split ';') -notcontains $install) {
     [Environment]::SetEnvironmentVariable('Path', "$install;$userPath", 'User')
 }
 $env:Path = "$install;$env:Path"
 scripta version --verbose
-scripta run .\scripta-0.1.0-x86_64-pc-windows-msvc\examples\hello.scripta
+scripta run (Join-Path $package 'examples\hello.scripta')
 ```
 
 No administrator access or separate VC redistributable is expected: the release
-uses the static MSVC CRT and audits imported DLLs. Windows candidates are not
-Authenticode-signed, so OS reputation prompts may occur. No service or registry
-file association is installed.
+uses the static MSVC CRT and audits imported DLLs. Review the release's signing
+details if Windows displays reputation prompts. Copying the executable does not
+install a service or registry file association.
 
 ## Build from source
 
@@ -170,5 +194,7 @@ $remaining = ($userPath -split ';' | Where-Object { $_ -and $_.TrimEnd('\') -ne 
 ```
 
 Open a new terminal to use the updated PATH. For a Cargo installation, use
-`cargo uninstall scr-cli` instead. There are no daemons, scheduled tasks,
-background services, or global runtime packages to remove.
+`cargo uninstall scr-cli` instead. If you separately configured cron jobs or a
+service for automation or `scripta serve`, stop and remove that configuration
+through its scheduler or service manager. See
+[service management](web-servers.md#deployment-and-service-management).

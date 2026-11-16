@@ -8,11 +8,8 @@ package or source checkout; sample input directories must already exist.
 | --- | --- | --- |
 | hello.scripta | `scripta examples/hello.scripta` | Prints Hello, Scripta! |
 | socket-echo.scripta | `scripta examples/socket-echo.scripta 9000` | One-connection TCP binary echo server using readiness polling; port 0 selects an ephemeral loopback port. |
-| web-transfers.scripta | `scripta serve examples/web-transfers.scripta` | Receives raw binary uploads through a request stream and serves a safe attachment download. |
 | binary-streams.scripta | `scripta examples/binary-streams.scripta INPUT OUTPUT` | Copies binary data in bounded chunks to an exclusively created file. |
 | http-stream-upload.scripta | `scripta examples/http-stream-upload.scripta URL INPUT` | Streams a file into an HTTP POST and counts response bytes without buffering the body. |
-| web-streaming.scripta | `scripta serve examples/web-streaming.scripta` | Streams a few text progress updates using nested application buffering and explicit transport flushing. |
-| web-uploads.scripta | `scripta serve examples/web-uploads.scripta` | Browser multipart form; escapes metadata and saves to an explicit non-overwriting destination. |
 | password-hashing.scripta | `scripta examples/password-hashing.scripta` | Hashes a public demo value with Argon2id and reports verification/rehash status without printing the input or hash. |
 | html-escaping.scripta | `scripta examples/html-escaping.scripta` | Generates HTML using escaped text and a quoted title attribute; optional first argument supplies the name. |
 | variables.scripta | `scripta examples/variables.scripta` | Explicit values, concatenation and conversion. |
@@ -64,6 +61,23 @@ The cross-platform release_examples integration suite uses temporary directories
 loopback HTTP, and the scripta executable itself for child-process testing. It does
 not invoke public endpoints, Git, Python, Node.js, or PHP.
 
+## Web applications and operations
+
+Run the commands in this section from the repository or extracted-package root.
+Web examples require `scripta serve`; ordinary CLI execution has no request context.
+
+| Purpose | Example and guide |
+| --- | --- |
+| HTML, JSON, redirects, and SQLite | [web-app.scripta](web-app.scripta); [local application](../docs/web-servers.md#run-a-local-application) |
+| Cookies and shared sessions | [web-sessions.scripta](web-sessions.scripta); [sessions](../docs/web-servers.md#sessions-and-cookies) |
+| Multipart forms and uploads | [web-uploads.scripta](web-uploads.scripta); [multipart handling](../docs/web-servers.md#multipart-forms-and-uploads) |
+| Incremental responses and buffers | [web-streaming.scripta](web-streaming.scripta); [response streaming](../docs/web-servers.md#incremental-responses-and-output-buffers) |
+| Raw uploads and attachment downloads | [web-transfers.scripta](web-transfers.scripta); [file transfers](../docs/web-servers.md#raw-uploads-and-file-downloads) |
+| Proxy trust and host allowlists | [web-proxy.scripta](web-proxy.scripta), [proxy-serve.toml](proxy-serve.toml), and [Caddyfile.proxy](Caddyfile.proxy) |
+| JSON host logs and private health probes | [observe-serve.toml](observe-serve.toml); [observability](../docs/web-servers.md#logs-and-health-checks) |
+| Development reloads | [watch/main.scripta](watch/main.scripta) and [watch/serve.toml](watch/serve.toml); [watch semantics](../docs/web-servers.md#development-watch-mode) |
+| Service deployment and instance replacement | [deploy/](deploy/); [deployment instructions](../docs/web-servers.md#deployment-and-service-management) |
+
 `web-app.scripta` demonstrates HTML, JSON, redirects, JSON POST bodies, and a SQLite
 counter. Run it with `scripta serve examples/web-app.scripta`; it requires a web
 request context rather than ordinary CLI execution. The SQLite counter creates
@@ -96,7 +110,7 @@ while serving `web-proxy.scripta`. Start with
 then request the application on port 8080 and `/livez`, `/readyz`, or `/metrics`
 on port 9090. These management paths never execute application code. See
 [logs and health checks](../docs/web-servers.md#logs-and-health-checks) for privacy,
-resource limits, and the current readiness/recovery limitations.
+resource limits, readiness, and worker recovery.
 
 The dedicated `watch/` application demonstrates opt-in development reloads:
 
@@ -104,5 +118,14 @@ The dedicated `watch/` application demonstrates opt-in development reloads:
 scripta serve examples/watch/main.scripta --config examples/watch/serve.toml
 ```
 
-Edit `watch/message.inc`, wait for `reload_ready`, and refresh the application.
+Edit `examples/watch/message.inc`, wait for `reload_ready`, and refresh the application.
 See [watch roots, limits, and generation semantics](../docs/web-servers.md#development-watch-mode).
+
+The [deployment templates](deploy/) include a systemd unit, blue/green server
+configurations, and a Caddy front end. They illustrate private state directories,
+worker recycling, separate health ports, and an operator-controlled traffic switch
+followed by bounded drain. Adapt paths, account, domain, and storage before use;
+follow the [deployment instructions](../docs/web-servers.md#deployment-and-service-management)
+for readiness checks, replacement order, shutdown, and platform-specific service
+management. Deploy new source through instance replacement; worker recycling
+retains the cached application source.

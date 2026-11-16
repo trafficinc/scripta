@@ -1,52 +1,46 @@
-# Compatibility matrix — 0.1.0 release candidates
+# Platform compatibility
 
-Configured build targets are not support claims. A platform is verified only when
-its executable passes native tests and the extracted-package smoke test.
-The [release-validation record](release-validation.md) describes the tested
-sources, native environments, and retained local and Actions evidence.
+This guide describes release targets and baseline requirements. For results tied
+to a particular source revision, consult that release's `validation-evidence.zip`
+and [historical validation records](release-validation.md).
 
-| Platform | Rust target / asset suffix | Evidence available here | Status |
+| Platform | Rust target | Native baseline | Archive format |
 | --- | --- | --- | --- |
-| Linux x86-64 | `x86_64-unknown-linux-gnu.tar.gz` | [Native debug/dist tests, dependency inspection and base/SQLite package checks](release-validation.md#post-migration-native-validation) | Verified on Ubuntu 22.04 |
-| Linux ARM64 | `aarch64-unknown-linux-gnu.tar.gz` | [Native debug/dist tests, dependency inspection and base/SQLite package checks](release-validation.md#post-migration-native-validation) | Verified on Ubuntu 22.04 |
-| macOS ARM64 | `aarch64-apple-darwin.tar.gz` | Local macOS 27.0.1 arm64 debug/dist suites, dependency inspection and extracted-package smoke passed | Verified locally on macOS 27.0.1; macOS 15 validation pending |
-| Windows x86-64 | `x86_64-pc-windows-msvc.zip` | [Native debug/dist tests, static-CRT inspection and base/SQLite package checks](release-validation.md#post-migration-native-validation) | Verified on Windows Server 2022 |
+| Linux x86-64 | `x86_64-unknown-linux-gnu` | Ubuntu 22.04 x86-64 | `.tar.gz` |
+| Linux ARM64 | `aarch64-unknown-linux-gnu` | Ubuntu 22.04 ARM64 | `.tar.gz` |
+| macOS ARM64 | `aarch64-apple-darwin` | macOS 15 Apple Silicon | `.tar.gz` |
+| Windows x86-64 | `x86_64-pc-windows-msvc` | Windows Server 2022 x86-64 | `.zip` |
 
-The current Linux/Windows receipts cover tag `v0.1.0-validation.20261114.2`,
-including the renamed executables/extensions and canonical/legacy opening tags.
-Earlier receipts remain historical; macOS 15 execution is still pending.
-
-Every archive is named `scripta-0.1.0-TARGET.tar.gz` or `.zip`. Windows contains
+Every archive is named `scripta-<version>-<target>.tar.gz` or `.zip`. Windows contains
 `scripta.exe` and compatibility `scr.exe`; other platforms contain `scripta` and
 compatibility `scr`. Assets are architecture-specific, not
 universal binaries. ARM32/ARMv7, musl/Alpine, Windows ARM64, and other targets are
-not part of this release matrix. macOS support is limited to Apple Silicon
-(M-series) Macs; Intel Macs are not supported. Raspberry Pi hardware has not
-been tested.
+outside the configured release targets. macOS packages target Apple Silicon
+(M-series) Macs. Device-specific platforms, including Raspberry Pi, require
+their own native evidence.
 
 ## Platform library baselines
 
 Linux candidates are built on Ubuntu 22.04/glibc 2.35 and are intended for a
 compatible glibc environment with standard `libgcc_s`/libc/math/loader libraries.
-Older glibc distributions are not verified. macOS release builds set deployment
-target 15.0 on Apple Silicon; older macOS versions are not verified. Windows
-candidates use the MSVC target and static CRT, with system Windows DLLs; the native
+Other Linux environments require their own native evidence. macOS release builds
+set deployment target 15.0 on Apple Silicon. Windows candidates use the MSVC
+target and static CRT, with system Windows DLLs; the native
 validation image is Windows Server 2022. Other Windows versions require their own
-validation before a specific-version support claim.
+native tests before a specific-version support claim.
 
 Native dependency inspection checks Linux/macOS dynamic libraries and Windows
 DLL imports. No OpenSSL, Python, Node.js, PHP, JVM, Docker container, or separately
-installed language
-runtime is required by scripta. These statements apply to the interpreter; a script
+installed language runtime is required by scripta. These statements apply to the interpreter; a script
 explicitly calling Process::run still needs its chosen executable, and HTTP calls
 need a connection to the requested endpoint. Local scripts need no network.
 
-Rust 1.99.1 is pinned for release builds. The manifests declare Rust 1.85 as the
-source minimum. The Rust 1.85.0 workspace/all-target check passed locally on macOS
-ARM64; compiler compatibility is distinct from native executable/platform
-verification.
+Use the compiler pinned in [`rust-toolchain.toml`](../rust-toolchain.toml) for
+release builds. [`Cargo.toml`](../Cargo.toml) declares the source minimum Rust
+version. Record minimum-compiler checks separately from native executable and
+platform tests.
 
-## Updating a row
+## Recording platform evidence
 
 Record the commit/tag, native machine OS/architecture, complete debug and dist test
 results, the archive and binary hashes, dependency inspection output, and the
