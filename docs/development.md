@@ -117,6 +117,12 @@ bundled inside that one evidence ZIP. These release assets are
 independent of the seven-day Actions artifact expiration. Windows downloads
 contain `scripta.exe` and legacy `scr.exe`; no Rust installation is required.
 
+The publisher writes generated checksums, the release manifest, and release notes
+as UTF-8 bytes with LF endings on every host. Native validation logs and smoke
+records are copied byte-for-byte. The publication tests emulate Windows text-mode
+newline conversion to catch CRLF changes inside the evidence ZIP and checksum
+files without relaxing byte comparisons.
+
 The workflow applies to future tag pushes containing this configuration. Existing
 tags/releases are not changed retroactively. Review results before updating
 platform compatibility claims; queuing a workflow does not establish success.

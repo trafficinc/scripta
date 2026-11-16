@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from publish_release import SUITES, TARGETS, digest, prepare, publish, release_kind
 
@@ -17,7 +17,7 @@ class ReleaseTests(unittest.TestCase):
         for target in TARGETS:
             directory = root / ('native-validation-' + target + '-1')
             (directory / 'logs').mkdir(parents=True)
-            (directory / 'logs/check.log').write_text('passed\n', encoding='utf-8')
+            (directory / 'logs/check.log').write_bytes(b'passed\n')
             record = {'target': target, 'version': '0.1.0', 'source_revision': REVISION,
                       'status': 'passed', 'steps': [{'exit_code': 0}],
                       'tests': {name: {'passed': 1, 'failed': 0, 'ignored': 0} for name in SUITES},
@@ -71,6 +71,32 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(digest(output / name), checksum)
             self.assertIn('no Rust installation', notes.read_text())
             self.assertTrue((output / 'scripta-0.1.0-x86_64-pc-windows-msvc.zip').is_file())
+
+    def test_generated_text_uses_lf_under_windows_newline_translation(self):
+        def windows_write_text(path, data, encoding=None, errors=None):
+            with path.open('w', encoding=encoding, errors=errors, newline='\r\n') as stream:
+                return stream.write(data)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch.object(Path, 'write_text', windows_write_text):
+                target = self.fixture(root / 'inputs')
+                # Native logs are copied verbatim, even when they contain CRLF.
+                (target / 'logs/check.log').write_bytes(b'passed\r\n')
+                output = root / 'assets'
+                manifest, notes = prepare(root / 'inputs', output, REVISION, 'v0.1.0', '0.1.0')
+            with zipfile.ZipFile(output / 'validation-evidence.zip') as evidence:
+                for package in manifest['packages']:
+                    self.assertEqual(evidence.read(package['asset'] + '.sha256'),
+                                     (package['archive_sha256'] + '  ' + package['asset'] + '\n').encode('utf-8'))
+                self.assertEqual(evidence.read('release-manifest.json'),
+                                 (json.dumps(manifest, indent=2) + '\n').encode('utf-8'))
+                self.assertEqual(evidence.read(f"logs/{TARGETS[0]}/check.log"), b'passed\r\n')
+            checksums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(output.iterdir())
+                                if path.name != 'SHA256SUMS')
+            self.assertEqual((output / 'SHA256SUMS').read_bytes(), checksums.encode('utf-8'))
+            self.assertNotIn(b'\r', notes.read_bytes())
+            self.assertTrue(notes.read_bytes().endswith(b'\n'))
 
     def test_failed_missing_mismatched_or_tampered_inputs_stop_before_staging(self):
         for failure in ['target', 'revision', 'version', 'failed', 'ignored', 'steps', 'variant', 'checksum', 'smoke', 'sqlite', 'smoke-sqlite']:
