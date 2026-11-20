@@ -1,0 +1,1 @@
+<?scr if(true)if(false)echo "a";else echo "b";try{require_once "x.scripta";}catch(Error $e){Log::error($e);}

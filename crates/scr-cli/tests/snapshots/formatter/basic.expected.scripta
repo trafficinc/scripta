@@ -1,0 +1,7 @@
+<?scr
+$x = 1 + 2;
+if ($x > 0) {
+    echo "yes";
+} else {
+    echo 'no';
+}

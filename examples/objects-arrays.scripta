@@ -1,0 +1,18 @@
+class User {
+    $name: string;
+    $tags = [];
+    function __construct($name: string) {
+        $this->name = $name;
+    }
+    function greeting(): string {
+        return "Hello, " . $this->name;
+    }
+}
+$users = [new User("Ada"), new User("Grace"), new User("Linus")];
+$names = [$user->name for $user in $users if $user->name !== "Linus"];
+[$first, ...$rest] = $names;
+$combined = ["Team", ...$names];
+$last = $users[-1];
+$alias = $last;
+$alias->tags[] = "systems";
+echo Json::encode(["first" => $first, "rest" => $rest, "combined" => $combined, "reversed" => $names[::-1], "greeting" => $last->greeting(), "tags" => $last->tags, "hasAda" => "Ada" in $names]) . "\n";

@@ -1,0 +1,2 @@
+require "helpers" as Helpers;
+echo Helpers::packageGreeting("packages");

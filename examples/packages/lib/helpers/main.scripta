@@ -1,0 +1,3 @@
+function packageGreeting($name: string): string {
+    return "Hello, " . $name . "!\n";
+}

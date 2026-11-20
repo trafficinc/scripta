@@ -1,0 +1,5 @@
+# Replace app.example.com with your domain before deploying.
+# Pair with proxy-serve.toml and web-proxy.scripta.
+app.example.com {
+    reverse_proxy 127.0.0.1:8080
+}

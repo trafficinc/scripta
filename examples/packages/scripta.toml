@@ -1,0 +1,5 @@
+[dependencies]
+helpers = { path = "lib/helpers", version = "^1.0" }
+
+[registry]
+index = "scripta-index.toml"

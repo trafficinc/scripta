@@ -1,0 +1,21 @@
+// With no URL, demonstrate local timing. HTTP runs only for an explicit URL.
+$url = Cli::arg(0);
+$started = Clock::monotonicMs();
+if ($url === null) {
+    Date::sleep(5);
+    echo Json::encode(["operation" => "sleep", "elapsedMs" => Clock::monotonicMs() - $started]) . "\n";
+    exit 0;
+}
+$response = null;
+$error = null;
+try {
+    $response = Http::get($url, ["timeoutMs" => 2000, "maxBodyBytes" => 1048576]);
+} catch (Error $e) {
+    $error = $e->message;
+}
+$elapsed = Clock::monotonicMs() - $started;
+if ($response === null) {
+    echo Json::encode(["ok" => false, "elapsedMs" => $elapsed, "error" => $error]) . "\n";
+    exit 1;
+}
+echo Json::encode(["status" => $response->status, "ok" => $response->ok(), "durationMs" => $response->durationMs, "elapsedMs" => $elapsed]) . "\n";

@@ -1,0 +1,16 @@
+# /etc/scripta/green.toml; pair with scripta@green.service.
+host = "127.0.0.1"
+port = 8081
+workers = 2
+# Recycle after completed exchanges; 0 disables request-count recycling.
+worker-max-requests = 10000
+queue = 32
+log-format = "json"
+health-address = "127.0.0.1:9091"
+trusted-proxies = ["127.0.0.1/32"]
+allowed-hosts = ["app.example.com"]
+timeout-ms = 10000
+drain-timeout-ms = 11000
+session-dir = "/var/lib/scripta/sessions"
+session-cookie-secure = true
+upload-temp-dir = "/var/lib/scripta/green/uploads"

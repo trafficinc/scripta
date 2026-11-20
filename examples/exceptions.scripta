@@ -1,0 +1,25 @@
+class ValidationError extends Error {
+    function describe(): string {
+        return $this->name . ": " . $this->message;
+    }
+}
+class MissingEmail extends ValidationError {
+}
+function validate($email: string) {
+    if ($email === "") {
+        throw new MissingEmail("Email is required");
+    }
+}
+try {
+    try {
+        validate("");
+    } catch (ValidationError $e) {
+        echo $e->describe() . "\n";
+        throw new Error("Cannot create account", $e);
+    }
+} catch (Error $e) {
+    echo $e->message . "\n";
+    echo "Cause: " . $e->cause->name . ": " . $e->cause->message . "\n";
+} finally {
+    echo "Validation complete\n";
+}

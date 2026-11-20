@@ -1,0 +1,3 @@
+# Use explicit --target on Windows so host proc macros keep the host configuration.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

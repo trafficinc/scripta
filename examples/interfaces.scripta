@@ -1,0 +1,26 @@
+interface Notifier {
+    function send($message: string): string;
+}
+class EmailNotifier implements Notifier {
+    function send($message: string): string {
+        return "Email: " . $message;
+    }
+}
+class SmsNotifier implements Notifier {
+    function send($message: string): string {
+        return "SMS: " . $message;
+    }
+}
+class UserService {
+    $notifier: Notifier;
+    function __construct($notifier: Notifier) {
+        $this->notifier = $notifier;
+    }
+    function register($name: string): string {
+        return $this->notifier->send("Welcome, " . $name);
+    }
+}
+$users = new UserService(new EmailNotifier());
+echo $users->register("Ada") . "\n";
+$users->notifier = new SmsNotifier();
+echo $users->register("Grace") . "\n";

@@ -1,0 +1,10 @@
+require "helpers" as Helpers;
+function test_package_greeting() {
+    Assert::same("Hello, tests!\n", Helpers::packageGreeting("tests"));
+}
+function test_strict_values() {
+    Assert::notSame(1, "1");
+    Assert::throws(function () {
+        return 1 + "1";
+    }, "TypeError");
+}

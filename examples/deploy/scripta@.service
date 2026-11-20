@@ -1,0 +1,33 @@
+# Linux systemd template. Review paths/account and install manually.
+# %i is an immutable release name, for example blue or green.
+[Unit]
+Description=Scripta application (%i)
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=scripta
+Group=scripta
+WorkingDirectory=/srv/scripta/releases/%i
+ExecStartPre=/usr/local/bin/scripta serve /srv/scripta/releases/%i/main.scripta --config /etc/scripta/%i.toml --check-config
+ExecStart=/usr/local/bin/scripta serve /srv/scripta/releases/%i/main.scripta --config /etc/scripta/%i.toml
+Restart=on-failure
+RestartSec=3
+# Signal only the supervisor first; kill the whole control group at the outer limit.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=15s
+UMask=0077
+StateDirectory=scripta scripta/sessions scripta/%i scripta/%i/uploads
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
