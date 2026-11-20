@@ -1,0 +1,7 @@
+// Escape plain text once at the point where it enters HTML text or a quoted attribute.
+$name = Cli::arg(0);
+if ($name === null) {
+    $name = "Ada <Admin> & \"friends\"";
+}
+$escaped = Html::escape($name);
+echo "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>HTML escaping</title><p title=\"" . $escaped . "\">Hello, " . $escaped . "!</p></html>\n";

@@ -1,0 +1,30 @@
+// Run: scripta serve examples/web-transfers.scripta
+// Upload: curl --data-binary @INPUT -X PUT http://127.0.0.1:8080/raw
+// Download: curl -OJ http://127.0.0.1:8080/download
+// Uses a fixed application destination and refuses overwrite. Remove it before retrying.
+$request = Web::request();
+if ($request->path === "/raw" && $request->method === "PUT") {
+    $input = $request->bodyStream();
+    $output = Stream::open("raw-upload.bin", "x");
+    $copied = 0;
+    try {
+        $copied = Stream::copy($input, $output, $request->bodySize);
+    } finally {
+        Stream::close($output);
+        Stream::close($input);
+    }
+    Web::status(201);
+    Web::header("Content-Type", "application/json");
+    echo Json::encode(["bytesReceived" => $copied]);
+    exit 0;
+}
+if ($request->path === "/download" &&($request->method === "GET" || $request->method === "HEAD")) {
+    $file = Stream::open("raw-upload.bin", "r");
+    try {
+        Web::download($file, "uploaded.bin");
+    } finally {
+        Stream::close($file);
+    }
+    exit 0;
+}
+echo "<!doctype html><meta charset=\"utf-8\"><title>File transfers</title><h1>Scripta file transfers</h1><p>PUT binary data to /raw, then download it below.</p><p><a href=\"/download\">Download uploaded.bin</a></p>";

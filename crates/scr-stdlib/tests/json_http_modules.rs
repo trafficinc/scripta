@@ -1,0 +1,729 @@
+use scr_runtime::{ContextOptions, Runtime, RuntimeError, RuntimeOptions, Value};
+use scr_stdlib::{FilesystemPolicy, StdlibOptions};
+use std::{
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    path::Path,
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
+
+fn runtime(path: Option<&Path>) -> Runtime {
+    let mut runtime = Runtime::with_options(RuntimeOptions {
+        context: ContextOptions {
+            script_path: path.map(Path::to_owned),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    scr_stdlib::register(&mut runtime).unwrap();
+    runtime
+}
+fn run(runtime: &mut Runtime, source: &str) -> Result<String, RuntimeError> {
+    let mut output = Vec::new();
+    runtime.execute_source(&format!("<?scr {source}"), &mut output)?;
+    Ok(String::from_utf8(output).unwrap())
+}
+fn error(runtime: &mut Runtime, source: &str, kind: &str) -> RuntimeError {
+    let error = run(runtime, source).unwrap_err();
+    assert!(
+        error.message.starts_with(&format!("{kind}:")),
+        "{source}: {error}"
+    );
+    error
+}
+#[test]
+fn anonymous_callbacks_keep_definition_paths_for_relative_requires() {
+    let directory = tempfile::tempdir().unwrap();
+    let lib = directory.path().join("lib");
+    std::fs::create_dir(&lib).unwrap();
+    std::fs::write(lib.join("callback.scripta"), "<?scr $callback = function ($number: int = 2): int { require 'increment.scripta'; return $number + $increment; };").unwrap();
+    std::fs::write(lib.join("increment.scripta"), "<?scr $increment = 5;").unwrap();
+    let mut runtime = runtime(Some(&directory.path().join("main.scripta")));
+    run(&mut runtime, "require 'lib/callback.scripta';").unwrap();
+    run(
+        &mut runtime,
+        "$answer = $callback(); $explicit = $callback(10);",
+    )
+    .unwrap();
+    assert_eq!(runtime.get_global("answer"), Some(&Value::Int(7)));
+    assert_eq!(runtime.get_global("explicit"), Some(&Value::Int(15)));
+    std::fs::write(lib.join("increment.scripta"), "<?scr $increment = 1 / 0;").unwrap();
+    let error = run(&mut runtime, "$callback();").unwrap_err();
+    assert!(error.message.starts_with("ArithmeticError:"));
+    assert_eq!(
+        error.source.as_ref().unwrap().path,
+        std::fs::canonicalize(lib.join("increment.scripta")).unwrap()
+    );
+    assert!(
+        error
+            .trace
+            .iter()
+            .any(|frame| frame.function == "<anonymous>")
+    );
+}
+
+#[test]
+fn json_roundtrips_structures_numbers_unicode_and_empty_objects() {
+    let mut runtime = runtime(None);
+    run(&mut runtime, r#"
+        $data = ["null" => null, "bool" => true, "list" => [1, 2.5, "世界", false], "integer" => 9223372036854775807];
+        $encoded = Json::encode($data); $decoded = Json::decode($encoded); $pretty = Json::pretty($data);
+        $object = Json::decode("{}"); $array = Json::decode("[]");
+        $float = Json::decode("1.0"); $before = Json::decode("-9223372036854775808");
+    "#).unwrap();
+    assert_eq!(runtime.get_global("data"), runtime.get_global("decoded"));
+    assert!(matches!(runtime.get_global("pretty"), Some(Value::String(s)) if s.contains('\n')));
+    assert_eq!(runtime.get_global("object"), Some(&Value::Map(vec![])));
+    assert_eq!(runtime.get_global("array"), Some(&Value::List(vec![])));
+    assert_eq!(runtime.get_global("float"), Some(&Value::Float(1.0)));
+    assert_eq!(runtime.get_global("before"), Some(&Value::Int(i64::MIN)));
+    let failure = error(&mut runtime, r#"Json::decode("{\n  bad}");"#, "JsonError");
+    assert!(failure.message.contains("line 2, column 3"));
+    for source in [
+        r#"Json::decode("NaN");"#,
+        r#"Json::decode("1e999");"#,
+        r#"Json::decode("18446744073709551616");"#,
+        "Json::encode([1 => true]);",
+        "Json::encode(str);",
+    ] {
+        error(&mut runtime, source, "JsonError");
+    }
+    error(&mut runtime, "Json::decode(1);", "TypeError");
+    assert_eq!(
+        run(
+            &mut runtime,
+            r#"try { Json::decode("bad"); } catch (JsonError $e) { echo "caught"; }"#
+        )
+        .unwrap(),
+        "caught"
+    );
+}
+
+#[test]
+fn modules_execute_in_order_share_caller_scope_and_once_uses_canonical_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib = dir.path().join("lib");
+    std::fs::create_dir(&lib).unwrap();
+    std::fs::write(lib.join("helper.scripta"), r#"<?scr echo "helper;"; $count += 1; function greet($name) { return "hello " . $name; } require_once "config.scripta";"#).unwrap();
+    std::fs::write(
+        lib.join("config.scripta"),
+        r#"<?scr echo "config;"; $configured = true;"#,
+    )
+    .unwrap();
+    std::fs::write(lib.join("repeat.scripta"), "<?scr $count += 1;").unwrap();
+    let mut runtime = runtime(Some(&dir.path().join("main.scripta")));
+    let output = run(&mut runtime, r#"$count = 0; echo "start;"; require "lib/helper.scripta"; require_once "lib/../lib/helper.scripta"; require_once "lib/config.scripta"; require "lib/repeat.scripta"; require "lib/repeat.scripta"; echo greet("world");"#).unwrap();
+    assert_eq!(output, "start;helper;config;hello world");
+    assert_eq!(runtime.get_global("count"), Some(&Value::Int(3)));
+    assert_eq!(runtime.get_global("configured"), Some(&Value::Bool(true)));
+    // Loaded-set state is retained across execute calls on the same runtime.
+    assert_eq!(
+        run(&mut runtime, r#"require_once "lib/helper.scripta";"#).unwrap(),
+        ""
+    );
+    std::fs::write(lib.join("local.scripta"), "<?scr $local += 2;").unwrap();
+    std::fs::write(
+        lib.join("function.scripta"),
+        r#"<?scr function helper() { $local = 3; require "local.scripta"; return $local; }"#,
+    )
+    .unwrap();
+    assert_eq!(
+        run(
+            &mut runtime,
+            r#"require "lib/function.scripta"; echo str(helper());"#
+        )
+        .unwrap(),
+        "5"
+    );
+    // Included declarations become available only when encountered.
+    std::fs::write(
+        lib.join("order.scripta"),
+        "<?scr later(); function later() {}",
+    )
+    .unwrap();
+    assert!(
+        run(&mut runtime, r#"require "lib/order.scripta";"#)
+            .unwrap_err()
+            .message
+            .contains("undefined function later")
+    );
+}
+
+#[test]
+fn include_failures_cycles_retry_and_traces_retain_original_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.scripta");
+    let mut runtime = runtime(Some(&main));
+    error(
+        &mut runtime,
+        r#"require "missing.scripta";"#,
+        "ModuleNotFoundError",
+    );
+    error(&mut runtime, "require 1;", "TypeError");
+    error(
+        &mut runtime,
+        r#"require "https://example.com/mod.scripta";"#,
+        "ModuleError",
+    );
+    let bad = dir.path().join("bad.scripta");
+    std::fs::write(&bad, "echo 'missing semicolon'").unwrap();
+    let failure = error(
+        &mut runtime,
+        r#"require_once "bad.scripta";"#,
+        "ModuleSyntaxError",
+    );
+    assert_eq!(
+        failure.source.as_ref().unwrap().path,
+        std::fs::canonicalize(&bad).unwrap()
+    );
+    std::fs::write(&bad, "<?scr echo \"retry\";").unwrap();
+    assert_eq!(
+        run(&mut runtime, r#"require_once "bad.scripta";"#).unwrap(),
+        "retry"
+    );
+    std::fs::write(
+        dir.path().join("a.scripta"),
+        r#"<?scr require "b.scripta";"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.scripta"),
+        r#"<?scr require_once "a.scripta";"#,
+    )
+    .unwrap();
+    let failure = error(
+        &mut runtime,
+        r#"require "a.scripta";"#,
+        "CircularIncludeError",
+    );
+    let rendered = failure.render("main.scripta", "<?scr require \"a.scripta\";");
+    assert!(
+        rendered.contains("a.scripta:1:")
+            && rendered.contains("b.scripta:1:")
+            && rendered.contains("main.scripta:1:")
+    );
+    let helper = dir.path().join("trace.scripta");
+    std::fs::write(
+        &helper,
+        "<?scr\nfunction explode() {\n    Json::decode(\"invalid\");\n}\n",
+    )
+    .unwrap();
+    let failure = error(
+        &mut runtime,
+        "require \"trace.scripta\";\nexplode();",
+        "JsonError",
+    );
+    let rendered = failure.render("wrong.scripta", "wrong");
+    assert!(rendered.contains("trace.scripta:3:"), "{rendered}");
+    assert!(rendered.contains("main.scripta:2:"), "{rendered}");
+    // The entry file participates in cycle detection before it can execute twice.
+    std::fs::write(&main, "<?scr require \"main.scripta\";").unwrap();
+    error(
+        &mut runtime,
+        r#"require "main.scripta";"#,
+        "CircularIncludeError",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn require_once_resolves_symlink_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("original.scripta"), "<?scr echo \"once\";").unwrap();
+    std::os::unix::fs::symlink("original.scripta", dir.path().join("alias.scripta")).unwrap();
+    let mut runtime = runtime(Some(&dir.path().join("main.scripta")));
+    assert_eq!(
+        run(
+            &mut runtime,
+            r#"require_once "original.scripta"; require_once "alias.scripta";"#
+        )
+        .unwrap(),
+        "once"
+    );
+}
+
+#[test]
+fn includes_respect_read_permission_and_filesystem_roots() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("helper.scripta"),
+        "<?scr echo \"forbidden\";",
+    )
+    .unwrap();
+    let mut options = RuntimeOptions::default();
+    options.context.script_path = Some(dir.path().join("main.scripta"));
+    options
+        .context
+        .permissions
+        .allowed
+        .remove("filesystem.read");
+    let mut denied = Runtime::with_options(options);
+    scr_stdlib::register(&mut denied).unwrap();
+    error(
+        &mut denied,
+        r#"require "helper.scripta";"#,
+        "PermissionError",
+    );
+    let mut restricted = Runtime::new();
+    scr_stdlib::register_with_options(
+        &mut restricted,
+        StdlibOptions {
+            filesystem: FilesystemPolicy {
+                roots: Some(vec![]),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    error(
+        &mut restricted,
+        r#"require "helper.scripta";"#,
+        "PermissionError",
+    );
+}
+
+// No external network services: each fixture binds an ephemeral loopback port.
+fn server(
+    count: usize,
+    handler: impl Fn(usize, &str) -> Vec<u8> + Send + 'static,
+) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    listener.set_nonblocking(true).unwrap();
+    let (tx, rx) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        for index in 0..count {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(2))
+                    }
+                    other => panic!("fixture accept failed: {other:?}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let request = read_request(&mut stream);
+            let reply = handler(index, &request);
+            let _ = stream.write_all(&reply);
+            tx.send(request).unwrap();
+        }
+    });
+    (url, rx, worker)
+}
+fn read_request(stream: &mut TcpStream) -> String {
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 1024];
+    loop {
+        let read = stream.read(&mut buffer).unwrap();
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        if let Some(end) = bytes.windows(4).position(|v| v == b"\r\n\r\n") {
+            let headers = String::from_utf8_lossy(&bytes[..end]).to_ascii_lowercase();
+            let length = headers
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("content-length:")
+                        .map(|v| v.trim().parse::<usize>().unwrap())
+                })
+                .unwrap_or(0);
+            if bytes.len() >= end + 4 + length {
+                break;
+            }
+        }
+    }
+    String::from_utf8(bytes).unwrap()
+}
+fn reply(status: &str, headers: &str, body: &[u8]) -> Vec<u8> {
+    let mut output = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n",
+        body.len()
+    )
+    .into_bytes();
+    output.extend_from_slice(body);
+    output
+}
+#[test]
+fn http_response_methods_headers_post_and_error_statuses() {
+    let (url, requests, worker) = server(3, |i, _| {
+        reply(
+            if i == 2 { "503 Unavailable" } else { "200 OK" },
+            "X-Value: a\r\nX-Value: b\r\nContent-Type: application/json\r\n",
+            br#"{"status":"up"}"#,
+        )
+    });
+    let mut runtime = runtime(None);
+    runtime.set_global("url", Value::String(url)).unwrap();
+    assert_eq!(run(&mut runtime, r#"$r = Http::get($url, ["headers" => ["X-Test" => "hello"]]); $duration = $r->durationMs; $status = $r->status; $headers = $r->headers; $body = $r->body; $text = $r->text(); $ok = $r->ok(); $data = $r->json(); echo $data["status"];"#).unwrap(), "up");
+    assert_eq!(runtime.get_global("status"), Some(&Value::Int(200)));
+    assert_eq!(runtime.get_global("ok"), Some(&Value::Bool(true)));
+    assert_eq!(runtime.get_global("body"), runtime.get_global("text"));
+    assert!(
+        matches!(runtime.get_global("duration"), Some(Value::Float(ms)) if ms.is_finite() && *ms >= 0.0)
+    );
+    let first = requests.recv().unwrap();
+    assert!(first.to_ascii_lowercase().contains("x-test: hello"));
+    assert_eq!(
+        run(&mut runtime, r#"echo Json::encode($headers["x-value"]);"#).unwrap(),
+        r#"["a","b"]"#
+    );
+    run(&mut runtime, r#"$r = Http::post($url, Json::encode(["message" => "hello"]), ["headers" => ["Content-Type" => "application/json"]]); $duration = $r->durationMs;"#).unwrap();
+    assert!(
+        matches!(runtime.get_global("duration"), Some(Value::Float(ms)) if ms.is_finite() && *ms >= 0.0)
+    );
+    let second = requests.recv().unwrap();
+    assert!(second.starts_with("POST "));
+    assert!(second.ends_with(r#"{"message":"hello"}"#));
+    run(&mut runtime, r#"$r = Http::request("PATCH", $url, ["body" => "patch"]); $ok = $r->ok(); $status = $r->status; $duration = $r->durationMs;"#).unwrap();
+    assert_eq!(runtime.get_global("ok"), Some(&Value::Bool(false)));
+    assert_eq!(runtime.get_global("status"), Some(&Value::Int(503)));
+    assert!(
+        matches!(runtime.get_global("duration"), Some(Value::Float(ms)) if ms.is_finite() && *ms >= 0.0)
+    );
+    assert!(requests.recv().unwrap().ends_with("patch"));
+    worker.join().unwrap();
+    error(&mut runtime, "$r->ok(1);", "TypeError");
+    error(&mut runtime, "Json::encode($r);", "JsonError");
+    error(&mut runtime, "$r->status = 1;", "PropertyError");
+    error(&mut runtime, "$r->durationMs = 0.0;", "PropertyError");
+}
+
+#[test]
+fn http_redirects_are_bounded_and_may_be_disabled() {
+    let (url, requests, worker) = server(5, |i, _| {
+        if i == 1 {
+            reply("200 OK", "", b"done")
+        } else {
+            reply("302 Found", "Location: /again\r\n", b"")
+        }
+    });
+    let mut runtime = runtime(None);
+    runtime.set_global("url", Value::String(url)).unwrap();
+    assert_eq!(
+        run(&mut runtime, r#"$r = Http::get($url); echo $r->text();"#).unwrap(),
+        "done"
+    );
+    error(
+        &mut runtime,
+        r#"Http::get($url, ["maxRedirects" => 1]);"#,
+        "RedirectError",
+    );
+    run(
+        &mut runtime,
+        r#"$r = Http::get($url, ["maxRedirects" => 0]); $status = $r->status;"#,
+    )
+    .unwrap();
+    assert_eq!(runtime.get_global("status"), Some(&Value::Int(302)));
+    worker.join().unwrap();
+    assert_eq!(requests.iter().count(), 5);
+}
+
+#[test]
+fn http_limits_timeouts_connection_encoding_and_json_failures_are_errors() {
+    let (url, requests, worker) = server(4, |i, _| match i {
+        0 => reply("200 OK", "", b"oversized"),
+        1 => reply("404 Not Found", "", b"not JSON"),
+        2 => reply("200 OK", "", &[0xff]),
+        _ => {
+            thread::sleep(Duration::from_millis(150));
+            reply("200 OK", "", b"late")
+        }
+    });
+    let mut runtime = runtime(None);
+    runtime.set_global("url", Value::String(url)).unwrap();
+    error(
+        &mut runtime,
+        r#"Http::get($url, ["maxBodyBytes" => 4]);"#,
+        "ResponseLimitError",
+    );
+    run(&mut runtime, "$r = Http::get($url); $status = $r->status;").unwrap();
+    assert_eq!(runtime.get_global("status"), Some(&Value::Int(404)));
+    error(&mut runtime, "$r->json();", "JsonError");
+    error(&mut runtime, "Http::get($url);", "EncodingError");
+    run(
+        &mut runtime,
+        r#"
+        $saved = $r;
+        $failedDuration = null;
+        $started = Clock::monotonicMs();
+        try { $r = Http::get($url, ["timeoutMs" => 30]); }
+        catch (TimeoutError $e) { $failedDuration = Clock::monotonicMs() - $started; }
+        $unchanged = $r === $saved;
+    "#,
+    )
+    .unwrap();
+    assert_eq!(runtime.get_global("unchanged"), Some(&Value::Bool(true)));
+    assert!(
+        matches!(runtime.get_global("failedDuration"), Some(Value::Float(ms)) if ms.is_finite() && *ms >= 10.0)
+    );
+    worker.join().unwrap();
+    assert_eq!(requests.iter().count(), 4);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    runtime.set_global("url", Value::String(url)).unwrap();
+    error(&mut runtime, "Http::get($url);", "ConnectionError");
+    for source in [
+        r#"Http::get("file:///etc/passwd");"#,
+        r#"Http::get("http://user:pass@localhost/");"#,
+        r#"Http::get($url, ["timeoutMs" => 0]);"#,
+        r#"Http::get($url, ["headers" => ["X-Bad" => "bad\r\nheader"]]);"#,
+        r#"Http::get($url, ["verifyTls" => false]);"#,
+        r#"Http::get($url, ["maxBodyBytes" => 999999999]);"#,
+    ] {
+        error(&mut runtime, source, "TypeError");
+    }
+    let mut options = RuntimeOptions::default();
+    options.context.permissions.allowed.remove("http.request");
+    let mut denied = Runtime::with_options(options);
+    scr_stdlib::register(&mut denied).unwrap();
+    error(
+        &mut denied,
+        r#"Http::get("http://localhost");"#,
+        "PermissionError",
+    );
+}
+
+#[test]
+fn https_rejects_untrusted_certificates() {
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(
+        cert.key_pair.serialize_der(),
+    ));
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert.cert.der().clone()], key)
+        .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let worker = thread::spawn(move || {
+        listener.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok((stream, _)) = listener.accept() {
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let connection =
+                    rustls::ServerConnection::new(std::sync::Arc::new(config)).unwrap();
+                let mut stream = rustls::StreamOwned::new(connection, stream);
+                let _ = stream.read(&mut [0; 128]);
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(2));
+        }
+    });
+    let mut runtime = runtime(None);
+    runtime
+        .set_global(
+            "url",
+            Value::String(format!("https://localhost:{}", address.port())),
+        )
+        .unwrap();
+    error(
+        &mut runtime,
+        r#"Http::get($url, ["timeoutMs" => 2000]);"#,
+        "TlsError",
+    );
+    worker.join().unwrap();
+}
+
+#[test]
+fn deep_include_chains_are_bounded_and_runtime_state_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    for index in 0..70 {
+        std::fs::write(
+            dir.path().join(format!("part{index}.scripta")),
+            format!("<?scr require \"part{}.scripta\";", index + 1),
+        )
+        .unwrap();
+    }
+    let mut runtime = runtime(Some(&dir.path().join("main.scripta")));
+    error(&mut runtime, r#"require "part0.scripta";"#, "ModuleError");
+    assert_eq!(
+        run(&mut runtime, r#"echo "recovered";"#).unwrap(),
+        "recovered"
+    );
+}
+
+#[test]
+fn json_preserves_internal_looking_object_keys_and_rejects_excessive_depth() {
+    let mut runtime = runtime(None);
+    runtime
+        .set_global(
+            "json",
+            Value::String(r#"{"$serde_json::private::Number":"123","other":true}"#.into()),
+        )
+        .unwrap();
+    run(
+        &mut runtime,
+        "$data = Json::decode($json); $encoded = Json::encode($data);",
+    )
+    .unwrap();
+    assert!(matches!(runtime.get_global("data"), Some(Value::Map(entries)) if entries.len() == 2));
+    runtime
+        .set_global(
+            "json",
+            Value::String(format!("{}0{}", "[".repeat(140), "]".repeat(140))),
+        )
+        .unwrap();
+    error(&mut runtime, "Json::decode($json);", "JsonError");
+}
+
+#[test]
+fn response_limits_apply_to_chunked_bodies_and_exact_boundaries() {
+    let (url, requests, worker) = server(3, |index, _| {
+        match index {
+        0 => b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n6\r\nabcdef\r\n0\r\n\r\n".to_vec(),
+        1 => reply("200 OK", "", b"1234"),
+        _ => reply("204 No Content", "", b""),
+    }
+    });
+    let mut runtime = runtime(None);
+    runtime.set_global("url", Value::String(url)).unwrap();
+    error(
+        &mut runtime,
+        r#"Http::get($url, ["maxBodyBytes" => 4]);"#,
+        "ResponseLimitError",
+    );
+    assert_eq!(
+        run(
+            &mut runtime,
+            r#"$r = Http::get($url, ["maxBodyBytes" => 4]); echo $r->text();"#
+        )
+        .unwrap(),
+        "1234"
+    );
+    assert_eq!(
+        run(
+            &mut runtime,
+            r#"$r = Http::get($url, ["maxBodyBytes" => 0, "headers" => []]); echo $r->text();"#
+        )
+        .unwrap(),
+        ""
+    );
+    worker.join().unwrap();
+    assert_eq!(requests.iter().count(), 3);
+}
+
+#[test]
+fn http_duration_includes_redirects_and_streamed_body_and_is_frozen() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/start", listener.local_addr().unwrap());
+    listener.set_nonblocking(true).unwrap();
+    let worker = thread::spawn(move || {
+        for index in 0..2 {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(2))
+                    }
+                    other => panic!("timing fixture accept failed: {other:?}"),
+                }
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let request = read_request(&mut stream);
+            if index == 0 {
+                assert!(request.starts_with("GET /start "));
+                thread::sleep(Duration::from_millis(100));
+                stream
+                    .write_all(&reply("302 Found", "Location: /final\r\n", b""))
+                    .unwrap();
+            } else {
+                assert!(request.starts_with("GET /final "));
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n\xff",
+                    )
+                    .unwrap();
+                stream.flush().unwrap();
+                thread::sleep(Duration::from_millis(100));
+                stream.write_all(&[0]).unwrap();
+            }
+        }
+    });
+    let mut runtime = runtime(None);
+    runtime.set_global("url", Value::String(url)).unwrap();
+    run(
+        &mut runtime,
+        r#"
+        $started = Clock::monotonicMs();
+        $r = Http::get($url, ["responseType" => "bytes", "maxBodyBytes" => 2]);
+        $elapsed = Clock::monotonicMs() - $started;
+        $duration = $r->durationMs;
+        $body = $r->body;
+        $encoded = Json::encode(["durationMs" => $duration]);
+    "#,
+    )
+    .unwrap();
+    let Some(Value::Float(duration)) = runtime.get_global("duration") else {
+        panic!("duration must be float")
+    };
+    let duration = *duration;
+    let Some(Value::Float(elapsed)) = runtime.get_global("elapsed") else {
+        panic!("elapsed must be float")
+    };
+    assert!(
+        duration.is_finite() && duration >= 150.0,
+        "duration omitted redirect or body wait: {duration}"
+    );
+    assert!(duration <= elapsed + 1.0, "duration exceeds full call time");
+    assert_eq!(
+        runtime.get_global("body"),
+        Some(&Value::Bytes(vec![0xff, 0].into()))
+    );
+    worker.join().unwrap();
+    thread::sleep(Duration::from_millis(20));
+    run(&mut runtime, "$again = $r->durationMs;").unwrap();
+    assert_eq!(runtime.get_global("again"), Some(&Value::Float(duration)));
+    error(&mut runtime, "$r->durationMs = 0.0;", "PropertyError");
+    run(&mut runtime, "$again = $r->durationMs;").unwrap();
+    assert_eq!(runtime.get_global("again"), Some(&Value::Float(duration)));
+}
+
+#[test]
+fn tag_free_entry_and_includes_share_scope_with_tagged_sources() {
+    let directory = tempfile::tempdir().unwrap();
+    let main = directory.path().join("main.scripta");
+    std::fs::write(
+        directory.path().join("legacy.scr"),
+        "<?scr $shared = $shared . ' legacy';",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.path().join("modern.scripta"),
+        "# include\n$shared = 'tag free'; require 'legacy.scr';",
+    )
+    .unwrap();
+    let mut runtime = runtime(Some(&main));
+    let mut output = Vec::new();
+    runtime
+        .execute_source(
+            "require_once 'modern.scripta'; require_once 'modern.scripta'; echo $shared;",
+            &mut output,
+        )
+        .unwrap();
+    assert_eq!(output, b"tag free legacy");
+}

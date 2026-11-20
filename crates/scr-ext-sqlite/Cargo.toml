@@ -1,0 +1,17 @@
+[package]
+name = "scr-ext-sqlite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+scr-runtime.workspace = true
+rusqlite = { version = "0.40", default-features = false, features = ["bundled", "hooks", "limits"] }
+fallible-iterator = "0.3"
+
+[dev-dependencies]
+tempfile = "3.15"
+
+[lints]
+workspace = true

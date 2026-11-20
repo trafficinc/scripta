@@ -1,0 +1,16 @@
+class User {
+    $name: string;
+    function __construct($name: string) {
+        $this->name = $name;
+    }
+}
+$user = new User("Ada");
+$items = ["apple", "pear"];
+$price = 25;
+$quantity = 4;
+$available = true;
+echo "Hello, {$user->name}!\n";
+echo "First item: {$items[0]}\n";
+echo "Total: {$price * $quantity}; available: {$available}\n";
+echo "Literal: \{$user->name}\n";
+echo '{$user->name}' . "\n";

@@ -1,0 +1,504 @@
+use scr_runtime::{ContextOptions, Runtime, RuntimeError, RuntimeOptions, Value};
+use std::{fs, path::Path};
+
+fn runtime(dir: &Path) -> Runtime {
+    let mut rt = Runtime::with_options(RuntimeOptions {
+        context: ContextOptions {
+            script_path: Some(dir.join("main.scripta")),
+            working_directory: dir.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    scr_stdlib::register(&mut rt).unwrap();
+    rt
+}
+fn run(rt: &mut Runtime, source: &str) -> Result<String, RuntimeError> {
+    let mut out = Vec::new();
+    rt.execute_source(&format!("<?scr {source}"), &mut out)?;
+    Ok(String::from_utf8(out).unwrap())
+}
+fn write(dir: &Path, name: &str, body: &str) {
+    fs::write(dir.join(name), format!("<?scr {body}")).unwrap();
+}
+
+#[test]
+fn aliases_isolate_functions_variables_and_caller_names_but_keep_native_functions() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "a.scripta",
+        "$name='a'; function normalize() { return String::upper($name); } function greet() { return normalize(); }",
+    );
+    write(
+        dir.path(),
+        "b.scripta",
+        "$name='b'; function normalize() { return String::upper($name); } function greet() { return normalize(); }",
+    );
+    let mut rt = runtime(dir.path());
+    assert_eq!(run(&mut rt, "$name='caller'; function normalize() { return 'caller'; } require_once 'a.scripta' as A; require_once 'b.scripta' as B; echo A::greet() . B::greet() . normalize() . $name;").unwrap(), "ABcallercaller");
+    assert!(
+        run(&mut rt, "greet();")
+            .unwrap_err()
+            .message
+            .contains("undefined function greet")
+    );
+    assert!(
+        run(&mut rt, "A::missing();")
+            .unwrap_err()
+            .message
+            .contains("module alias A has no function missing")
+    );
+    write(dir.path(), "read-caller.scripta", "echo $name;");
+    assert!(
+        run(&mut rt, "require 'read-caller.scripta' as Read;")
+            .unwrap_err()
+            .message
+            .contains("undefined variable $name")
+    );
+    write(dir.path(), "call-caller.scripta", "normalize();");
+    assert!(
+        run(&mut rt, "require 'call-caller.scripta' as Call;")
+            .unwrap_err()
+            .message
+            .contains("undefined function normalize")
+    );
+    assert_eq!(run(&mut rt, "echo A::greet();").unwrap(), "A");
+}
+
+#[test]
+fn modules_expose_top_level_functions_without_export_declarations() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "lib.scripta",
+        "$name='Ada'; function helper($name) { return String::upper($name); } function greet() { return helper($name); }",
+    );
+    let mut rt = runtime(dir.path());
+    assert_eq!(
+        run(
+            &mut rt,
+            "require 'lib.scripta' as Lib; echo Lib::greet() . Lib::helper('module');"
+        )
+        .unwrap(),
+        "ADAMODULE"
+    );
+    assert!(
+        run(&mut rt, "greet();")
+            .unwrap_err()
+            .message
+            .contains("undefined function greet")
+    );
+}
+
+#[test]
+fn aliased_require_and_require_once_share_one_cached_instance() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "counter.scripta",
+        "echo 'init;'; $n=0; function next() { $n+=1; return str($n); }",
+    );
+    let mut rt = runtime(dir.path());
+    assert_eq!(run(&mut rt, "require_once 'counter.scripta' as Counter; echo Counter::next(); require_once './counter.scripta' as Other; echo Other::next(); require_once 'counter.scripta' as Counter; echo Counter::next();").unwrap(), "init;123");
+    assert_eq!(run(&mut rt, "require 'counter.scripta' as Counter; echo Counter::next() . Other::next(); require_once 'counter.scripta' as Latest; echo Latest::next();").unwrap(), "456");
+    rt.collect_garbage();
+    assert_eq!(
+        run(&mut rt, "echo Counter::next() . Other::next();").unwrap(),
+        "78"
+    );
+    // Legacy loading remains independent and shares the caller's scope.
+    assert_eq!(
+        run(
+            &mut rt,
+            "require_once 'counter.scripta'; require_once 'counter.scripta'; echo str($n);"
+        )
+        .unwrap(),
+        "init;0"
+    );
+    assert!(
+        run(&mut rt, "require 'counter.scripta';")
+            .unwrap_err()
+            .message
+            .contains("already declared")
+    );
+}
+
+#[test]
+fn alias_conflicts_are_catchable_and_do_not_execute_or_replace_the_module() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "a.scripta", "function name() { return 'a'; }");
+    write(
+        dir.path(),
+        "b.scripta",
+        "echo 'should not run'; function name() { return 'b'; }",
+    );
+    let mut rt = runtime(dir.path());
+    assert_eq!(run(&mut rt, "require_once 'a.scripta' as Lib; try { require 'b.scripta' as Lib; } catch (ModuleAliasError $e) { echo 'conflict;'; } echo Lib::name();").unwrap(), "conflict;a");
+    assert_eq!(run(&mut rt, "try { require 'b.scripta' as String; } catch (ModuleAliasError $e) { echo String::upper('reserved'); }").unwrap(), "RESERVED");
+    let error = rt
+        .register(
+            "Lib::new",
+            scr_runtime::NativeFunction::new(
+                scr_runtime::NativeSignature::new(vec![], scr_runtime::NativeType::Null),
+                |_, _| Ok(Value::Null),
+            ),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, "RegistryError");
+    assert_eq!(run(&mut rt, "echo Lib::name();").unwrap(), "a");
+}
+
+#[test]
+fn local_includes_once_tracking_and_aliases_follow_the_enclosing_module() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "helper.scripta",
+        "function helper() { return 'helper'; }",
+    );
+    write(
+        dir.path(),
+        "inner.scripta",
+        "function value() { return 'inner'; }",
+    );
+    write(
+        dir.path(),
+        "outer.scripta",
+        "require_once 'helper.scripta'; require_once './helper.scripta'; require_once 'inner.scripta' as Inner; function value() { return helper() . Inner::value(); }",
+    );
+    let mut rt = runtime(dir.path());
+    assert_eq!(run(&mut rt, "require 'outer.scripta' as First; require 'outer.scripta' as Second; require_once 'helper.scripta'; echo First::value() . Second::value() . helper();").unwrap(), "helperinnerhelperinnerhelper");
+    assert!(
+        run(&mut rt, "Inner::value();")
+            .unwrap_err()
+            .message
+            .contains("undefined function Inner::value")
+    );
+    assert_eq!(run(&mut rt, "function factory() { require_once 'outer.scripta' as Local; return function () { return Local::value(); }; } $f=factory();").unwrap(), "");
+    rt.collect_garbage();
+    assert_eq!(run(&mut rt, "echo $f();").unwrap(), "helperinner");
+}
+
+#[test]
+fn module_cache_aliases_and_callbacks_survive_collection_even_without_functions() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "empty.scripta", "echo 'loaded';");
+    write(
+        dir.path(),
+        "lib.scripta",
+        "$n=0; function tick() { $n+=1; return str($n); } function callback() { return function () { return tick(); }; }",
+    );
+    let mut rt = runtime(dir.path());
+    assert_eq!(run(&mut rt, "{ require_once 'empty.scripta' as Empty; } require_once 'lib.scripta' as Old; $f=Old::callback(); require 'lib.scripta' as New; echo Old::tick();").unwrap(), "loaded1");
+    for _ in 0..3 {
+        rt.collect_garbage();
+    }
+    assert_eq!(
+        run(
+            &mut rt,
+            "require_once 'empty.scripta' as Again; echo Old::tick() . New::tick() . $f();"
+        )
+        .unwrap(),
+        "234"
+    );
+    // Both aliases and the retained callback still reference the shared cached root.
+    for _ in 0..3 {
+        rt.collect_garbage();
+    }
+    assert_eq!(
+        run(&mut rt, "echo Old::tick() . New::tick();").unwrap(),
+        "56"
+    );
+}
+
+#[test]
+fn cached_modules_are_not_reexecuted_and_failed_initialization_allows_retry() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "lib.scripta",
+        "function name() { return 'old'; }",
+    );
+    let mut rt = runtime(dir.path());
+    run(&mut rt, "require_once 'lib.scripta' as Lib;").unwrap();
+    write(
+        dir.path(),
+        "lib.scripta",
+        "$caller='changed'; function name() { return 'partial'; } throw 'failed';",
+    );
+    // Successful module initialization is cached even when the source changes.
+    assert_eq!(
+        run(
+            &mut rt,
+            "$caller='safe'; require 'lib.scripta' as Lib; echo Lib::name() . $caller;"
+        )
+        .unwrap(),
+        "oldsafe"
+    );
+    write(
+        dir.path(),
+        "retry.scripta",
+        "function value() { return 'partial'; } throw 'failed';",
+    );
+    run(
+        &mut rt,
+        "try { require 'retry.scripta' as Retry; } catch ($e) {}",
+    )
+    .unwrap();
+    assert!(
+        run(&mut rt, "Retry::value();")
+            .unwrap_err()
+            .message
+            .contains("undefined function")
+    );
+    write(
+        dir.path(),
+        "retry.scripta",
+        "function value() { return 'retry'; }",
+    );
+    assert_eq!(
+        run(
+            &mut rt,
+            "require 'retry.scripta' as Retry; echo Retry::value();"
+        )
+        .unwrap(),
+        "retry"
+    );
+    assert_eq!(run(&mut rt, "echo Lib::name();").unwrap(), "old");
+}
+
+#[test]
+fn cycles_source_errors_and_call_traces_retain_files_and_do_not_poison_runtime() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "cycle.scripta",
+        "require_once 'cycle.scripta' as Cycle;",
+    );
+    write(dir.path(), "syntax.scripta", "function broken(;");
+    write(
+        dir.path(),
+        "trace.scripta",
+        "function fail() { return $missing; }",
+    );
+    let mut rt = runtime(dir.path());
+    assert_eq!(run(&mut rt, "try { require_once 'cycle.scripta' as Cycle; } catch (CircularIncludeError $e) { echo 'cycle'; }").unwrap(), "cycle");
+    let error = run(&mut rt, "require_once 'syntax.scripta' as Syntax;").unwrap_err();
+    assert_eq!(error.code, "E0201");
+    assert!(error.source.unwrap().path.ends_with("syntax.scripta"));
+    run(&mut rt, "require_once 'trace.scripta' as Trace;").unwrap();
+    let error = run(&mut rt, "Trace::fail();").unwrap_err();
+    assert!(
+        error
+            .source
+            .as_ref()
+            .unwrap()
+            .path
+            .ends_with("trace.scripta")
+    );
+    assert!(error.trace.iter().any(|frame| {
+        frame.function == "fail"
+            && frame
+                .source
+                .as_ref()
+                .unwrap()
+                .path
+                .ends_with("main.scripta")
+    }));
+    assert_eq!(run(&mut rt, "echo 'recovered';").unwrap(), "recovered");
+}
+
+#[test]
+fn cached_aliases_still_require_permissions_and_host_policy_and_scopes_are_budgeted() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "lib.scripta",
+        "function value() { return 'ok'; }",
+    );
+    let mut rt = runtime(dir.path());
+    run(&mut rt, "require_once 'lib.scripta' as Lib;").unwrap();
+    rt.set_module_policy(|_| {
+        Err(scr_runtime::NativeError::new(
+            "PermissionError",
+            "denied by host",
+        ))
+    });
+    assert!(
+        run(&mut rt, "require 'lib.scripta' as Other;")
+            .unwrap_err()
+            .message
+            .contains("denied by host")
+    );
+    assert_eq!(run(&mut rt, "echo Lib::value();").unwrap(), "ok");
+    let mut options = RuntimeOptions::default();
+    options.context.script_path = Some(dir.path().join("main.scripta"));
+    options
+        .context
+        .permissions
+        .allowed
+        .remove("filesystem.read");
+    let mut denied = Runtime::with_options(options.clone());
+    assert!(
+        run(&mut denied, "require_once 'lib.scripta' as Lib;")
+            .unwrap_err()
+            .message
+            .contains("permission denied")
+    );
+    options
+        .context
+        .permissions
+        .allowed
+        .insert("filesystem.read".into());
+    options.max_scopes = Some(1);
+    let mut limited = Runtime::with_options(options);
+    assert!(
+        run(&mut limited, "require_once 'lib.scripta' as Lib;")
+            .unwrap_err()
+            .message
+            .contains("scope limit")
+    );
+    assert_eq!(run(&mut limited, "echo 'recovered';").unwrap(), "recovered");
+}
+
+#[test]
+fn alias_formatting_preserves_comments_and_execution_and_check_does_not_load_files() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "lib.scripta",
+        "function greet($name='Ada') { return $name; }",
+    );
+    let source = "<?scr require /* path */ ('lib.scripta') as /* alias */ Helpers;echo Helpers :: greet ( );";
+    scr_cli::pipeline::check(source).unwrap();
+    scr_cli::pipeline::check("<?scr require_once 'nonexistent' as Missing; Missing::unknown();")
+        .unwrap();
+    let formatted = scr_cli::formatter::format(source).unwrap();
+    assert!(formatted.contains("as /* alias */ Helpers"), "{formatted}");
+    assert!(formatted.contains("Helpers::greet()"));
+    assert_eq!(scr_cli::formatter::format(&formatted).unwrap(), formatted);
+    for source in [source, &formatted] {
+        let mut rt = runtime(dir.path());
+        let mut output = Vec::new();
+        rt.execute_source(source, &mut output).unwrap();
+        assert_eq!(output, b"Ada");
+    }
+}
+
+#[test]
+fn repeated_require_reuses_scopes_and_fatal_failures_restore_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "lib.scripta",
+        "function value() { return 'ok'; }",
+    );
+    let mut rt = Runtime::with_options(RuntimeOptions {
+        max_scopes: Some(8),
+        context: ContextOptions {
+            script_path: Some(dir.path().join("main.scripta")),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    // Repeated module loads must reuse the cached root under a tight scope budget.
+    assert_eq!(run(&mut rt, "for ($i=0; $i<100; $i+=1) { require 'lib.scripta' as Lib; } require_once 'lib.scripta' as Current; echo Current::value();").unwrap(), "ok");
+    write(dir.path(), "steps.scripta", "while (true) {}");
+    let mut limited = Runtime::with_options(RuntimeOptions {
+        instruction_limit: Some(20),
+        context: ContextOptions {
+            script_path: Some(dir.path().join("main.scripta")),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    assert!(
+        run(&mut limited, "require_once 'steps.scripta' as Steps;")
+            .unwrap_err()
+            .message
+            .contains("instruction limit")
+    );
+    write(
+        dir.path(),
+        "steps.scripta",
+        "function value() { return 'retry'; }",
+    );
+    assert_eq!(
+        run(
+            &mut limited,
+            "require_once 'steps.scripta' as Steps; echo Steps::value();"
+        )
+        .unwrap(),
+        "retry"
+    );
+    write(
+        dir.path(),
+        "exit.scripta",
+        "function value() { return 'partial'; } exit 7;",
+    );
+    assert_eq!(
+        rt.execute_source(
+            "<?scr require_once 'exit.scripta' as Exiting;",
+            &mut Vec::new()
+        )
+        .unwrap(),
+        7
+    );
+    assert!(
+        run(&mut rt, "Exiting::value();")
+            .unwrap_err()
+            .message
+            .contains("undefined function")
+    );
+    write(
+        dir.path(),
+        "exit.scripta",
+        "function value() { return 'complete'; }",
+    );
+    assert_eq!(
+        run(
+            &mut rt,
+            "require_once 'exit.scripta' as Exiting; echo Exiting::value();"
+        )
+        .unwrap(),
+        "complete"
+    );
+}
+
+#[test]
+fn module_entry_once_identity_is_retained_for_later_calls_and_canonical_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "self.scripta",
+        "echo 'init'; function check() { require_once 'self.scripta'; return 'ok'; }",
+    );
+    let mut rt = runtime(dir.path());
+    assert_eq!(
+        run(
+            &mut rt,
+            "require_once 'self.scripta' as Lib; echo Lib::check();"
+        )
+        .unwrap(),
+        "initok"
+    );
+    rt.collect_garbage();
+    assert_eq!(run(&mut rt, "echo Lib::check();").unwrap(), "ok");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            dir.path().join("self.scripta"),
+            dir.path().join("link.scripta"),
+        )
+        .unwrap();
+        assert_eq!(
+            run(
+                &mut rt,
+                "require_once 'link.scripta' as Lib; echo Lib::check();"
+            )
+            .unwrap(),
+            "ok"
+        );
+    }
+}

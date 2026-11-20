@@ -1,0 +1,14 @@
+// Behind a configured trusted proxy; see docs/web-servers.md for the trust policy.
+// Local direct access: scripta serve examples/web-proxy.scripta
+$request = Web::request();
+if ($request->path === "/redirect") {
+    if ($request->host === null || $request->scheme === null) {
+        Web::status(400);
+        echo "Missing request origin";
+        exit 0;
+    }
+    Web::redirect($request->scheme . "://" . $request->host . "/", 303);
+    exit 0;
+}
+Web::header("Content-Type", "application/json");
+echo Json::encode(["peer" => $request->peerAddress, "client" => $request->clientAddress, "scheme" => $request->scheme, "host" => $request->host,]);

@@ -1,0 +1,21 @@
+class Counter {
+    $value: int = 0;
+    function next(): int {
+        $this->value += 1;
+        return $this->value;
+    }
+}
+function test_object_identity() {
+    $counter = new Counter();
+    $alias = $counter;
+    Assert::same(1, $alias->next());
+    Assert::same(1, $counter->value);
+}
+function test_array_expressions() {
+    $squares = [$x * $x for $x in [1, 2, 3] if $x > 1];
+    [$first, ...$rest] = $squares;
+    Assert::same(4, $first);
+    Assert::same([9], $rest);
+    Assert::same([9, 4], $squares[::-1]);
+    Assert::isTrue(9 in $squares);
+}

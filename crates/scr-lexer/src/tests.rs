@@ -1,0 +1,519 @@
+use super::*;
+
+fn kinds(body: &str) -> Vec<TokenKind> {
+    lex(&format!("<?scr {body}"))
+        .unwrap()
+        .into_iter()
+        .map(|t| t.kind)
+        .collect()
+}
+
+fn fails(source: &str, kind: LexerErrorKind) -> LexerError {
+    let error = lex(source).unwrap_err();
+    assert_eq!(error.kind, kind, "{source:?}: {error}");
+    assert!(error.span.start <= error.span.end);
+    assert!(error.span.end <= source.len());
+    assert!(source.is_char_boundary(error.span.start));
+    assert!(source.is_char_boundary(error.span.end));
+    assert_eq!(error.start, SourcePosition::at(source, error.span.start));
+    assert_eq!(error.end, SourcePosition::at(source, error.span.end));
+    error
+}
+
+#[test]
+fn every_keyword_and_keyword_boundaries() {
+    for (spelling, expected) in [
+        ("true", TokenKind::True),
+        ("false", TokenKind::False),
+        ("null", TokenKind::Null),
+        ("echo", TokenKind::Echo),
+        ("if", TokenKind::If),
+        ("elseif", TokenKind::Elseif),
+        ("else", TokenKind::Else),
+        ("while", TokenKind::While),
+        ("for", TokenKind::For),
+        ("foreach", TokenKind::Foreach),
+        ("as", TokenKind::As),
+        ("function", TokenKind::Function),
+        ("class", TokenKind::Class),
+        ("interface", TokenKind::Interface),
+        ("implements", TokenKind::Implements),
+        ("extends", TokenKind::Extends),
+        ("new", TokenKind::New),
+        ("in", TokenKind::In),
+        ("return", TokenKind::Return),
+        ("break", TokenKind::Break),
+        ("continue", TokenKind::Continue),
+        ("try", TokenKind::Try),
+        ("catch", TokenKind::Catch),
+        ("finally", TokenKind::Finally),
+        ("throw", TokenKind::Throw),
+        ("exit", TokenKind::Exit),
+    ] {
+        assert_eq!(kinds(spelling), vec![expected, TokenKind::Eof]);
+        for name in [
+            format!("{spelling}_x"),
+            format!("{spelling}1"),
+            spelling.to_uppercase(),
+        ] {
+            assert_eq!(kinds(&name), vec![TokenKind::Ident(name), TokenKind::Eof]);
+        }
+        assert_eq!(
+            kinds(&format!("${spelling}")),
+            vec![TokenKind::Variable(spelling.into()), TokenKind::Eof]
+        );
+    }
+}
+
+#[test]
+fn every_operator_and_punctuation() {
+    for (spelling, expected) in [
+        ("+", TokenKind::Plus),
+        ("-", TokenKind::Minus),
+        ("*", TokenKind::Star),
+        ("/", TokenKind::Slash),
+        ("%", TokenKind::Percent),
+        (".", TokenKind::Dot),
+        ("=", TokenKind::Assign),
+        ("+=", TokenKind::PlusAssign),
+        ("-=", TokenKind::MinusAssign),
+        ("*=", TokenKind::StarAssign),
+        ("/=", TokenKind::SlashAssign),
+        (".=", TokenKind::DotAssign),
+        ("==", TokenKind::Equal),
+        ("!=", TokenKind::NotEqual),
+        ("===", TokenKind::StrictEqual),
+        ("!==", TokenKind::StrictNotEqual),
+        ("<", TokenKind::Less),
+        ("<=", TokenKind::LessEqual),
+        (">", TokenKind::Greater),
+        (">=", TokenKind::GreaterEqual),
+        ("&&", TokenKind::And),
+        ("||", TokenKind::Or),
+        ("!", TokenKind::Not),
+        (";", TokenKind::Semicolon),
+        (",", TokenKind::Comma),
+        (":", TokenKind::Colon),
+        ("(", TokenKind::LeftParen),
+        (")", TokenKind::RightParen),
+        ("{", TokenKind::LeftBrace),
+        ("}", TokenKind::RightBrace),
+        ("[", TokenKind::LeftBracket),
+        ("]", TokenKind::RightBracket),
+        ("=>", TokenKind::FatArrow),
+        ("->", TokenKind::Arrow),
+        ("::", TokenKind::StaticAccess),
+    ] {
+        let source = format!("<?scr {spelling}");
+        let tokens = lex(&source).unwrap();
+        assert_eq!(tokens[0].kind, expected, "{spelling}");
+        assert_eq!(tokens[0].span, Span::new(6, source.len()));
+        assert_eq!(tokens[1].kind, TokenKind::Eof);
+    }
+}
+
+#[test]
+fn opening_tags_are_optional_but_malformed_and_embedded_tags_are_rejected() {
+    for source in [
+        "",
+        " \r\n",
+        "// comment",
+        "/* comment */",
+        "#!/usr/bin/env scripta",
+        "\u{feff}",
+        "?>",
+    ] {
+        let tokens = lex(source).unwrap();
+        assert_eq!(tokens.len(), 1, "{source}");
+        assert_eq!(tokens[0].kind, TokenKind::Eof);
+        assert_eq!(tokens[0].span, Span::new(source.len(), source.len()));
+    }
+    assert_eq!(lex("echo 1;").unwrap()[0].kind, TokenKind::Echo);
+    for source in ["<?php echo 1;", "<?script", "<?"] {
+        fails(source, LexerErrorKind::MissingOpeningTag);
+    }
+    for source in ["text <?scr", "// comment\n<?scr", "echo 'x'; <?scripta"] {
+        fails(source, LexerErrorKind::InvalidOperator);
+    }
+}
+
+#[test]
+fn bom_shebang_and_opening_tag() {
+    for preamble in [
+        "",
+        "\u{feff}",
+        "#!/usr/bin/env scripta\n",
+        "\u{feff}#!/usr/bin/env scripta\r\n",
+        " \n\t",
+    ] {
+        let source = format!("{preamble}<?scr/* comment */echo 'ok';");
+        let tokens = lex(&source).unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Echo);
+        assert_eq!(tokens[0].span.start, source.find("echo").unwrap());
+        assert_eq!(
+            tokens[0].start,
+            SourcePosition::at(&source, tokens[0].span.start)
+        );
+    }
+    fails(
+        " \n#!/usr/bin/env scripta\n<?scr",
+        LexerErrorKind::InvalidOperator,
+    );
+    fails("\u{feff}\u{feff}<?scr", LexerErrorKind::InvalidCharacter);
+}
+
+#[test]
+fn closing_tag_must_be_last() {
+    for source in ["<?scr", "<?scr?>", "<?scr ?> \r\n\t", "<?scr // eof"] {
+        let tokens = lex(source).unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Eof);
+        assert_eq!(tokens[0].span, Span::new(source.len(), source.len()));
+    }
+    for tail in [
+        "echo 'x';",
+        "<html>",
+        "// comment",
+        "# comment",
+        "/*comment*/",
+        "<?scr",
+        "?>",
+    ] {
+        let source = format!("<?scr ?> \n{tail}");
+        let error = fails(&source, LexerErrorKind::ContentAfterClosingTag);
+        assert_eq!(error.start.line, 2);
+        assert_eq!(error.start.column, 1);
+    }
+}
+
+#[test]
+fn comments_are_trivia_and_tags_inside_comments_are_inert() {
+    assert_eq!(
+        kinds("// ?>\r\n# ?>\r/* ?> <?scr */echo/*middle*/\"ok\";"),
+        vec![
+            TokenKind::Echo,
+            TokenKind::String("ok".into()),
+            TokenKind::Semicolon,
+            TokenKind::Eof
+        ]
+    );
+    assert_eq!(kinds("/**/ // last"), vec![TokenKind::Eof]);
+    for source in [
+        "<?scr /*",
+        "<?scr /* hi\n世界",
+        "<?scr /* outer /* inner */ /*",
+    ] {
+        fails(source, LexerErrorKind::UnterminatedComment);
+    }
+}
+
+#[test]
+fn names_and_variables() {
+    assert_eq!(
+        kinds("$name $_name2 foo Foo_2 $if"),
+        vec![
+            TokenKind::Variable("name".into()),
+            TokenKind::Variable("_name2".into()),
+            TokenKind::Ident("foo".into()),
+            TokenKind::Ident("Foo_2".into()),
+            TokenKind::Variable("if".into()),
+            TokenKind::Eof
+        ]
+    );
+    for source in ["<?scr $", "<?scr $2x", "<?scr $é"] {
+        fails(source, LexerErrorKind::InvalidVariable);
+    }
+    fails("<?scr é", LexerErrorKind::InvalidCharacter);
+}
+
+#[test]
+fn decimal_numbers_and_exponents_preserve_spelling() {
+    for number in ["0", "123", "001", "9223372036854775808"] {
+        assert_eq!(
+            kinds(number),
+            vec![TokenKind::Int(number.into()), TokenKind::Eof]
+        );
+    }
+    for number in ["0.0", "1.25", "1e3", "1E-3", "0.25e+10", "001.20"] {
+        assert_eq!(
+            kinds(number),
+            vec![TokenKind::Float(number.into()), TokenKind::Eof]
+        );
+    }
+    assert_eq!(
+        kinds("1.foo"),
+        vec![
+            TokenKind::Int("1".into()),
+            TokenKind::Dot,
+            TokenKind::Ident("foo".into()),
+            TokenKind::Eof
+        ]
+    );
+    // Signs belong to operators, not numeric literals.
+    assert_eq!(
+        kinds("-1"),
+        vec![TokenKind::Minus, TokenKind::Int("1".into()), TokenKind::Eof]
+    );
+}
+
+#[test]
+fn malformed_numbers() {
+    for number in [
+        "1e", "1e+", "1E-", "12abc", "0x10", "0b11", "1_000", "1.2.3", "1e2.3", "2e3x",
+    ] {
+        fails(&format!("<?scr {number}"), LexerErrorKind::MalformedNumber);
+    }
+}
+
+#[test]
+fn strings_decode_escapes_and_preserve_unicode_and_source_spans() {
+    let source = "<?scr \"hé世界 🦀\" 'literal $name'";
+    let tokens = lex(source).unwrap();
+    assert_eq!(tokens[0].kind, TokenKind::String("hé世界 🦀".into()));
+    assert_eq!(
+        &source[tokens[0].span.start..tokens[0].span.end],
+        "\"hé世界 🦀\""
+    );
+    assert_eq!(tokens[1].kind, TokenKind::String("literal $name".into()));
+    assert_eq!(
+        kinds(r#""\n\r\t\0\\\"\'\$name""#),
+        vec![
+            TokenKind::String("\n\r\t\0\\\"'$name".into()),
+            TokenKind::Eof
+        ]
+    );
+    assert_eq!(
+        kinds(r"'it\'s \\'"),
+        vec![TokenKind::String("it's \\".into()), TokenKind::Eof]
+    );
+    assert_eq!(
+        kinds("\"?> <?scr\""),
+        vec![TokenKind::String("?> <?scr".into()), TokenKind::Eof]
+    );
+    assert_eq!(
+        kinds("\"$name\""),
+        vec![TokenKind::String("$name".into()), TokenKind::Eof]
+    );
+}
+
+#[test]
+fn invalid_and_unterminated_strings() {
+    for body in ["\"open", "'open", "\"ends\\", "'ends\\", "\"multi\nline"] {
+        fails(&format!("<?scr {body}"), LexerErrorKind::UnterminatedString);
+    }
+    for body in [r"'\n'", r"'\t'", r#"'\"'"#, r#""\q""#, r#""\u1234""#] {
+        fails(&format!("<?scr {body}"), LexerErrorKind::InvalidEscape);
+    }
+}
+
+#[test]
+fn variadic_ellipsis_is_a_single_token_distinct_from_concatenation() {
+    let source = "<?scr function f(...$values: int) {} $text = 'a' . 'b';";
+    let tokens = lex(source).unwrap();
+    let token = tokens
+        .iter()
+        .find(|t| t.kind == TokenKind::Ellipsis)
+        .unwrap();
+    assert_eq!(&source[token.span.start..token.span.end], "...");
+    assert_eq!(
+        tokens
+            .iter()
+            .filter(|t| t.kind == TokenKind::Ellipsis)
+            .count(),
+        1
+    );
+    assert_eq!(
+        tokens.iter().filter(|t| t.kind == TokenKind::Dot).count(),
+        1
+    );
+}
+
+#[test]
+fn invalid_operators_and_characters() {
+    for op in [
+        "++", "--", "**", "%=", "<<", ">>", "??", "&=", "|=", "^=", "&", "|", "^", "~", "?",
+    ] {
+        fails(&format!("<?scr {op}"), LexerErrorKind::InvalidOperator);
+    }
+    for c in ["@", "`", "\0", "\u{feff}", "🦀"] {
+        fails(&format!("<?scr {c}"), LexerErrorKind::InvalidCharacter);
+    }
+}
+
+#[test]
+fn positions_across_bom_shebang_unicode_crlf_cr_and_tabs() {
+    let source = "\u{feff}#!/usr/bin/env scripta\r\n<?scr\r\necho \"é🦀\";\r\t$x = 2;\n";
+    let tokens = lex(source).unwrap();
+    for token in &tokens {
+        assert_eq!(token.start, SourcePosition::at(source, token.span.start));
+        assert_eq!(token.end, SourcePosition::at(source, token.span.end));
+    }
+    assert_eq!((tokens[0].start.line, tokens[0].start.column), (3, 1));
+    assert_eq!((tokens[1].start.line, tokens[1].start.column), (3, 6));
+    assert_eq!((tokens[1].end.line, tokens[1].end.column), (3, 10));
+    assert_eq!((tokens[3].start.line, tokens[3].start.column), (4, 2));
+    assert_eq!(tokens.last().unwrap().start.line, 5);
+    let error = fails("<?scr\r\n\"é\" @", LexerErrorKind::InvalidCharacter);
+    assert_eq!((error.start.line, error.start.column), (2, 5));
+    assert_eq!(error.span, Span::new(12, 13));
+    let diagnostic: Diagnostic = error.into();
+    let rendered = diagnostic.render("test.scripta", "<?scr\r\n\"é\" @");
+    assert!(rendered.contains("test.scripta:2:5"));
+    assert!(rendered.contains("error[E0101]: unexpected character"));
+    assert!(rendered.contains("2 | \"*\" @"));
+}
+
+#[test]
+fn source_positions_remain_valid_over_a_small_adversarial_corpus() {
+    // Exercises arbitrary UTF-8 transitions and EOF after every common prefix.
+    for prefix in ["", "<?scr", "\u{feff}<?scr", "#!scripta\n<?scr"] {
+        for fragment in [
+            "", "$", "/*", "\"", "'", "\\", "é", "\r\n", "?>", "1e+", "!==", "\"🦀\"",
+        ] {
+            let source = format!("{prefix}{fragment}");
+            match lex(&source) {
+                Ok(tokens) => {
+                    let mut end = 0;
+                    for token in tokens {
+                        assert!(token.span.start >= end);
+                        assert!(token.span.end <= source.len());
+                        assert_eq!(token.start, SourcePosition::at(&source, token.span.start));
+                        assert_eq!(token.end, SourcePosition::at(&source, token.span.end));
+                        end = token.span.end;
+                    }
+                }
+                Err(error) => {
+                    fails(&source, error.kind);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn canonical_and_legacy_opening_tags_have_identical_tokens_and_correct_spans() {
+    let mut expected = None;
+    for tag in ["", "<?scripta", "<?scr"] {
+        for preamble in [
+            "",
+            "\u{feff}",
+            "#!/usr/bin/env scripta\r\n",
+            "\u{feff}#!/usr/bin/env scripta\r\n",
+            " \n\t",
+        ] {
+            let source = format!(
+                "{preamble}{tag}/* <?scr and <?scripta are inert here */echo \"é🦀\"; ?>\r\n"
+            );
+            let tokens = lex(&source).unwrap();
+            let kinds: Vec<_> = tokens.iter().map(|token| token.kind.clone()).collect();
+            if let Some(expected) = &expected {
+                assert_eq!(&kinds, expected);
+            } else {
+                expected = Some(kinds);
+            }
+            assert_eq!(tokens[0].span.start, source.find("echo").unwrap());
+            for token in &tokens {
+                assert_eq!(token.start, SourcePosition::at(&source, token.span.start));
+                assert_eq!(token.end, SourcePosition::at(&source, token.span.end));
+            }
+        }
+        for suffix in ["", "?>", " // eof", "/* empty */"] {
+            assert_eq!(lex(&format!("{tag}{suffix}")).unwrap().len(), 1);
+        }
+        let source = format!("{tag}\r\né");
+        let error = lex(&source).unwrap_err();
+        assert_eq!(error.span, Span::new(tag.len() + 2, source.len()));
+        assert_eq!((error.start.line, error.start.column), (2, 1));
+    }
+}
+
+#[test]
+fn opening_tag_boundaries_reject_typos_and_diagnostics_recommend_canonical_tag() {
+    for source in [
+        "<?src",
+        "<?scta",
+        "<?Scripta",
+        "<?script",
+        "<?scriptaExtra",
+        "<?scripta_",
+        "<?scripta9",
+        "<?scrExtra",
+        "<?scr_",
+        "<?scr9",
+    ] {
+        let error = fails(source, LexerErrorKind::MissingOpeningTag);
+        let diagnostic: Diagnostic = error.into();
+        let rendered = diagnostic.render("test.scripta", source);
+        assert!(rendered.contains("invalid opening tag"), "{rendered}");
+        assert!(rendered.contains("omit the opening tag"), "{rendered}");
+    }
+}
+
+#[test]
+fn tag_free_comments_and_preambles_keep_original_source_positions() {
+    for ending in ["\n", "\r\n", "\r"] {
+        let source = format!(
+            "\u{feff}#!/usr/bin/env scripta{ending}// <?scripta stays in a comment{ending}\techo \"世界 <?scr ?>\";"
+        );
+        let tokens = lex(&source).unwrap();
+        assert_eq!(tokens[0].span.start, source.find("echo").unwrap());
+        assert_eq!((tokens[0].start.line, tokens[0].start.column), (3, 2));
+        assert_eq!(tokens[1].kind, TokenKind::String("世界 <?scr ?>".into()));
+        for token in tokens {
+            assert_eq!(token.start, SourcePosition::at(&source, token.span.start));
+            assert_eq!(token.end, SourcePosition::at(&source, token.span.end));
+        }
+    }
+    for source in [
+        "echo 'ok'; ?> trailing",
+        "echo 'ok'; ?> // comment",
+        "?> ?>",
+    ] {
+        fails(source, LexerErrorKind::ContentAfterClosingTag);
+    }
+}
+
+#[test]
+fn interpolation_tracks_nested_tokens_quotes_comments_and_unicode_positions() {
+    let source = "\"é\r\n{$items[\"}\"] /* } */ . \"{$name}\"}\"";
+    let tokens = lex(source).unwrap();
+    let TokenKind::InterpolatedString(parts) = &tokens[0].kind else {
+        panic!("expected interpolated string");
+    };
+    assert_eq!(parts[0], StringPart::Text("é\r\n".into()));
+    let StringPart::Expression(expression) = &parts[1] else {
+        panic!("expected embedded expression");
+    };
+    assert_eq!(expression[0].kind, TokenKind::Variable("items".into()));
+    assert_eq!(expression[0].start.line, 2);
+    assert_eq!(expression[0].start.column, 2);
+    assert_eq!(
+        &source[expression[0].span.start..expression[0].span.end],
+        "$items"
+    );
+    assert_eq!(expression[2].kind, TokenKind::String("}".into()));
+    assert!(matches!(
+        expression[5].kind,
+        TokenKind::InterpolatedString(_)
+    ));
+    assert_eq!(expression.last().unwrap().kind, TokenKind::Eof);
+    assert_eq!(
+        kinds(r#""\{$name} {$name}" '{$name}' "$name {ordinary}""#)[1],
+        TokenKind::String("{$name}".into())
+    );
+    assert_eq!(
+        kinds(r#""\{$name} {\$name} $name {ordinary}""#)[0],
+        TokenKind::String("{$name} {$name} $name {ordinary}".into())
+    );
+}
+
+#[test]
+fn interpolation_rejects_unterminated_and_excessively_nested_input() {
+    fails(r#""{$name"#, LexerErrorKind::UnterminatedInterpolation);
+    let mut source = "$name".to_string();
+    for _ in 0..40 {
+        source = format!("\"{{$x . {source}}}\"");
+    }
+    let error = lex(&source).unwrap_err();
+    assert!(error.message.contains("nesting exceeds"));
+}

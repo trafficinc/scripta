@@ -1,0 +1,4 @@
+$name = "Production";
+$usage = 85;
+echo "Checking " . $name . "...\n";
+echo("Disk usage: " . str($usage) . "%\n");

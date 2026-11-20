@@ -1,0 +1,15 @@
+// Usage: scripta examples/atomic-report.scripta report.json [--apply]
+$path = Cli::arg(0);
+if ($path === null) {
+    echo "Usage: scripta examples/atomic-report.scripta <output-file> [--apply]\n";
+    exit 2;
+}
+$report = ["status" => "ok", "generatedAt" => Date::now()];
+$contents = Json::pretty($report) . "\n";
+if (!Cli::has("apply")) {
+    echo "Would atomically write: " . $path . "\n";
+    echo $contents;
+    exit 0;
+}
+File::writeAtomic($path, $contents);
+echo "Updated report: " . $path . "\n";

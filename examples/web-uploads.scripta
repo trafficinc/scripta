@@ -1,0 +1,18 @@
+// Run locally: scripta serve examples/web-uploads.scripta
+// Saves the first file to an application-chosen name in the server working directory.
+// Existing files are never overwritten. Remove received-upload.bin before another save.
+$request = Web::request();
+Web::header("Content-Type", "text/html; charset=utf-8");
+echo "<!doctype html><meta charset=\"utf-8\"><title>Scripta uploads</title><h1>Upload a file</h1>";
+if ($request->method === "POST") {
+    foreach ($request->form() as $field) {
+        echo "<p>" . Html::escape($field[0]) . ": " . Html::escape($field[1]) . "</p>";
+    }
+    $uploads = $request->uploads();
+    if (len($uploads) > 0) {
+        $upload = $uploads[0];
+        $upload->moveTo("received-upload.bin");
+        echo "<p>Saved " . Html::escape($upload->filename) . " (" . str($upload->size) . " bytes) as received-upload.bin</p>";
+    }
+}
+echo "<form method=\"post\" enctype=\"multipart/form-data\"><label>Note <input name=\"note\"></label><label>File <input type=\"file\" name=\"file\"></label><button>Upload</button></form>";

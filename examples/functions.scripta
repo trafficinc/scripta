@@ -1,0 +1,8 @@
+function greet($name: string): string {
+    return "Hello, " . $name . "!";
+}
+function add($left: int, $right: int): int {
+    return $left + $right;
+}
+echo greet("Scripta") . "\n";
+echo str(add(2, 4)) . "\n";

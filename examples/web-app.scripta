@@ -1,0 +1,35 @@
+$request = Web::request();
+Web::header("Cache-Control", "no-store");
+if ($request->method === "GET" && $request->path === "/") {
+    Web::header("Content-Type", "text/html; charset=utf-8");
+    echo "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><title>Scripta web demo</title><h1>Scripta is serving HTTP</h1><p><a href=\"/api/status\">Status JSON</a> | <a href=\"/redirect\">Redirect</a></p><p>POST JSON to /api/echo to receive it back. POST to /api/visits to increment the SQLite counter.</p></html>\n";
+} elseif ($request->method === "GET" && $request->path === "/api/status") {
+    Web::header("Content-Type", "application/json; charset=utf-8");
+    echo Json::encode(["status" => "ok", "time" => Date::now()]) . "\n";
+} elseif ($request->method === "GET" && $request->path === "/redirect") {
+    Web::redirect("/api/status", 302);
+    exit 0;
+} elseif ($request->method === "POST" && $request->path === "/api/echo") {
+    Web::header("Content-Type", "application/json; charset=utf-8");
+    try {
+        echo Json::encode($request->json()) . "\n";
+    } catch (Error $error) {
+        Web::status(400);
+        echo Json::encode(["error" => "Expected a valid JSON request body"]) . "\n";
+    }
+} elseif ($request->method === "POST" && $request->path === "/api/visits") {
+    Web::header("Content-Type", "application/json; charset=utf-8");
+    $db = Sqlite::open("web-demo.sqlite");
+    try {
+        Sqlite::execute($db, "CREATE TABLE IF NOT EXISTS visits (id INTEGER PRIMARY KEY, total INTEGER NOT NULL)");
+        Sqlite::execute($db, "INSERT INTO visits (id, total) VALUES (1, 1) ON CONFLICT(id) DO UPDATE SET total = total + 1");
+        $rows = Sqlite::query($db, "SELECT total FROM visits WHERE id = 1");
+        echo Json::encode($rows[0]) . "\n";
+    } finally {
+        Sqlite::close($db);
+    }
+} else {
+    Web::status(404);
+    Web::header("Content-Type", "application/json; charset=utf-8");
+    echo Json::encode(["error" => "Not found"]) . "\n";
+}
