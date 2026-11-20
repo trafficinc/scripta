@@ -145,7 +145,7 @@ class PromotionTests(unittest.TestCase):
 
     def test_native_run_identity_and_all_jobs_must_pass_before_download(self):
         run = self.api.responses['/actions/runs/123']
-        for key, value in [('head_sha', '0' * 40), ('head_branch', 'other'), ('event', 'workflow_dispatch'),
+        for key, value in [('head_sha', '0' * 40), ('head_branch', 'other'), ('event', 'pull_request'),
                            ('status', 'in_progress'), ('conclusion', 'failure'), ('path', 'other.yml'),
                            ('repository', {'full_name': 'other/repo'}), ('head_repository', {'full_name': 'fork/repo'})]:
             with self.subTest(key=key):
@@ -161,6 +161,34 @@ class PromotionTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         self.assertEqual(self.api.downloads, [])
         self.assertEqual(self.api.posts, [])
+
+    def test_manual_candidate_and_new_assembly_job_can_be_promoted(self):
+        run = self.api.responses['/actions/runs/123']
+        run['event'] = 'workflow_dispatch'
+        run['head_branch'] = 'main'
+        jobs = self.api.responses['/actions/runs/123/jobs?per_page=100']
+        jobs['jobs'].append({'name': 'Assemble validated downloads',
+                             'status': 'completed', 'conclusion': 'success'})
+        jobs['total_count'] = 6
+        manifest, _ = self.prepare()
+        self.assertEqual(manifest['promoted_from']['tag'], SOURCE_TAG)
+        self.assertEqual(manifest['source_revision'], REVISION)
+        self.assertEqual(self.api.posts, [])
+
+    def test_new_assembly_job_must_pass_and_duplicate_or_extra_jobs_are_rejected(self):
+        jobs = self.api.responses['/actions/runs/123/jobs?per_page=100']
+        original = copy.deepcopy(jobs)
+        for extra in [
+            {'name': 'Assemble validated downloads', 'status': 'completed', 'conclusion': 'failure'},
+            {'name': 'Unexpected job', 'status': 'completed', 'conclusion': 'success'},
+            copy.deepcopy(jobs['jobs'][0]),
+        ]:
+            jobs.update(copy.deepcopy(original))
+            jobs['jobs'].append(extra)
+            jobs['total_count'] = 6
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                self.prepare()
+            self.assertEqual(self.api.downloads, [])
 
     def test_wrong_version_published_destination_and_missing_assets_stop_before_download(self):
         with self.assertRaises(ValueError):

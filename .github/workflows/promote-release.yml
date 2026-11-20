@@ -31,6 +31,9 @@ jobs:
     permissions:
       actions: read
       contents: write
+    concurrency:
+      group: scripta-release-publication
+      cancel-in-progress: false
     steps:
       - name: Check out promotion tools
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

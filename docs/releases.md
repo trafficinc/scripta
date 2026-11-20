@@ -23,6 +23,43 @@ Release notes should describe user-visible changes, migration steps, package
 contents, and known limitations. Describe signing or notarization according to
 the artifacts actually shipped.
 
+## Build manually in GitHub Actions
+
+Once the workflow is on the default branch, open **Actions → Native builds and
+releases → Run workflow**, select the branch, and run it. Leave **Create release**
+unchecked for a build only. Version numbers come from the selected commit's
+`Cargo.toml`; this workflow does not change or commit versions.
+
+| Input | Meaning |
+| --- | --- |
+| `create_release` | Off by default; publish the saved build after all validation succeeds |
+| `release_tag` | Optional; defaults to `v<workspace-version>`. RC/validation/other tags produce prereleases; version-shaped tags must match the workspace version |
+| `notes` | Optional release notes, included only when creating a release |
+| `request_id`, `expected_revision` | Optional compatibility inputs for `scripts/github_release.py`; leave blank in the UI |
+
+Every build validates and packages Linux x86-64/ARM64, Windows x86-64, and macOS 15
+Apple Silicon natively, with SQLite. After all four jobs succeed, **Assemble
+validated downloads** saves a `scripta-build-<run-id>-<attempt>` artifact and adds a
+download link, version, and source commit to the run summary. The artifact contains
+the four platform archives, `SHA256SUMS`, and `validation-evidence.zip`. It is kept
+for 30 days; individual native diagnostic artifacts are kept for seven days.
+Failed validation prevents assembly and publication; its diagnostic artifacts
+remain available where the failing job produced them.
+
+With **Create release** checked, **Publish release downloads** retrieves that
+exact saved artifact by ID, verifies checksums, source identity, and native
+evidence again, then publishes its original six files without rebuilding. It
+creates the chosen tag at the validated commit with `GITHUB_TOKEN`, which does
+not trigger a second tag workflow. Existing tags must already resolve to that
+same commit; they are never moved. Published releases cannot be overwritten.
+Failed uploads leave a draft that can be resumed with the same tag and commit.
+Release publication and promotion share a concurrency group to prevent simultaneous
+asset updates. Build-only runs create neither tags nor GitHub Releases.
+
+To change the version, use the preparation procedure above, then commit and push
+the intended version before selecting that branch in Actions. The manual form
+does not require a local release helper or a personal access token.
+
 ## Automatic publication on tag pushes
 
 Run `python3 scripts/github_release.py` from a clean checkout whose remote branch
@@ -33,9 +70,10 @@ Enter cancels. Use `--remote NAME` for a remote other than `origin`, or
 `--run-id RUN_ID` to resume an interrupted run.
 
 The [native build workflow](../.github/workflows/native-validation.yml) runs on
-every tag push and on manual dispatch. Branch pushes and pull requests do not
-publish releases. After all native jobs succeed, the workflow publishes a GitHub
-Release. The exact `v<workspace-version>` tag produces a normal release; other
+every tag push and on manual dispatch. It has no branch-push or pull-request
+triggers. Tag pushes publish after all native jobs and asset assembly succeed;
+manual runs publish only when **Create release** is checked. The exact
+`v<workspace-version>` tag produces a normal release; other
 tags produce prereleases. Version-shaped tags must match the workspace version.
 
 Each release contains exactly six assets: four platform archives with SQLite,

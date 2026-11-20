@@ -129,9 +129,11 @@ receipts and hashes when updating names.
 
 Keep validation guidance in this file. Do not create GitHub Actions workflows
 unless the user explicitly requests them.
-The authorized release workflow runs on every tag push, with no branch/PR
-triggers. A pushed tag identifies a release candidate; the GitHub Release is
-published only after validation succeeds.
+The authorized release workflow supports manual builds and runs on every tag
+push, with no branch-push/PR triggers. Manual runs publish only when Create
+release is selected; tag pushes publish after validation succeeds. Build-only
+manual runs must not create tags or releases. Reuse the saved validated packages
+for publication, without rebuilding them.
 Build Linux x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon;
 publish release downloads only after every native test/package job succeeds.
 Keep release downloads compact: exactly four platform packages, all with SQLite,
