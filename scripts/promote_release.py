@@ -130,14 +130,18 @@ def validated_run(api, repository, run_id, source_tag, revision):
     if not isinstance(run_id, int) or run_id <= 0:
         raise ValueError('Validation run ID must be positive')
     run = api.get('/actions/runs/' + str(run_id))
-    if (run.get('id') != run_id or run.get('event') != 'push' or run.get('path') != WORKFLOW
-            or run.get('head_sha') != revision or run.get('head_branch') != source_tag
+    event = run.get('event')
+    if (run.get('id') != run_id or event not in ('push', 'workflow_dispatch') or run.get('path') != WORKFLOW
+            or run.get('head_sha') != revision or (event == 'push' and run.get('head_branch') != source_tag)
             or run.get('status') != 'completed' or run.get('conclusion') != 'success'
             or run.get('repository', {}).get('full_name', '').lower() != repository.lower()
             or run.get('head_repository', {}).get('full_name', '').lower() != repository.lower()):
         raise ValueError('Source run must be successful native validation of this exact tag and commit')
     jobs = api.get('/actions/runs/' + str(run_id) + '/jobs?per_page=100')
     expected = set(TARGETS) | {'Publish release downloads'}
+    # Historical candidates predate the separate artifact-assembly job.
+    if any(job.get('name') == 'Assemble validated downloads' for job in jobs.get('jobs', [])):
+        expected.add('Assemble validated downloads')
     if (jobs.get('total_count') != len(expected) or len(jobs.get('jobs', [])) != len(expected)
             or {job.get('name') for job in jobs['jobs']} != expected
             or any(job.get('status') != 'completed' or job.get('conclusion') != 'success' for job in jobs['jobs'])):
@@ -150,7 +154,7 @@ def package_names(version):
             for target in TARGETS}
 
 
-def checked_evidence(source, source_tag, revision, version, destination):
+def checked_evidence(source, source_tag, revision, version, destination, *, prerelease=True):
     names = package_names(version)
     assets = set(names.values())
     checksums = {}
@@ -205,7 +209,7 @@ def checked_evidence(source, source_tag, revision, version, destination):
 
     manifest = json.loads((unpacked / 'release-manifest.json').read_bytes())
     if (manifest.get('tag') != source_tag or manifest.get('source_revision') != revision
-            or manifest.get('version') != version or manifest.get('prerelease') is not True):
+            or manifest.get('version') != version or manifest.get('prerelease') is not prerelease):
         raise ValueError('Candidate manifest does not match validated source')
     packages = manifest.get('packages', [])
     if len(packages) != 4 or {p.get('asset') for p in packages} != assets:
