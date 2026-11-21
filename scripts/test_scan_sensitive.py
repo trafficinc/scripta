@@ -16,11 +16,13 @@ GITLEAKS = shutil.which(os.environ.get('GITLEAKS_BIN', 'gitleaks'))
 
 class SensitiveScanTests(unittest.TestCase):
     def test_report_omits_source_values_and_commit_identity(self):
-        report = locations([{'File': '/repo/app.scripta', 'RuleID': 'test',
-                             'StartLine': 3, 'Commit': 'abc', 'Secret': 'sensitive',
-                             'Match': 'sensitive line', 'Author': 'private person',
-                             'Email': 'private address', 'Message': 'private message'}],
-                           'history', Path('/repo'))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            report = locations([{'File': str(root / 'app.scripta'), 'RuleID': 'test',
+                                 'StartLine': 3, 'Commit': 'abc', 'Secret': 'sensitive',
+                                 'Match': 'sensitive line', 'Author': 'private person',
+                                 'Email': 'private address', 'Message': 'private message'}],
+                               'history', root)
         self.assertEqual(report, [{'scope': 'history', 'rule': 'test',
                                    'file': 'app.scripta', 'line': 3, 'commit': 'abc'}])
 
