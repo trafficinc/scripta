@@ -902,12 +902,16 @@ fn multipart_exact_limits_and_limit_plus_one_and_disk_recovery() {
 #[test]
 fn multipart_large_files_are_spooled_and_worker_timeout_cleans_all_storage() {
     let server = Server::start(
-        r#"<?scripta $r=Web::request();$f=$r->uploads();if ($r->path === "/hang") {Date::sleep(5000);}echo str($f[0]->size);"#,
+        r#"<?scripta $r=Web::request();$f=$r->uploads();if ($r->path === "/hang") {Date::sleep(30000);}echo str($f[0]->size);"#,
         &[
             "--upload-temp-dir",
             "spools",
+            "--log-format",
+            "json",
+            "--health-address",
+            "127.0.0.1:0",
             "--timeout-ms",
-            "300",
+            "2000",
             "--max-body-bytes",
             "4194304",
         ],
@@ -918,7 +922,28 @@ fn multipart_large_files_are_spooled_and_worker_timeout_cleans_all_storage() {
     uploads_clean(&server);
     assert_eq!(server.request("POST", "/hang", &body, MULTIPART).0, 504);
     uploads_clean(&server);
-    assert_eq!(server.request("POST", "/", &body, MULTIPART).0, 200);
+    // Worker recovery is proactive, but can outlast a short request deadline on
+    // busy native runners. Wait for replacement instead of spending the next
+    // upload's deadline in the recovery queue. Do not retry the upload itself.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let metrics: serde_json::Value =
+            serde_json::from_slice(&health(&server, "/metrics").2).unwrap();
+        if metrics["ready"] == true
+            && metrics["readyWorkers"] == 1
+            && metrics["workerRestarts"] == 1
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "worker did not recover: {metrics}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let recovered = server.request("POST", "/", &body, MULTIPART);
+    assert_eq!(recovered.0, 200);
+    assert_eq!(recovered.2, b"2097152");
     uploads_clean(&server);
     // Disconnect during a partial body must release its raw spool and queue slot.
     let mut stream = TcpStream::connect(server.address).unwrap();

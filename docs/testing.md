@@ -48,6 +48,8 @@ An explicit symlink path is an error. Explicit regular files may use `.scr` or
 other existing source spellings. Multiple paths are deduplicated; files and
 functions are sorted. `--filter` matches a case-sensitive substring of
 `file::function`. Use `--` before dash-prefixed paths.
+Reported file paths within the project are relative to its canonical root and
+use `/` separators on every platform; explicit files outside it retain absolute paths.
 
 Discovery parses and validates all selected files before executing any case.
 Syntax errors, duplicate declarations, invalid case signatures, or no matching
