@@ -9,6 +9,9 @@ pub(super) fn discover(
     options: &Options,
     source_limit: usize,
 ) -> Result<Vec<Case>, String> {
+    // Discovered files are canonicalized below. Use the same representation for
+    // report paths, including Windows verbatim prefixes and resolved root aliases.
+    let canonical_root = std::fs::canonicalize(root).map_err(|e| e.to_string())?;
     fn visit(
         path: &Path,
         explicit: bool,
@@ -103,7 +106,7 @@ pub(super) fn discover(
                 .join("\n"));
         }
         let file = path
-            .strip_prefix(root)
+            .strip_prefix(&canonical_root)
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
@@ -147,4 +150,38 @@ pub(super) fn discover(
     }
     cases.sort_by(|a, b| (&a.file, &a.name).cmp(&(&b.file, &b.name)));
     Ok(cases)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_paths_are_relative_for_canonical_and_noncanonical_roots() {
+        let directory = tempfile::tempdir().unwrap();
+        let tests = directory.path().join("tests");
+        std::fs::create_dir(&tests).unwrap();
+        std::fs::write(
+            tests.join("paths_test.scripta"),
+            "function test_path() {}\n",
+        )
+        .unwrap();
+        for root in [
+            directory.path().to_path_buf(),
+            tests.join(".."),
+            std::fs::canonicalize(directory.path()).unwrap(),
+        ] {
+            let cases = discover(
+                directory.path(),
+                &root,
+                &TestConfig::default(),
+                &Options::default(),
+                1024,
+            )
+            .unwrap();
+            assert_eq!(cases.len(), 1);
+            assert_eq!(cases[0].file, "tests/paths_test.scripta");
+            assert_eq!(cases[0].name, "test_path");
+        }
+    }
 }
