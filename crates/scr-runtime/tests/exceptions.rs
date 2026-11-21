@@ -3,6 +3,18 @@ use scr_runtime::{
     RuntimeOptions, Value,
 };
 
+// Exception messages must not depend on secrets configured on the test host.
+// Redaction tests inject their own environment values below.
+fn options() -> RuntimeOptions {
+    RuntimeOptions {
+        context: ContextOptions {
+            environment: Default::default(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 fn run(rt: &mut Runtime, source: &str) -> Result<u8, scr_runtime::RuntimeError> {
     rt.execute_source(source, &mut Vec::new())
 }
@@ -12,7 +24,7 @@ fn string(rt: &Runtime, name: &str, expected: &str) {
 
 #[test]
 fn core_and_native_failures_have_structured_read_only_properties() {
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::with_options(options());
     rt.register(
         "fail",
         NativeFunction::new(NativeSignature::new(vec![], NativeType::Null), |_, _| {
@@ -46,7 +58,7 @@ fn core_and_native_failures_have_structured_read_only_properties() {
 
 #[test]
 fn exception_classes_inherit_fields_methods_constructors_and_annotations() {
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::with_options(options());
     run(
         &mut rt,
         r#"
@@ -80,7 +92,7 @@ fn exception_classes_inherit_fields_methods_constructors_and_annotations() {
 
 #[test]
 fn rethrow_preserves_identity_origin_and_trace_and_wrapping_preserves_cause() {
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::with_options(options());
     let source = r#"
         class Wrapped extends Error {}
         $saved = null; $line = null; $trace = null; $same = false; $sameLine = false; $sameTrace = false; $wrapped = null; $wrappedCode = null;
@@ -124,14 +136,17 @@ fn invalid_hierarchies_members_and_constructor_arguments_are_rejected() {
         "new Error('x', 1);",
         "new Error('x', null, 3);",
     ] {
-        assert!(run(&mut Runtime::new(), source).is_err(), "{source}");
+        assert!(
+            run(&mut Runtime::with_options(options()), source).is_err(),
+            "{source}"
+        );
     }
     let source = (0..70)
         .map(|i| format!("class E{i} extends E{} {{}} ", i + 1))
         .collect::<String>()
         + "class E70 extends Error {}";
     assert!(
-        run(&mut Runtime::new(), &source)
+        run(&mut Runtime::with_options(options()), &source)
             .unwrap_err()
             .message
             .contains("64")
@@ -140,7 +155,7 @@ fn invalid_hierarchies_members_and_constructor_arguments_are_rejected() {
 
 #[test]
 fn arbitrary_values_keep_legacy_catches_and_finally_keeps_control_flow() {
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::with_options(options());
     run(
         &mut rt,
         r#"
@@ -165,9 +180,10 @@ fn messages_and_locations_are_redacted_and_cause_depth_is_bounded() {
     let mut rt = Runtime::with_options(RuntimeOptions {
         context: ContextOptions {
             redacted_values: vec!["private-token".into()],
+            environment: [("SCR_TEST_SECRET".into(), "root".into())].into(),
             ..Default::default()
         },
-        ..Default::default()
+        ..options()
     });
     run(
         &mut rt,
@@ -178,6 +194,8 @@ fn messages_and_locations_are_redacted_and_cause_depth_is_bounded() {
         panic!()
     };
     assert!(!message.contains("private-token"));
+    run(&mut rt, "$e = new Error('root'); $message = $e->message;").unwrap();
+    string(&rt, "message", "[REDACTED]");
     run(
         &mut rt,
         "$e = new Error('root'); $i = 0; while ($i < 128) {$e = new Error('next', $e); $i += 1;}",
@@ -196,12 +214,12 @@ fn exact_value_budget_and_budget_plus_one_preserve_fatal_boundaries() {
     let limit = 2 * std::mem::size_of::<Value>() + 1; // value, cause handle, message byte
     let mut exact = Runtime::with_options(RuntimeOptions {
         max_value_bytes: Some(limit),
-        ..Default::default()
+        ..options()
     });
     run(&mut exact, "$e = new Error('x');").unwrap();
     let mut short = Runtime::with_options(RuntimeOptions {
         max_value_bytes: Some(limit - 1),
-        ..Default::default()
+        ..options()
     });
     let error = run(&mut short, "$saved = 'kept'; $caught = false; $cleanup = false; try {$saved = new Error('x');} catch (Error $e) {$caught = true;} finally {$cleanup = true;}").unwrap_err();
     assert!(error.message.contains("value byte limit"));
@@ -245,7 +263,7 @@ fn causes_and_user_field_cycles_are_collected_without_losing_host_roots() {
     }
     let drops = Arc::new(AtomicUsize::new(0));
     let counter = drops.clone();
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::with_options(options());
     rt.register(
         "resource",
         NativeFunction::new(
@@ -270,7 +288,7 @@ fn causes_and_user_field_cycles_are_collected_without_losing_host_roots() {
 
 #[test]
 fn inheritance_accepts_the_exact_depth_and_rejects_one_more() {
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::with_options(options());
     let source = (0..62)
         .map(|i| format!("class E{i} extends E{} {{}} ", i + 1))
         .collect::<String>()
@@ -293,7 +311,7 @@ fn cancellation_during_cause_validation_bypasses_catches_and_finally() {
     let flag = Arc::new(AtomicBool::new(false));
     let mut rt = Runtime::with_options(RuntimeOptions {
         interrupt_flag: Some(flag.clone()),
-        ..Default::default()
+        ..options()
     });
     let trigger = flag.clone();
     rt.register(
