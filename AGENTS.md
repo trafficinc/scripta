@@ -129,14 +129,14 @@ receipts and hashes when updating names.
 
 Keep validation guidance in this file. Do not create GitHub Actions workflows
 unless the user explicitly requests them.
-The authorized release workflow supports manual builds and runs on every tag
-push, with no branch-push/PR triggers. Manual runs publish only when Create
-release is selected; tag pushes publish after validation succeeds. Build-only
-manual runs must not create tags or releases. Reuse the saved validated packages
-for publication, without rebuilding them.
-The manual Publish successful build workflow may publish an unexpired successful
-native build under a new matching tag. Preserve its platform archives and native
-receipts; regenerate only release metadata, evidence packaging, and checksums.
+The authorized release process uses local `scripts/prepare_release.py`, then
+manual Build release candidate and Publish release candidate workflows. Keep
+both workflows manual-only; do not add branch, PR, or tag-push triggers. Building
+must not create tags or releases. Publication requires an explicit successful
+build run ID and derives `v<version>` from that build's source commit; do not
+accept an independently entered tag or silently choose the latest build.
+Reuse the saved validated platform archives and native receipts without rebuilding;
+regenerate only release metadata, evidence packaging, and checksums.
 Build Linux x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon;
 publish release downloads only after every native test/package job succeeds.
 Keep release downloads compact: exactly four platform packages, all with SQLite,

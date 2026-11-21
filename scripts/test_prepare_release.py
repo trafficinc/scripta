@@ -28,6 +28,7 @@ class PreparationTests(unittest.TestCase):
         preparation.cargo = Mock(return_value=Mock(stdout=json.dumps({
             'workspace_members': ['cli-id'], 'packages': [{'id': 'cli-id', 'name': 'scr-cli'}]})))
         preparation.run = Mock(return_value=Mock(returncode=1))
+        preparation.check_remote_version = Mock()
         return preparation, snapshots
 
     def test_semver_choices_and_invalid_input(self):
@@ -109,6 +110,34 @@ class PreparationTests(unittest.TestCase):
                 b'name = "scr-cli"\nversion = "0.1.0"', b'name = "scr-cli"\nversion = "0.2.0"'))
             preparation.cargo.assert_any_call(
                 'metadata', '--format-version', '1', '--locked', capture=True)
+
+    def test_remote_tags_releases_and_connection_failures_stop_before_version_writes(self):
+        for reason in ('tag', 'release', 'network'):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory:
+                preparation, snapshots = self.fixture(Path(directory))
+                preparation.check_remote_version.side_effect = ValueError('existing ' + reason)
+                with self.assertRaises(ValueError):
+                    preparation.bump(snapshots, '0.1.0', '0.1.1')
+                self.assertEqual({path: path.read_bytes() for path in snapshots}, snapshots)
+                preparation.cargo.assert_not_called()
+
+    def test_remote_availability_checks_github_origin_remote_tag_and_paginated_releases(self):
+        for reason in ('available', 'tag', 'release', 'network'):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as directory:
+                preparation, _ = self.fixture(Path(directory))
+                preparation.run.side_effect = [
+                    Mock(stdout='git@github.com:owner/repo.git'),
+                    Mock(stdout='revision refs/tags/v0.1.1' if reason == 'tag' else ''),
+                    subprocess.CalledProcessError(1, ['gh', 'api']) if reason == 'network'
+                    else Mock(stdout='v0.1.0\nv0.1.1\n' if reason == 'release' else 'v0.1.0\n')]
+                if reason == 'available':
+                    Preparation.check_remote_version(preparation, '0.1.1')
+                    preparation.run.assert_any_call(
+                        ['gh', 'api', '--paginate', 'repos/owner/repo/releases?per_page=100',
+                         '--jq', '.[].tag_name'], capture=True)
+                else:
+                    with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                        Preparation.check_remote_version(preparation, '0.1.1')
 
     def test_failed_or_interrupted_lock_validation_restores_original_bytes(self):
         for failure in [subprocess.CalledProcessError(1, ['cargo', 'metadata']), KeyboardInterrupt()]:

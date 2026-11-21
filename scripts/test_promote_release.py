@@ -304,16 +304,6 @@ class PromotionTests(unittest.TestCase):
                 promotion.promote(self.api, REPOSITORY, manifest, self.output, notes, environment, Mock())
         self.assertEqual(self.api.posts, [])
 
-    def test_workflow_is_manual_and_uses_builtin_token_without_build_steps(self):
-        path = Path(__file__).resolve().parents[1] / '.github/workflows/promote-release.yml'
-        workflow = path.read_text()
-        self.assertIn('  workflow_dispatch:', workflow)
-        self.assertNotIn('  push:', workflow)
-        self.assertNotIn('  pull_request:', workflow)
-        self.assertIn('GH_TOKEN: ${{ github.token }}', workflow)
-        self.assertNotIn('cargo ', workflow)
-        self.assertNotIn('rustup ', workflow)
-        self.assertIn('--publish', workflow)
 
     def test_cross_host_download_redirect_does_not_forward_authorization(self):
         request = urllib.request.Request('https://api.github.com/asset', headers={'Authorization': 'Bearer fixture'})

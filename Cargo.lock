@@ -996,14 +996,14 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "scr-ast"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "scr-diagnostics",
 ]
 
 [[package]]
 name = "scr-cli"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "ctrlc",
  "process-wrap",
@@ -1026,11 +1026,11 @@ dependencies = [
 
 [[package]]
 name = "scr-diagnostics"
-version = "0.1.1"
+version = "0.2.0"
 
 [[package]]
 name = "scr-ext-sqlite"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "fallible-iterator",
  "rusqlite",
@@ -1040,14 +1040,14 @@ dependencies = [
 
 [[package]]
 name = "scr-lexer"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "scr-diagnostics",
 ]
 
 [[package]]
 name = "scr-parser"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "scr-ast",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "scr-release"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "serde_json",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "scr-runtime"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "scr-ast",
  "scr-diagnostics",
@@ -1079,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "scr-stdlib"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "chrono",
@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "scr-web"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "http-body-util",
  "hyper",

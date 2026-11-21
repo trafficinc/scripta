@@ -1,42 +1,11 @@
-name: Native builds and releases
-run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.request_id && format('Pre-release validation {0}', inputs.request_id) || format('Build {0}', github.ref_name)) || format('Release {0}', github.ref_name) }}
+name: Build release candidate
+run-name: Build release candidate from ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
-    inputs:
-      create_release:
-        description: Create a GitHub Release after all four platforms pass
-        required: true
-        default: false
-        type: boolean
-      release_tag:
-        description: Optional tag (blank uses v<workspace-version>; RC/validation tags are prereleases)
-        required: false
-        type: string
-      notes:
-        description: Optional release notes (used only when Create release is checked)
-        required: false
-        type: string
-      request_id:
-        description: Optional identifier for scripts/github_release.py; leave blank in the UI
-        required: false
-        type: string
-      expected_revision:
-        description: Optional full commit SHA assertion for the release helper; leave blank in the UI
-        required: false
-        type: string
-  push:
-    tags:
-      - '**'
 
 permissions:
   contents: read
-
-env:
-  BUILD_CREATE_RELEASE: ${{ inputs.create_release && 'true' || 'false' }}
-  BUILD_RELEASE_TAG: ${{ inputs.release_tag }}
-  BUILD_RELEASE_NOTES: ${{ inputs.notes }}
-  BUILD_EXPECTED_REVISION: ${{ inputs.expected_revision }}
 
 concurrency:
   group: native-validation-${{ github.ref }}
@@ -69,8 +38,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check build version, tag, and selected revision
+      - name: Check candidate version is available
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ${{ matrix.python }} scripts/workflow_build.py inspect
 
       - name: Validate native tests and packages
@@ -131,34 +102,3 @@ jobs:
         env:
           BUILD_ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
         run: python3 scripts/workflow_build.py summary
-
-  publish:
-    name: Publish release downloads
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && inputs.create_release)
-    needs: [validate, assemble]
-    runs-on: ubuntu-22.04
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    concurrency:
-      group: scripta-release-publication
-      cancel-in-progress: false
-    steps:
-      - name: Check out selected publishing tools
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Download this run's validated build
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          artifact-ids: ${{ needs.assemble.outputs.artifact_id }}
-          path: dist/release-assets
-          merge-multiple: true
-
-      - name: Verify saved assets and publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          python3 scripts/workflow_build.py publish
-          --assets dist/release-assets

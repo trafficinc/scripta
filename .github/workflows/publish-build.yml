@@ -1,16 +1,12 @@
-name: Publish successful build
-run-name: Publish saved build as ${{ inputs.release_tag }}
+name: Publish release candidate
+run-name: Publish release candidate from build ${{ inputs.build_run_id }}
 
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: New release tag matching the built version (for example v0.1.2)
-        required: true
-        type: string
       build_run_id:
-        description: Optional native build run ID; blank selects the latest successful build on main
-        required: false
+        description: Successful Build release candidate run ID (shown in the build summary)
+        required: true
         type: string
       notes:
         description: Optional release notes
@@ -35,7 +31,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PROMOTION_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       SAVED_BUILD_RUN_ID: ${{ inputs.build_run_id }}
-      SAVED_BUILD_RELEASE_TAG: ${{ inputs.release_tag }}
       SAVED_BUILD_NOTES: ${{ inputs.notes }}
     steps:
       - name: Check out publishing tools

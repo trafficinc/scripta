@@ -13,18 +13,18 @@ REVISION = 'a' * 40
 
 
 class ReleaseTests(unittest.TestCase):
-    def fixture(self, root):
+    def fixture(self, root, version='0.1.0'):
         for target in TARGETS:
             directory = root / ('native-validation-' + target + '-1')
             (directory / 'logs').mkdir(parents=True)
             (directory / 'logs/check.log').write_bytes(b'passed\n')
-            record = {'target': target, 'version': '0.1.0', 'source_revision': REVISION,
+            record = {'target': target, 'version': version, 'source_revision': REVISION,
                       'status': 'passed', 'steps': [{'exit_code': 0}],
                       'tests': {name: {'passed': 1, 'failed': 0, 'ignored': 0} for name in SUITES},
                       'packages': {}}
             for variant in ['standard']:
                 extension = '.zip' if 'windows' in target else '.tar.gz'
-                name = f'scripta-0.1.0-{target}{extension}'
+                name = f'scripta-{version}-{target}{extension}'
                 path = directory / variant / name
                 path.parent.mkdir()
                 path.write_bytes((target + variant).encode())
@@ -34,7 +34,7 @@ class ReleaseTests(unittest.TestCase):
                     'archive_sha256': checksum, 'binary_sha256': 'b' * 64,
                     'offline_package_smoke': 'passed', 'identical_input_repack': 'passed',
                     'dependencies': ['system library'], 'extensions': ['sqlite']}
-                smoke = {'target': target, 'version': '0.1.0', 'extensions': ['sqlite'], 'archive_sha256': checksum,
+                smoke = {'target': target, 'version': version, 'extensions': ['sqlite'], 'archive_sha256': checksum,
                          'binary_sha256': 'b' * 64}
                 path.with_name(name + '.validation.json').write_text(json.dumps(smoke), encoding='utf-8')
             (directory / 'validation.json').write_text(json.dumps(record), encoding='utf-8')

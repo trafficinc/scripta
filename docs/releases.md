@@ -1,154 +1,89 @@
 # Release procedure
 
-Use the compiler pinned in [`rust-toolchain.toml`](../rust-toolchain.toml), the
-committed `Cargo.lock`, and a reviewed source commit. Release targets and OS
-baselines are listed in [compatibility](compatibility.md).
+The release process has one local script and two manual GitHub Actions workflows.
+Use the pinned compiler, committed `Cargo.lock`, and native baselines in
+[compatibility](compatibility.md).
 
-## Prepare a version
+## 1. Prepare locally
 
 From the workspace root:
 
 ```sh
 python3 scripts/prepare_release.py
-# With all Cargo dependencies cached:
+# With Cargo dependencies cached:
 python3 scripts/prepare_release.py --offline
 ```
 
-The script runs local checks, then prompts for a patch, minor, or major bump.
-Cancel is the default. It updates the workspace version and package entries in
-`Cargo.lock` without changing dependency pins. Review the changes and release
-notes, commit the intended source, and push the branch.
+The script runs local checks, then offers **patch / minor / major / cancel**.
+It checks the proposed tag locally and on `origin`, and checks GitHub releases
+(including drafts) before changing version files. Git and an authenticated GitHub
+CLI (`gh auth login`) are required; `origin` must point to this GitHub repository.
+`--offline` applies to Cargo dependencies; release availability still requires
+network access. Failures stop preparation without writing a new version.
 
-Release notes should describe user-visible changes, migration steps, package
-contents, and known limitations. Describe signing or notarization according to
-the artifacts actually shipped.
+Preparation updates the workspace version in `Cargo.toml` and local workspace
+entries in `Cargo.lock`, preserving dependency pins and existing line endings.
+The script prints the prepared version and the next steps. It does not commit,
+push, create tags, start Actions, or publish anything.
 
-## Build manually in GitHub Actions
+Review the changes and release notes, **commit and push main**. Notes should cover
+user-visible changes, migration, package contents, and known limitations. Local
+macOS checks do not establish Linux or Windows support.
 
-Once the workflow is on the default branch, open **Actions → Native builds and
-releases → Run workflow**, select the branch, and run it. Leave **Create release**
-unchecked for a build only. Version numbers come from the selected commit's
-`Cargo.toml`; this workflow does not change or commit versions.
+## 2. Build release candidate
 
-| Input | Meaning |
-| --- | --- |
-| `create_release` | Off by default; publish the saved build after all validation succeeds |
-| `release_tag` | Optional; defaults to `v<workspace-version>`. RC/validation/other tags produce prereleases; version-shaped tags must match the workspace version |
-| `notes` | Optional release notes, included only when creating a release |
-| `request_id`, `expected_revision` | Optional compatibility inputs for `scripts/github_release.py`; leave blank in the UI |
+Once these workflows are on the default branch, open **Actions → Build release
+candidate → Run workflow** and select **main**. There are no version, release tag,
+or publication inputs. The build reads the version from the selected commit and
+stops early if that version already has a tag or release. If it is already used,
+prepare a higher version, commit/push it, and build main again.
 
-Every build validates and packages Linux x86-64/ARM64, Windows x86-64, and macOS 15
-Apple Silicon natively, with SQLite. After all four jobs succeed, **Assemble
-validated downloads** saves a `scripta-build-<run-id>-<attempt>` artifact and adds a
-download link, version, and source commit to the run summary. The artifact contains
-the four platform archives, `SHA256SUMS`, and `validation-evidence.zip`. It is kept
-for 30 days; individual native diagnostic artifacts are kept for seven days.
-Failed validation prevents assembly and publication; its diagnostic artifacts
-remain available where the failing job produced them.
+The workflow validates natively on Linux x86-64/ARM64, Windows x86-64, and macOS 15
+Apple Silicon, then packages SQLite-enabled downloads. All four jobs must pass
+before assembly. Failed jobs keep any diagnostic artifacts they produced.
+The build never creates tags or GitHub Releases, and there are no automatic
+branch, pull-request, or tag-push build/publication triggers.
 
-With **Create release** checked, **Publish release downloads** retrieves that
-exact saved artifact by ID, verifies checksums, source identity, and native
-evidence again, then publishes its original six files without rebuilding. It
-creates the chosen tag at the validated commit with `GITHUB_TOKEN`, which does
-not trigger a second tag workflow. Existing tags must already resolve to that
-same commit; they are never moved. Published releases cannot be overwritten.
-Failed uploads leave a draft that can be resumed with the same tag and commit.
-Release publication and promotion share a concurrency group to prevent simultaneous
-asset updates. Build-only runs create neither tags nor GitHub Releases.
+The successful run summary shows the **version, source commit, derived release
+tag, build run ID, download link, and publication instructions**. Copy its run ID.
+The `scripta-build-<run-id>-<attempt>` artifact contains exactly four platform
+archives, `SHA256SUMS`, and `validation-evidence.zip`. It is retained for 30 days;
+individual native diagnostic artifacts are retained for seven days.
 
-To change the version, use the preparation procedure above, then commit and push
-the intended version before selecting that branch in Actions. The manual form
-does not require a local release helper or a personal access token.
+## 3. Publish release candidate
 
-## Publish a successful build later, without rebuilding
+Open **Actions → Publish release candidate → Run workflow** on the **default
+branch**. Enter the successful build's **build run ID**, add optional notes, and
+run. A run ID is also the number at the end of the build's Actions run URL.
 
-On the default branch, open **Actions → Publish successful build → Run workflow**.
-Enter the new release tag and optional release notes. Leave **Build run ID** blank
-to select the latest successful **Native builds and releases** run on `main`, or
-enter a particular native build run ID (including a reviewed build on another
-branch). A run ID is the number at the end of its Actions run URL.
+There is no tag field and no automatic latest-build selection. The workflow
+reads the version from the **build's source commit** and derives `v<version>`.
+For example, a `0.1.2` build publishes `v0.1.2`, even if main has since advanced.
+It verifies the selected run, all four platform jobs, artifact assembly,
+artifact identity/availability, checksums, and native evidence. Existing releases
+or unrelated tags are reported before downloading, with instructions to prepare
+and build a newer version. An expired or deleted artifact requires a new build.
 
-The workflow requires all four native jobs and artifact assembly to have passed.
-The saved `scripta-build-<run-id>-<attempt>` artifact must still exist and be
-unexpired; these artifacts are kept for 30 days. If the latest successful run's
-artifact is missing or expired, the workflow stops rather than silently selecting
-an older build. Choose an available run explicitly or create a new native build.
+Publication tags the **built commit**, not the current workflow commit. The four
+platform archives are copied byte-for-byte without rebuilding. Release metadata,
+`validation-evidence.zip`, and `SHA256SUMS` are regenerated to record the source
+run, attempt, artifact, and original evidence checksum. Native validation records,
+logs, smoke receipts, and package hashes remain unchanged. Exactly six assets
+are uploaded to a draft first; the release becomes public only when every upload
+succeeds. These version releases are normal stable releases.
 
-The tag must match the **built commit's** workspace version, even if the current
-default branch has a newer version. For example, packages built as `0.1.2` can be
-published as `v0.1.2` or `v0.1.2-rc.1`; they cannot be relabeled `v0.1.3`.
-The exact version tag publishes a normal release; RC/validation/other tags publish
-prereleases, following the existing naming rules.
+If upload fails, rerun **Publish release candidate** with the **same build run
+ID**. It can resume its own tag/draft. Published releases cannot be replaced and
+tags are never moved. A concurrent build retry or artifact replacement stops
+publication. The workflow uses the built-in `GITHUB_TOKEN`; it does not compile
+Rust or start another build.
 
-The workflow downloads the selected artifact by ID, verifies its source revision,
-checksums, and full native evidence, and creates the tag at the **build's commit**.
-The four platform archives are copied byte-for-byte. Release metadata,
-`validation-evidence.zip`, and `SHA256SUMS` are regenerated for the new tag; native
-logs, validation records, and smoke receipts remain unchanged. The release manifest
-records the source run, attempt, artifact, and original evidence checksum.
-Exactly six release assets are uploaded to a draft before publication.
+The previous promotion workflow and tag-and-build helper have been retired.
+Use these two manual workflows for future releases; existing published releases,
+validation receipts, and tags are preserved.
 
-Existing unrelated tags and already published releases are rejected. If uploads
-fail, rerun with the same build run ID and release tag to resume this publication's
-own tag/draft. Tags are never moved. The selected build is rechecked before
-publication; a concurrent build retry or artifact replacement stops the release.
-The workflow uses `GITHUB_TOKEN` and shares the publication concurrency group with
-the existing release workflows. It does not compile Rust or trigger a second build.
-
-Use **Publish successful build** for saved Actions artifacts. **Promote validated
-release** remains available for promoting packages from a published prerelease.
-
-## Automatic publication on tag pushes
-
-Run `python3 scripts/github_release.py` from a clean checkout whose remote branch
-matches the local commit. GitHub CLI must be authenticated, and the workflow must
-be present on the default branch. The script runs the four-platform checks in
-Actions, then prompts for the matching tag before creating and pushing it.
-Enter cancels. Use `--remote NAME` for a remote other than `origin`, or
-`--run-id RUN_ID` to resume an interrupted run.
-
-The [native build workflow](../.github/workflows/native-validation.yml) runs on
-every tag push and on manual dispatch. It has no branch-push or pull-request
-triggers. Tag pushes publish after all native jobs and asset assembly succeed;
-manual runs publish only when **Create release** is checked. The exact
-`v<workspace-version>` tag produces a normal release; other
-tags produce prereleases. Version-shaped tags must match the workspace version.
-
-Each release contains exactly six assets: four platform archives with SQLite,
-`SHA256SUMS`, and `validation-evidence.zip`. Supporting logs, checksums, native
-records, and the release manifest stay inside that ZIP. Uploads remain in a draft
-until every asset succeeds. Existing published assets and tags are never replaced.
-
-Python 3.8 or newer, Git, Rustup, and a C compiler for bundled SQLite are required
-by the release tools.
-
-## Promote validated packages without rebuilding
-
-On the default branch, open Actions and manually run
-[Promote validated release](../.github/workflows/promote-release.yml).
-
-| Input | Meaning |
-| --- | --- |
-| `validation_tag` | Published candidate tag whose packages will be reused |
-| `validation_run_id` | Successful native build and publication run for that candidate |
-| `release_tag` | Stable tag matching the workspace version at the candidate commit |
-
-Let the workflow create the stable tag with its built-in `GITHUB_TOKEN`; pushing
-that tag yourself starts another native build. Promotion copies the four platform
-archives byte-for-byte and regenerates release metadata and checksums. It does
-not rebuild packages or move existing tags. Rerun with the same inputs to resume
-a failed draft upload.
-
-For a local preview, set `CANDIDATE_TAG`, `NATIVE_RUN_ID`, and `STABLE_TAG`, then run:
-
-```sh
-python3 scripts/promote_release.py --repository trafficinc/scripta \
-  --validation-tag "$CANDIDATE_TAG" \
-  --validation-run-id "$NATIVE_RUN_ID" --release-tag "$STABLE_TAG" \
-  --output dist/promotion-preview
-```
-
-Omitting `--publish` prepares files locally without creating a tag or release.
+Python 3.9 or newer, Git, Rustup, and a C compiler for bundled SQLite are required
+for local preparation. Publishing runs on GitHub and needs no personal access token.
 
 ## Pinned inputs and profiles
 

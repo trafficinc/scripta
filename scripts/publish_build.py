@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import tempfile
 import urllib.parse
 import zipfile
@@ -21,7 +20,7 @@ def successful_run(api, repository, run_id):
         raise ValueError('Build run ID must be a positive integer')
     run = api.get('/actions/runs/' + str(run_id))
     if (run.get('id') != run_id or run.get('path') != WORKFLOW
-            or run.get('event') not in ('push', 'workflow_dispatch')
+            or run.get('event') != 'workflow_dispatch' or run.get('head_branch') != 'main'
             or run.get('status') != 'completed' or run.get('conclusion') != 'success'
             or not SHA.fullmatch(run.get('head_sha', ''))
             or type(run.get('run_attempt')) is not int or run['run_attempt'] <= 0
@@ -29,7 +28,10 @@ def successful_run(api, repository, run_id):
                    for key in ('repository', 'head_repository'))):
         raise ValueError('Select a successful native build from this repository')
     jobs = api.get(f'/actions/runs/{run_id}/jobs?per_page=100')
-    expected = set(TARGETS) | {'Assemble validated downloads', 'Publish release downloads'}
+    expected = set(TARGETS) | {'Assemble validated downloads'}
+    # Successful build-only runs from the previous workflow remain usable.
+    if any(job.get('name') == 'Publish release downloads' for job in jobs.get('jobs', [])):
+        expected.add('Publish release downloads')
     items = jobs.get('jobs', [])
     if (jobs.get('total_count') != len(expected) or len(items) != len(expected)
             or {job.get('name') for job in items} != expected
@@ -55,7 +57,7 @@ def build_artifact(api, run):
     else:
         raise ValueError('Build has too many artifacts to inspect')
     if not found:
-        raise ValueError('This run has no saved build; run Native builds and releases first')
+        raise ValueError('This run has no saved build; run Build release candidate first')
     latest = max(attempt for attempt, _ in found)
     matches = [artifact for attempt, artifact in found if attempt == latest]
     if len(matches) != 1 or matches[0].get('expired') is not False:
@@ -67,23 +69,32 @@ def build_artifact(api, run):
     return artifact
 
 
-def select_build(api, repository, tag, run_id=None):
+def destination_manifest(selection):
+    return {'tag': selection['release_tag'], 'source_revision': selection['source_revision'],
+            'built_from': {key: selection[key] for key in ('run_id', 'artifact_id')}}
+
+
+def check_destination(api, manifest):
+    tag = manifest['tag']
+    existing = api.get('/releases/tags/' + urllib.parse.quote(tag, safe=''), missing=True)
+    if existing is not None and not existing.get('draft'):
+        raise ValueError(f'{tag} is already published. Run scripts/prepare_release.py to prepare a newer version, '
+                         'commit/push it, then build and publish the new run ID')
+    ensure_tag(api, manifest, create=False)
+
+
+def select_build(api, repository, run_id):
     if run_id is None:
-        # GitHub returns workflow runs newest first. Explicit IDs may select other branches.
-        response = api.get('/actions/workflows/native-validation.yml/runs?branch=main&status=success&per_page=1')
-        runs = response.get('workflow_runs', [])
-        if not runs or runs[0].get('head_branch') != 'main':
-            raise ValueError('No successful native build exists on main')
-        run_id = runs[0]['id']
+        raise ValueError('Enter the successful Build release candidate run ID from its summary; latest-build selection is disabled')
     run = successful_run(api, repository, run_id)
     version = workspace_version(api, run['head_sha'])
-    release_kind(tag, version)
-    subprocess.run(['git', 'check-ref-format', 'refs/tags/' + tag],
-                   check=True, capture_output=True, text=True)
+    tag = 'v' + version
     artifact = build_artifact(api, run)
-    return {'repository': repository, 'run_id': run_id, 'run_attempt': run['run_attempt'],
-            'source_revision': run['head_sha'], 'version': version, 'release_tag': tag,
-            'artifact_id': artifact['id'], 'artifact_name': artifact['name']}
+    selection = {'repository': repository, 'run_id': run_id, 'run_attempt': run['run_attempt'],
+                 'source_revision': run['head_sha'], 'version': version, 'release_tag': tag,
+                 'artifact_id': artifact['id'], 'artifact_name': artifact['name']}
+    check_destination(api, destination_manifest(selection))
+    return selection
 
 
 def recheck(api, selection):
@@ -126,7 +137,7 @@ def prepare_saved(api, selection, assets, output):
     return manifest, notes
 
 
-def ensure_tag(api, manifest):
+def ensure_tag(api, manifest, create=True):
     tag = manifest['tag']
     revision = manifest['source_revision']
     source = manifest['built_from']
@@ -141,7 +152,9 @@ def ensure_tag(api, manifest):
                     and annotated.get('object', {}).get('type') == 'commit'
                     and annotated['object'].get('sha') == revision):
                 return  # Resume this exact publication after a failed draft upload.
-        raise ValueError('Release tag already exists and was not created by this publication')
+        raise ValueError(f'{tag} already exists and belongs to another publication. Prepare and build a newer version; tags are never moved')
+    if not create:
+        return
     annotated = api.post('/git/tags', {'tag': tag, 'message': message, 'object': revision, 'type': 'commit'})
     if not SHA.fullmatch(annotated.get('sha', '')):
         raise ValueError('Invalid created tag object')
@@ -153,9 +166,7 @@ def publish_build(api, selection, manifest, output, notes, environment, publishe
     if environment.get('GITHUB_REPOSITORY') != selection['repository']:
         raise ValueError('Selected build belongs to another repository')
     recheck(api, selection)
-    existing = api.get('/releases/tags/' + urllib.parse.quote(manifest['tag'], safe=''), missing=True)
-    if existing is not None and not existing.get('draft'):
-        raise ValueError('This release is already published; it will not be replaced')
+    check_destination(api, manifest)
     extra = environment.get('SAVED_BUILD_NOTES', '')
     if extra:
         notes.write_bytes(('\n'.join(extra.splitlines()) + '\n\n' + notes.read_text(encoding='utf-8')).encode('utf-8'))
@@ -176,8 +187,7 @@ def main():
         api = GitHub(repository, os.environ['GH_TOKEN'])
         if args.command == 'select':
             requested = os.environ.get('SAVED_BUILD_RUN_ID', '').strip()
-            selection = select_build(api, repository, os.environ['SAVED_BUILD_RELEASE_TAG'],
-                                     int(requested) if requested else None)
+            selection = select_build(api, repository, int(requested) if requested else None)
             args.selection.parent.mkdir(parents=True, exist_ok=True)
             args.selection.write_bytes((json.dumps(selection, indent=2) + '\n').encode('utf-8'))
             with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8', newline='\n') as output:
@@ -195,7 +205,7 @@ def main():
                               f'Source commit: `{selection["source_revision"]}`\n\n'
                               f'[Original build]({manifest["built_from"]["run_url"]})\n\n'
                               'Platform packages reused without rebuilding.\n')
-    except (OSError, ValueError, KeyError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
         parser.exit(1, 'Saved build publication failed: ' + str(error) + '\n')
 
 

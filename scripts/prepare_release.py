@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run local checks, then interactively bump the version for a GitHub tag release."""
+"""Run local checks and prepare a version for manual candidate build/publication."""
 import argparse
 import json
 import os
@@ -94,6 +94,7 @@ class Preparation:
             raise ValueError(f'Tag {tag} already exists; choose a new version')
         if exists.returncode != 1:
             raise RuntimeError('Could not check existing local tags')
+        self.check_remote_version(candidate)
         metadata = json.loads(self.cargo('metadata', '--format-version', '1', '--no-deps',
                                          '--locked', capture=True).stdout)
         members = set(metadata['workspace_members'])
@@ -127,6 +128,24 @@ class Preparation:
             raise
         return tag
 
+    def check_remote_version(self, candidate):
+        tag = 'v' + candidate
+        url = self.run(['git', 'remote', 'get-url', 'origin'], capture=True).stdout.strip()
+        match = re.fullmatch(r'(?:https://github\.com/|ssh://git@github\.com/|git@github\.com:)'
+                             r'([\w.-]+/[\w.-]+?)(?:\.git)?/?', url)
+        if not match:
+            raise ValueError('origin must point to the GitHub repository used for releases')
+        repository = match[1]
+        tags = self.run(['git', 'ls-remote', 'origin', 'refs/tags/' + tag], capture=True).stdout
+        if tags.strip():
+            raise ValueError(f'Remote tag {tag} already exists; choose a higher version')
+        # Pagination includes drafts and older releases. Authentication/network
+        # failures stop preparation rather than pretending a version is available.
+        releases = self.run(['gh', 'api', '--paginate', f'repos/{repository}/releases?per_page=100',
+                             '--jq', '.[].tag_name'], capture=True).stdout.splitlines()
+        if tag in releases:
+            raise ValueError(f'GitHub release {tag} already exists; choose a higher version')
+
 
 def workspace_version(text):
     section = re.search(r'^\[workspace\.package\]\s*\n(.*?)(?=^\[|\Z)', text, re.M | re.S)
@@ -157,14 +176,12 @@ def prepare(preparation):
     tag = preparation.bump(snapshots, version, candidate)
     print(f'\nUpdated Cargo.toml and Cargo.lock: {version} -> {candidate}.')
     print('Review the changes and release notes, then commit the intended source revision.')
-    print('After committing and pushing the branch, validate all four platforms before tagging:')
-    print('  python3 scripts/github_release.py')
-    print('It waits for GitHub validation, then asks you to confirm the matching release tag.')
-    print('Alternatively, to trigger release validation directly with a tag:')
-    print(f'  git tag {tag}')
-    print(f'  git push origin refs/tags/{tag}')
-    print('The tag workflow builds all four native packages and publishes to GitHub Releases')
-    print('only after every native validation job passes. Other-platform validation is pending.')
+    print(f'Prepared release: {tag}')
+    print('1. Commit the intended changes and push main.')
+    print('2. Actions -> Build release candidate -> Run workflow on main.')
+    print('3. After success, copy the build run ID from its summary.')
+    print('4. Actions -> Publish release candidate -> enter that run ID and run on the default branch.')
+    print(f'The publication workflow derives {tag} from the built version; do not create a tag yourself.')
     print('No commit, tag, push, local package, or GitHub release was created by this script.')
 
 
