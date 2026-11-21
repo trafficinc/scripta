@@ -60,6 +60,44 @@ To change the version, use the preparation procedure above, then commit and push
 the intended version before selecting that branch in Actions. The manual form
 does not require a local release helper or a personal access token.
 
+## Publish a successful build later, without rebuilding
+
+On the default branch, open **Actions → Publish successful build → Run workflow**.
+Enter the new release tag and optional release notes. Leave **Build run ID** blank
+to select the latest successful **Native builds and releases** run on `main`, or
+enter a particular native build run ID (including a reviewed build on another
+branch). A run ID is the number at the end of its Actions run URL.
+
+The workflow requires all four native jobs and artifact assembly to have passed.
+The saved `scripta-build-<run-id>-<attempt>` artifact must still exist and be
+unexpired; these artifacts are kept for 30 days. If the latest successful run's
+artifact is missing or expired, the workflow stops rather than silently selecting
+an older build. Choose an available run explicitly or create a new native build.
+
+The tag must match the **built commit's** workspace version, even if the current
+default branch has a newer version. For example, packages built as `0.1.2` can be
+published as `v0.1.2` or `v0.1.2-rc.1`; they cannot be relabeled `v0.1.3`.
+The exact version tag publishes a normal release; RC/validation/other tags publish
+prereleases, following the existing naming rules.
+
+The workflow downloads the selected artifact by ID, verifies its source revision,
+checksums, and full native evidence, and creates the tag at the **build's commit**.
+The four platform archives are copied byte-for-byte. Release metadata,
+`validation-evidence.zip`, and `SHA256SUMS` are regenerated for the new tag; native
+logs, validation records, and smoke receipts remain unchanged. The release manifest
+records the source run, attempt, artifact, and original evidence checksum.
+Exactly six release assets are uploaded to a draft before publication.
+
+Existing unrelated tags and already published releases are rejected. If uploads
+fail, rerun with the same build run ID and release tag to resume this publication's
+own tag/draft. Tags are never moved. The selected build is rechecked before
+publication; a concurrent build retry or artifact replacement stops the release.
+The workflow uses `GITHUB_TOKEN` and shares the publication concurrency group with
+the existing release workflows. It does not compile Rust or trigger a second build.
+
+Use **Publish successful build** for saved Actions artifacts. **Promote validated
+release** remains available for promoting packages from a published prerelease.
+
 ## Automatic publication on tag pushes
 
 Run `python3 scripts/github_release.py` from a clean checkout whose remote branch

@@ -134,6 +134,9 @@ push, with no branch-push/PR triggers. Manual runs publish only when Create
 release is selected; tag pushes publish after validation succeeds. Build-only
 manual runs must not create tags or releases. Reuse the saved validated packages
 for publication, without rebuilding them.
+The manual Publish successful build workflow may publish an unexpired successful
+native build under a new matching tag. Preserve its platform archives and native
+receipts; regenerate only release metadata, evidence packaging, and checksums.
 Build Linux x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon;
 publish release downloads only after every native test/package job succeeds.
 Keep release downloads compact: exactly four platform packages, all with SQLite,

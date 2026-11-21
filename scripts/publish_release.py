@@ -25,7 +25,7 @@ def release_kind(tag, version):
     return tag != 'v' + version or '-' in version
 
 
-def prepare(inputs, output, revision, tag, version, promoted_from=None):
+def prepare(inputs, output, revision, tag, version, promoted_from=None, built_from=None):
     prerelease = release_kind(tag, version)
     if output.exists():
         raise ValueError('Choose a fresh release asset directory')
@@ -85,6 +85,8 @@ def prepare(inputs, output, revision, tag, version, promoted_from=None):
                 'prerelease': prerelease, 'packages': []}
     if promoted_from is not None:
         manifest['promoted_from'] = promoted_from
+    if built_from is not None:
+        manifest['built_from'] = built_from
     with tempfile.TemporaryDirectory(prefix='scripta-evidence-', dir=output.parent) as directory:
         evidence = Path(directory)
         for archive, smoke, name, target, variant in packages:
@@ -122,6 +124,10 @@ def prepare(inputs, output, revision, tag, version, promoted_from=None):
     if promoted_from is not None:
         notes += ['', 'Platform archives promoted byte-for-byte from `' + promoted_from['tag'] + '`.',
                   'Native validation: ' + promoted_from['run_url'],
+                  'Only release metadata, the evidence ZIP, and SHA256SUMS were regenerated.']
+    if built_from is not None:
+        notes += ['', 'Platform archives reused byte-for-byte from a saved native build.',
+                  'Original build: ' + built_from['run_url'],
                   'Only release metadata, the evidence ZIP, and SHA256SUMS were regenerated.']
     notes_path = output.parent / (output.name + '-notes.md')
     notes_path.write_bytes(('\n'.join(notes) + '\n').encode('utf-8'))
