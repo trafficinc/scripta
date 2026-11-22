@@ -68,7 +68,11 @@ impl Runtime {
         span: Span,
         output: &mut dyn ScriptOutput,
     ) -> Result<Vec<Value>> {
-        let mut values = Vec::new();
+        let mut values = if expressions.is_empty() {
+            Vec::new()
+        } else {
+            self.take_argument_buffer()
+        };
         for expression in expressions {
             if let ExprKind::Spread(inner) = &expression.kind {
                 let Value::List(items) = self.evaluate(inner, output)? else {

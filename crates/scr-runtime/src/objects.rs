@@ -12,7 +12,7 @@ pub(crate) struct ClassDefinition {
     pub parent: Option<TypeAnnotation>,
     pub interfaces: Vec<TypeAnnotation>,
     pub fields: Vec<scr_ast::FieldDeclaration>,
-    pub methods: Vec<Rc<scr_ast::FunctionDeclaration>>,
+    pub methods: Vec<Rc<value::UserDeclaration>>,
 }
 impl From<&ClassDeclaration> for ClassDefinition {
     fn from(declaration: &ClassDeclaration) -> Self {
@@ -21,7 +21,13 @@ impl From<&ClassDeclaration> for ClassDefinition {
             parent: declaration.parent.clone(),
             interfaces: declaration.interfaces.clone(),
             fields: declaration.fields.clone(),
-            methods: declaration.methods.iter().cloned().map(Rc::new).collect(),
+            methods: declaration
+                .methods
+                .iter()
+                .cloned()
+                .map(value::UserDeclaration::new)
+                .map(Rc::new)
+                .collect(),
         }
     }
 }
@@ -814,11 +820,14 @@ impl Runtime {
         }
         self.ensure_implementation(&class, span)?;
         let arguments = self.evaluate_arguments(arguments, span, output)?;
-        self.stack.push(StackFrame {
-            function: format!("new {name}"),
-            span,
-            source: self.source.clone(),
-        });
+        self.stack.push(
+            StackFrame {
+                function: format!("new {name}"),
+                span,
+                source: self.source.clone(),
+            }
+            .into(),
+        );
         let result = (|| {
             let previous = self.environments.current;
             let previous_source = self.source.clone();

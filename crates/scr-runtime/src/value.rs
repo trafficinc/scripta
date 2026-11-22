@@ -48,13 +48,39 @@ impl MapKey {
 #[derive(Clone)]
 pub struct Callable(pub(crate) Rc<Function>);
 
+// Runtime-owned immutable declaration metadata; public ASTs remain unchanged.
+pub(crate) struct UserDeclaration {
+    ast: FunctionDeclaration,
+    pub required: usize,
+    pub variadic: bool,
+}
+impl UserDeclaration {
+    pub fn new(ast: FunctionDeclaration) -> Self {
+        Self {
+            required: ast
+                .parameters
+                .iter()
+                .filter(|p| p.default.is_none() && !p.variadic)
+                .count(),
+            variadic: ast.parameters.last().is_some_and(|p| p.variadic),
+            ast,
+        }
+    }
+}
+impl std::ops::Deref for UserDeclaration {
+    type Target = FunctionDeclaration;
+    fn deref(&self) -> &Self::Target {
+        &self.ast
+    }
+}
+
 pub(crate) enum Function {
     Native {
-        name: String,
+        name: Rc<str>,
         function: NativeFunction,
     },
     User {
-        declaration: Rc<FunctionDeclaration>,
+        declaration: Rc<UserDeclaration>,
         receiver: Option<Value>,
         environment: usize,
         owner: Rc<()>,
@@ -122,7 +148,7 @@ impl Value {
     /// Construct a native callable for object methods without a global registration.
     pub fn native_function(name: impl Into<String>, function: NativeFunction) -> Self {
         Self::Callable(Callable(Rc::new(Function::Native {
-            name: name.into(),
+            name: Rc::from(name.into()),
             function,
         })))
     }

@@ -216,11 +216,14 @@ impl Numeric {
                 if cancelled || interrupted() {
                     // Match native-call diagnostics without re-reading a flag
                     // already observed set (a host may subsequently reset it).
-                    runtime.stack.push(StackFrame {
-                        function: callable.name().into(),
-                        source: runtime.source.clone(),
-                        span: *span,
-                    });
+                    runtime.stack.push(
+                        StackFrame {
+                            function: callable.name().into(),
+                            source: runtime.source.clone(),
+                            span: *span,
+                        }
+                        .into(),
+                    );
                     let error = runtime.native_error(
                         NativeError::new("Interrupted", "execution interrupted"),
                         *span,

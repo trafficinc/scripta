@@ -87,8 +87,14 @@ impl InvocationContext<'_> {
                 .validate_value(value, 0, self.span)
                 .map_err(|signal| InvocationError { signal })?;
         }
+        let mut values = if arguments.is_empty() {
+            Vec::new()
+        } else {
+            self.runtime.take_argument_buffer()
+        };
+        values.extend_from_slice(arguments);
         self.runtime
-            .call_callable(callable, arguments.to_vec(), self.span, self.output)
+            .call_callable(callable, values, self.span, self.output)
             .map_err(|signal| InvocationError { signal })
     }
     pub fn error(&self, error: NativeError) -> InvocationError {
@@ -139,11 +145,14 @@ impl Runtime {
         })?;
         let host_frame = self.stack.is_empty();
         if host_frame {
-            self.stack.push(StackFrame {
-                function: "<host>".into(),
-                span,
-                source: self.source.clone(),
-            });
+            self.stack.push(
+                StackFrame {
+                    function: "<host>".into(),
+                    span,
+                    source: self.source.clone(),
+                }
+                .into(),
+            );
         }
         let result = InvocationContext {
             runtime: self,

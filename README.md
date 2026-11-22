@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="docs/assets/scripta-banner.png" alt="Scripta — a standing raven wrapped in a glowing beam of light. Lightweight scripting for everyday automation." width="960">
+  <img src="docs/assets/scripta-banner.png" alt="Scripta — a standing black American bison wrapped in a glowing beam of light. Lightweight scripting for everyday automation." width="960">
 </h1>
 
 <p align="center">
@@ -20,11 +20,13 @@
 
 **The simplicity of PHP. The practicality of shell scripting. Powered by Rust.**
 
-Scripta is a lightweight, standalone scripting language designed to make automation simpler without the complexity of traditional programming environments.
+**One executable. Write a script and run it.**
+
+Scripta is a lightweight, standalone scripting language for everyday automation. Download the executable for your platform, save your code in a `.scripta` file, and run it with `scripta run your-script.scripta`.
 
 Built in Rust with familiar PHP-inspired syntax, Scripta combines filesystem operations, system commands, HTTP APIs, JSON processing, and built-in SQLite into one practical scripting environment.
 
-Write scripts that are easy to read, simple to maintain, and ready to run—without requiring Python, Node.js, PHP, Docker, or a separate compilation step.
+Local scripts need no Python, Node.js, PHP, Docker, Rust, or separate compilation step. The interpreter uses platform system libraries; scripts that launch external commands still need those programs installed.
 
 **What can you build with Scripta?**
 
@@ -39,8 +41,11 @@ Write scripts that are easy to read, simple to maintain, and ready to run—with
 
 Scripta bridges the gap between shell scripts that become difficult to maintain and general-purpose languages that can feel excessive for straightforward automation.
 
-It provides familiar syntax, explicit type conversions, a practical standard library, and a standalone interpreter for macOS, Linux, and Windows.
-
+- **Simple setup:** one interpreter executable runs your scripts, with no separate language runtime to install or per-script compilation step.
+- **Useful tools built in:** work with files, commands, HTTP APIs, JSON, and SQLite. Standard release packages include SQLite without a separate database server or library installation.
+- **Predictable type rules:** strict runtime operations and explicit conversions help catch incompatible values; optional function annotations check arguments and return values at runtime.
+- **An integrated workflow:** format scripts, run native Scripta tests, and check syntax with the same executable. Errors include source locations and runtime stack traces.
+- **Multiple platforms:** platform-specific packages target Linux, Windows, and Apple Silicon macOS. See [compatibility](docs/compatibility.md) for architectures and OS baselines.
 
 ### ~ *SCRIPTA IS STILL IN BETA* ~
 
@@ -53,16 +58,16 @@ Median whole-process wall time in milliseconds; **lower is better**.
 
 | Benchmark | Work size | PHP (ms) | Python (ms) | Scripta (ms) |
 | --- | --- | ---: | ---: | ---: |
-| Numeric loop | 1,000,000 iterations | 47.691 | 104.311 | 53.151 |
-| Recursive Fibonacci | fib(28), no memoization | 62.280 | 96.550 | 358.164 |
-| List pipeline | 2,000 items × 200 passes | 55.291 | 62.507 | 109.226 |
-| String concatenation | 100,000 × 8-byte appends | 830.993 | 39.350 | 27.778 |
-| Dictionary operations | 256 keys; 40,960 updates; 128 copy-removals | 36.176 | 42.884 | 42.537 |
-| Class dispatch | 200,000 method calls | 41.049 | 75.207 | 160.744 |
-| Regex match | 20,000 matches attempted | 35.493 | 62.775 | 17.685 |
-| JSON roundtrip | 20,000 encode/decode pairs | 49.380 | 147.610 | 69.605 |
-| Function calls | 200,000 calls | 39.319 | 50.478 | 98.728 |
-| Startup | Empty script | 33.211 | 29.580 | 6.051 |
+| Numeric loop | 1,000,000 iterations | 49.172 | 107.856 | 54.017 |
+| Recursive Fibonacci | fib(28), no memoization | 63.967 | 98.316 | 346.728 |
+| List pipeline | 2,000 items × 200 passes | 56.048 | 63.329 | 110.847 |
+| String concatenation | 100,000 × 8-byte appends | 848.982 | 39.825 | 27.538 |
+| Dictionary operations | 256 keys; 40,960 updates; 128 copy-removals | 35.966 | 42.848 | 42.369 |
+| Class dispatch | 200,000 method calls | 40.867 | 75.767 | 162.039 |
+| Regex match | 20,000 matches attempted | 37.222 | 66.509 | 17.753 |
+| JSON roundtrip | 20,000 encode/decode pairs | 52.165 | 153.933 | 71.449 |
+| Function calls | 200,000 calls | 39.755 | 51.375 | 95.052 |
+| Startup | Empty script | 33.570 | 30.597 | 6.292 |
 
 Measured locally,
 with 15 samples after 3 warmups per workload/runtime.
@@ -107,8 +112,6 @@ requests behind a reverse proxy.
   source locations, and runtime stack traces.
 - **Built-in SQLite:** default builds include parameterized SQL,
   transactions, and bounded query results. See the [SQLite extension](docs/sqlite.md).
-- **A standalone interpreter:** the installed executable uses platform system
-  libraries. Local scripts need no Python, Node.js, PHP, Docker, Rust, or network.
 
 Scripta is dynamically typed with strict operations and explicit conversions.
 Its syntax is inspired by PHP; the [language specification](docs/language-spec.md)
@@ -201,10 +204,6 @@ PowerShell, invoke a quoted executable path with `&`, for example:
 After placing the executable on PATH, `scripta run hello.scripta` works on all three
 systems. An explicit `Http` call needs the requested endpoint; `Process::run`
 needs the program the script chooses to launch.
-
-## Download the package for your OS in Releases
-
-Then add to your path to have scripta available globally.
 
 ## Build from source
 

@@ -3,6 +3,8 @@
 
 mod arrays;
 mod bindings;
+#[cfg(test)]
+mod call_reuse_tests;
 mod environment;
 mod error;
 mod exceptions;
@@ -100,6 +102,8 @@ enum Signal {
     Exit(u8),
 }
 type Result<T> = std::result::Result<T, Signal>;
+const MAX_ARGUMENT_BUFFERS: usize = 8;
+const MAX_ARGUMENT_CAPACITY: usize = 16;
 
 #[derive(Default)]
 pub struct Runtime {
@@ -107,7 +111,10 @@ pub struct Runtime {
     map_indexes: std::cell::RefCell<map_index::MapIndexes>,
     exception_classes:
         std::cell::RefCell<std::collections::HashMap<String, Rc<objects::ScriptClass>>>,
-    stack: Vec<StackFrame>,
+    stack: Vec<error::ActiveFrame>,
+    argument_buffers: Vec<Vec<Value>>,
+    #[cfg(test)]
+    disable_call_reuse: bool,
     identity: Rc<()>,
     options: RuntimeOptions,
     steps: u64,
@@ -273,10 +280,11 @@ impl Runtime {
                 format!("function {name} is already registered"),
             ));
         }
-        functions.insert(
-            name.clone(),
-            Value::Callable(Callable(Rc::new(Function::Native { name, function }))),
-        );
+        let callable = Value::Callable(Callable(Rc::new(Function::Native {
+            name: Rc::from(name.as_str()),
+            function,
+        })));
+        functions.insert(name, callable);
         Ok(())
     }
 
@@ -378,14 +386,17 @@ impl Runtime {
         if let Some(path) = &entry {
             self.active_modules.push(path.clone());
         }
-        self.stack.push(StackFrame {
-            function: "<main>".into(),
-            source: self.source.clone(),
-            span: program
-                .statements
-                .first()
-                .map_or(Span::default(), |statement| statement.span),
-        });
+        self.stack.push(
+            StackFrame {
+                function: "<main>".into(),
+                source: self.source.clone(),
+                span: program
+                    .statements
+                    .first()
+                    .map_or(Span::default(), |statement| statement.span),
+            }
+            .into(),
+        );
         let result = (|| {
             // Only direct top-level declarations are hoisted. Conditional and
             // nested declarations retain their execution-dependent behavior.
@@ -461,7 +472,11 @@ impl Runtime {
         Box::new(RuntimeError {
             message: scr_diagnostics::redact_text(&message.into(), &secrets),
             span,
-            trace: self.stack.clone(),
+            trace: self
+                .stack
+                .iter()
+                .map(error::ActiveFrame::snapshot)
+                .collect(),
             code: "E0401",
             help: None,
             redacted_values: Arc::new(secrets),
@@ -1038,7 +1053,7 @@ impl Runtime {
         self.validate_function(declaration)?;
         self.environments.capture();
         let function = Rc::new(Function::User {
-            declaration: Rc::new(declaration.clone()),
+            declaration: Rc::new(value::UserDeclaration::new(declaration.clone())),
             receiver: None,
             environment: self.environments.current,
             owner: self.identity.clone(),
@@ -1072,10 +1087,42 @@ impl Runtime {
         self.call_function(callable.0.as_ref(), values, span, output)
     }
 
+    fn take_argument_buffer(&mut self) -> Vec<Value> {
+        #[cfg(test)]
+        if self.disable_call_reuse {
+            return Vec::new();
+        }
+        self.argument_buffers.pop().unwrap_or_default()
+    }
+
     fn call_function(
         &mut self,
         function: &Function,
-        values: Vec<Value>,
+        mut values: Vec<Value>,
+        span: Span,
+        output: &mut dyn ScriptOutput,
+    ) -> Result<Value> {
+        let result = self.call_function_inner(function, &mut values, span, output);
+        // Never retain argument values/roots. Suspended callers keep ownership
+        // of their own buffers through recursive or reentrant calls.
+        values.clear();
+        #[cfg(not(test))]
+        let reuse = true;
+        #[cfg(test)]
+        let reuse = !self.disable_call_reuse;
+        if reuse
+            && (1..=MAX_ARGUMENT_CAPACITY).contains(&values.capacity())
+            && self.argument_buffers.len() < MAX_ARGUMENT_BUFFERS
+        {
+            self.argument_buffers.push(values);
+        }
+        result
+    }
+
+    fn call_function_inner(
+        &mut self,
+        function: &Function,
+        values: &mut Vec<Value>,
         span: Span,
         output: &mut dyn ScriptOutput,
     ) -> Result<Value> {
@@ -1084,14 +1131,14 @@ impl Runtime {
         {
             return self.fail("maximum call depth exceeded", span);
         }
-        self.stack.push(StackFrame {
-            function: match function {
-                Function::Native { name, .. } => name.clone(),
-                Function::User { declaration, .. } => declaration.name.clone(),
-            },
-            source: self.source.clone(),
-            span,
-        });
+        let frame = error::ActiveFrame::call(function, span, self.source.clone());
+        #[cfg(test)]
+        let frame = if self.disable_call_reuse {
+            frame.snapshot().into()
+        } else {
+            frame
+        };
+        self.stack.push(frame);
         let result = match function {
             Function::Native { name, function } if function.is_reentrant() => {
                 let mut context = InvocationContext {
@@ -1100,7 +1147,7 @@ impl Runtime {
                     span,
                 };
                 function
-                    .invoke_reentrant(name, &mut context, &values)
+                    .invoke_reentrant(name, &mut context, values)
                     .map_err(|error| error.signal)
             }
             Function::Native { name, function } => {
@@ -1126,7 +1173,7 @@ impl Runtime {
                         .as_mut(),
                 };
                 function
-                    .invoke(name, &mut context, &values)
+                    .invoke(name, &mut context, values)
                     .map_err(|error| self.native_error(error, span))
             }
             Function::User {
@@ -1140,12 +1187,8 @@ impl Runtime {
                     self.stack.pop();
                     return self.fail("user callable belongs to a different runtime", span);
                 }
-                let required = declaration
-                    .parameters
-                    .iter()
-                    .filter(|p| p.default.is_none() && !p.variadic)
-                    .count();
-                let variadic = declaration.parameters.last().is_some_and(|p| p.variadic);
+                let required = declaration.required;
+                let variadic = declaration.variadic;
                 let maximum = declaration.parameters.len();
                 if values.len() < required || (!variadic && values.len() > maximum) {
                     let expected = if variadic {
@@ -1187,10 +1230,21 @@ impl Runtime {
                             .variables
                             .insert("this".into(), receiver.clone());
                     }
-                    let mut values = values.into_iter();
+                    let mut next_argument = 0;
                     for parameter in &declaration.parameters {
                         let value = if parameter.variadic {
-                            let items: Vec<_> = values.by_ref().collect();
+                            let items = if next_argument == values.len() {
+                                Vec::new()
+                            } else if values.capacity()
+                                > (values.len() - next_argument).saturating_mul(2).max(4)
+                            {
+                                // A short retained tail must not keep a large
+                                // argument allocation, including a pooled one.
+                                values.drain(next_argument..).collect()
+                            } else {
+                                values.drain(..next_argument);
+                                std::mem::take(values)
+                            };
                             for value in &items {
                                 self.annotation(
                                     &parameter.annotation,
@@ -1203,8 +1257,9 @@ impl Runtime {
                             self.validate_value(&value, 0, parameter.span)?;
                             value
                         } else {
-                            let value = if let Some(value) = values.next() {
-                                value
+                            let value = if let Some(value) = values.get_mut(next_argument) {
+                                next_argument += 1;
+                                std::mem::replace(value, Value::Null)
                             } else {
                                 self.evaluate(
                                     parameter.default.as_ref().expect("validated arity"),

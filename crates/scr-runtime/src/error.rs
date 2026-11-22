@@ -16,6 +16,54 @@ pub struct StackFrame {
     pub source: Option<Arc<SourceFile>>,
 }
 
+// Active calls share immutable names. Strings are copied only when taking a
+// public diagnostic snapshot, so traces retain their existing owned interface.
+pub(crate) enum FrameName {
+    Shared(std::rc::Rc<str>),
+    User(std::rc::Rc<crate::value::UserDeclaration>),
+    Owned(String),
+}
+pub(crate) struct ActiveFrame {
+    pub name: FrameName,
+    pub span: Span,
+    pub source: Option<Arc<SourceFile>>,
+}
+impl ActiveFrame {
+    pub fn call(
+        function: &crate::value::Function,
+        span: Span,
+        source: Option<Arc<SourceFile>>,
+    ) -> Self {
+        let name = match function {
+            crate::value::Function::Native { name, .. } => FrameName::Shared(name.clone()),
+            crate::value::Function::User { declaration, .. } => {
+                FrameName::User(declaration.clone())
+            }
+        };
+        Self { name, span, source }
+    }
+    pub fn snapshot(&self) -> StackFrame {
+        StackFrame {
+            function: match &self.name {
+                FrameName::Shared(name) => name.as_ref().to_owned(),
+                FrameName::User(declaration) => declaration.name.clone(),
+                FrameName::Owned(name) => name.clone(),
+            },
+            span: self.span,
+            source: self.source.clone(),
+        }
+    }
+}
+impl From<StackFrame> for ActiveFrame {
+    fn from(frame: StackFrame) -> Self {
+        Self {
+            name: FrameName::Owned(frame.function),
+            span: frame.span,
+            source: frame.source,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct RuntimeError {
     pub message: String,

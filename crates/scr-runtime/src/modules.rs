@@ -258,11 +258,14 @@ impl Runtime {
         } else {
             None
         };
-        self.stack.push(StackFrame {
-            function: if once { "require_once" } else { "require" }.into(),
-            span,
-            source: self.source.clone(),
-        });
+        self.stack.push(
+            StackFrame {
+                function: if once { "require_once" } else { "require" }.into(),
+                span,
+                source: self.source.clone(),
+            }
+            .into(),
+        );
         let previous = self.source.replace(Arc::new(SourceFile {
             path: result.clone(),
             text,
