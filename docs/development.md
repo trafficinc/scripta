@@ -17,23 +17,10 @@ Use `.scripta` for source files (`.scta` shorthand and legacy `.scr` also work).
 Scripts start directly with code. The benchmark driver accepts `--scripta` and
 legacy `--scr`; the separate playground launcher retains its `--scr` protocol.
 
-Run format, lint, and test checks on each platform being validated. CLI exit codes
-are 0 for success, 1 for I/O or language errors,
-and 2 for incorrect command-line usage. `help` and `version` succeed; `--help`,
-`-h`, and `--version` are aliases. `run <file>` executes; `<file>` is shorthand.
-`check <file>` validates lexing and statement syntax, producing no output on
-success. It collects recoverable parser errors and exits with code 1 if any are
-found, including missing semicolons, legacy equality, and invalid control-flow
-context. It does not resolve variables, enforce type annotations, or execute
-native functions. The runtime executes the implemented statement grammar;
-`check` validates it without running loops, functions, output, throws, or exits.
-`run`, `check`, and `fmt` accept command-local `--help`/`-h`, and
-`scripta help run|check|fmt` prints the same command help with exit 0.
-Both `run` and `check` accept `--` before a path. `scripta run -` consumes bounded
-UTF-8 script source from stdin through EOF; `scripta run -- -` addresses a literal
-file named `-`. Stdin source uses `<stdin>` in diagnostics and the working
-directory for relative includes/packages. Subsequent script input is at EOF. No file-extension restriction
-is imposed. Non-Unicode paths retain the operating system's native encoding.
+Run format, lint, and test checks on each platform being validated. See the
+[CLI reference](../README.md#cli-reference) for commands and exit codes, the
+[language specification](language-spec.md) for evaluation and error semantics,
+and [platform compatibility](compatibility.md) for supported targets.
 
 Interface contracts and composition are covered in
 `crates/scr-cli/tests/interfaces.rs`, including module identity, signature failures,
@@ -52,30 +39,56 @@ the root `tests/fixtures` directory. Root `tests/language` and `tests/integratio
 directories describe test ownership and future organization; they are not
 automatically discovered by Cargo.
 
-Runtime support now includes arithmetic, lexical/block scopes, control flow,
-functions/closures, owned collections, conversions, exit codes, and explicit
-throw/catch. The typed native API exposes context, streams, environment snapshots,
-permissions, named exceptions, and cancellation. Standard library registration
-includes `str`, `int`, `float`, `bool`, `type`, `len`, and `sleep`. See the
-[registration guide](standard-library.md#registering-rust-modules) for new Rust modules.
-For a complete crate, optional Cargo feature, CLI wiring, and testing walkthrough,
-see [Writing built-in extensions](writing-extensions.md).
-The [SQLite module](sqlite.md) is enabled by default in the CLI. Building from
-source needs a C compiler for bundled SQLite; downloaded executables do not.
-Use `-p scr-cli --no-default-features` for a minimal source build. Embedders
-continue to register `scr-ext-sqlite` explicitly.
-`File`, `Dir`, and `Path` provide filesystem operations and optional root policies;
-filesystem tests live in `crates/scr-stdlib/tests` and use temporary directories.
-Process/Env/Cli now support owned children, literal arguments, bounded output,
-deadlines/cancellation, runtime-local environment values, options, and prompts.
-Tests in scr-stdlib/tests and scr-cli/tests cover fixture children and CLI invocation
-parity. JSON, verified HTTPS, bounded responses, and local script loading are covered
-by loopback HTTP/TLS and temporary-file integration tests, with no public network
-dependency. List and Map helpers, logical value/scope/step budgets, and native
-release packaging and structured exceptions are implemented. Callback-based
-collection transforms and recursive merge variants remain unimplemented. Add
-runnable examples when each feature works; the fixtures in `tests/fixtures` exercise complete
-statements, Hello World output, script exit codes, and runtime stack traces.
+Use the [standard-library reference](standard-library.md) for native APIs and
+resource policies, and [Writing built-in extensions](writing-extensions.md) for
+crate registration and CLI wiring. SQLite is enabled by default; see
+[building with SQLite](sqlite.md#building-with-sqlite) for source requirements.
+Add runnable examples and focused tests when behavior changes.
+
+## Local disk cleanup
+
+From the workspace root, preview removable build outputs and Python caches:
+
+```sh
+python3 scripts/clean_local.py
+python3 scripts/clean_local.py --apply
+```
+
+Requires Python 3.9+ and Git. The default targets only `target/` and `__pycache__/`
+directories under the project's source, scripts, benchmarks, tests, examples,
+and playground directories. Removing `target/` also removes locally built
+executables; the next Cargo build regenerates them and takes longer. Global Cargo
+caches, toolchains, and custom target directories outside `target/` are preserved.
+Stop builds, tests, benchmark runs, and other writers before applying cleanup.
+
+Optional categories require explicit flags; preview them before applying:
+
+```sh
+python3 scripts/clean_local.py --dist --benchmark-results
+python3 scripts/clean_local.py --dist --benchmark-results --apply
+```
+
+`--dist` includes local release packages and validation evidence in `dist/`.
+`--benchmark-results` includes local measurement records in `benchmarks/results/`;
+it preserves benchmark fixtures, comparison work, and `benchmarks/evidence/`.
+Back up any records you want to retain before selecting these categories.
+
+The script locates the repository relative to itself, previews by default, and
+checks all candidates before deletion. It refuses candidates containing tracked
+files, nested Git metadata, symlinks, junctions, or special filesystem entries.
+Sources, documentation, manifests, lockfiles, credentials, installed `.scripta/`
+dependencies, and other untracked work outside these generated directories are
+preserved. Size estimates sum file lengths; hard links, sparse files, compression,
+and filesystem allocation can change the actual space recovered. Exit codes are
+`0` for a successful preview/cleanup and `1` for failure. Failed cleanup can leave
+earlier candidates removed; deletion is not rolled back. Do not run concurrently
+with changes to the repository or cleanup directories.
+
+Run the disposable-repository safety tests with:
+
+```sh
+python3 -B -m unittest discover -s scripts -p 'test_clean_local.py'
+```
 
 ## Local secrets and personal information scan
 
@@ -122,26 +135,20 @@ Run the scanner regression tests with the executable installed:
 python3 -m unittest discover -s scripts -p 'test_scan_sensitive.py'
 ```
 
-## Releases
+## Python tooling tests
 
-Use [the release procedure](releases.md) for version preparation, publishing,
-promotion, and local packaging. Platform targets and OS baselines are listed in
-[compatibility](compatibility.md).
-
-Run the release tooling's regression tests without building Rust or accessing
+Run the Python tooling's regression tests without building Rust or accessing
 GitHub:
 
 ```sh
 python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
 
-These tests use explicit LF/CRLF bytes to check version edits and rollback,
-validation-log parsing, and Git checkout rules with `core.autocrlf=true`.
-Release inputs must stay LF while byte-exact fixtures and upstream notices retain
-their original bytes. The native build workflow runs this suite on every release
-platform. Passing locally does not establish Windows support; native Windows
-tests, packaging, and extracted-package smoke validation remain pending until
-that platform's build succeeds.
+Text-editing tests use explicit LF/CRLF bytes and cover rollback and Git checkout
+rules with `core.autocrlf=true`. Build inputs stay LF while byte-exact fixtures
+and upstream notices retain their original bytes. Local success does not establish
+correctness on other platforms; see the native validation guidance in
+[AGENTS.md](../AGENTS.md#cross-platform-validation).
 
 ## Formatter and diagnostic tooling
 
@@ -220,27 +227,19 @@ strict and isolate the fixtures. Process cwd fixtures canonicalize their
 reported paths so Windows short paths and extended-length paths compare by
 directory identity rather than spelling.
 
-## Performance and runtime safety
+## Benchmarks and runtime safety
 
-See [the Phase 13 report](performance.md) for actual release benchmarks, per-child
-RSS, binary size, safety verification, and execution budget contracts. Run
-`cargo bench -p scr-cli --bench interpreter --locked` for phase timings, and
-`python3 benchmarks/run.py --scripta target/release/scripta --output benchmarks/results/local.json`
-for checked Scripta/Bash/Python CLI fixtures. Workspace Rust forbids unsafe code
-through inherited Cargo lints. Source excerpts now mask literal/comment contents;
-error codes and original Unicode column positions are preserved.
+The [performance table](performance.md) summarizes the PHP/Python/Scripta
+comparison. Its [methodology](../benchmarks/comparison/README.md) describes
+workloads, output checks, measurement, and regeneration of both published tables.
+Run regression tests before timing, avoid concurrent builds/tests, and save a
+new evidence file for each run.
 
-Run `cargo bench -p scr-stdlib --bench collections --locked --offline` to compare
-map helpers at 128, 512, and 2048 entries, including mixed integer/string keys.
-The dependency-free harness reports CSV medians from nine measured runs after
-two warmups and checks result lengths. Parsing, registration, and fixture setup
-are excluded; argument copying, runtime validation, and result assignment are
-included. These are end-to-end helper timings, not isolated native-call timings
-or CI performance thresholds. Map key operations use temporary borrowed-key
-hash indexes and preserve ordered output vectors. Value-based comparisons still
-use repeated searches and can take quadratic time: strict value equality
-supports nested collections and identity-based objects/callables.
+The [benchmark guide](../benchmarks/README.md) also covers the Bash comparison,
+interpreter stages, collection helpers, memory lifecycle, tracing collector, and
+HTTP workloads. Benchmark timings are observations, not CI performance thresholds.
 
-The HTTP benchmark driver and workload are described in
-[benchmarks/serve.md](../benchmarks/serve.md). Run benchmarks separately from
-builds and tests to avoid contention.
+Runtime limits and redaction are documented in the
+[standard-library reference](standard-library.md#distribution-and-resource-behavior);
+collector roots and resource ownership are described in
+[architecture](architecture.md#execution-hot-paths-and-limits).

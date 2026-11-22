@@ -3,7 +3,7 @@
 </h1>
 
 <p align="center">
-  A standalone CLI scripting language for files, commands, system utilities, and APIs.<br>
+  A standalone scripting language for files, commands, system utilities, and APIs.<br>
   PHP-inspired syntax · Explicit value conversions · Written in Rust
 </p>
 
@@ -16,10 +16,64 @@
   <a href="examples/README.md">Examples</a>
 </p>
 
-Use `scripta backup.scripta`, `scripta deploy.scripta`, or
-`scripta monitor.scripta`. `.scripta` is the official source extension; `.scta`
-is a shorthand. The `scr` command and `.scr` files remain compatible.
-Scripts start directly with code.
+# Scripta
+
+**The simplicity of PHP. The practicality of shell scripting. Powered by Rust.**
+
+Scripta is a lightweight, standalone scripting language designed to make automation simpler without the complexity of traditional programming environments.
+
+Built in Rust with familiar PHP-inspired syntax, Scripta combines filesystem operations, system commands, HTTP APIs, JSON processing, and built-in SQLite into one practical scripting environment.
+
+Write scripts that are easy to read, simple to maintain, and ready to run—without requiring Python, Node.js, PHP, Docker, or a separate compilation step.
+
+**What can you build with Scripta?**
+
+- **System automation** — Automate repetitive tasks, manage files, execute commands, and monitor system resources.
+- **Server administration** — Create maintenance scripts, scheduled jobs, health checks, and deployment utilities.
+- **CLI tools** — Build custom command-line applications with structured arguments and reusable functions.
+- **API integrations** — Work with HTTPS requests, JSON data, and external services.
+- **Data processing** — Process files, generate reports, and store information using built-in SQLite.
+- **Web utilities** — Generate dashboards, build HTTP-powered tools, and automate web workflows.
+
+### Why Scripta?
+
+Scripta bridges the gap between shell scripts that become difficult to maintain and general-purpose languages that can feel excessive for straightforward automation.
+
+It provides familiar syntax, explicit type conversions, a practical standard library, and a standalone interpreter for macOS, Linux, and Windows.
+
+
+### ~ *SCRIPTA IS STILL IN BETA* ~
+
+Please do not use this in professional use, but only for hobby projects. It is unknown if Scripta will become usable for production use-cases, but I hope so. If you find any bugs please report them in the Issues tab! We are actively looking at them!
+
+## Benchmarks
+
+<!-- BEGIN LANGUAGE BENCHMARKS -->
+Median whole-process wall time in milliseconds; **lower is better**.
+
+| Benchmark | Work size | PHP (ms) | Python (ms) | Scripta (ms) |
+| --- | --- | ---: | ---: | ---: |
+| Numeric loop | 1,000,000 iterations | 48.920 | 109.811 | 402.862 |
+| Recursive Fibonacci | fib(28), no memoization | 62.044 | 101.277 | 435.955 |
+| List pipeline | 2,000 items × 200 passes | 55.045 | 67.289 | 168.773 |
+| String concatenation | 100,000 × 8-byte appends | 825.968 | 44.064 | 42.086 |
+| Dictionary operations | 256 keys; 40,960 updates; 128 copy-removals | 35.898 | 47.739 | 59.385 |
+| Class dispatch | 200,000 method calls | 40.994 | 80.030 | 204.872 |
+| Regex match | 20,000 matches attempted | 35.156 | 67.620 | 21.877 |
+| JSON roundtrip | 20,000 encode/decode pairs | 49.467 | 152.479 | 78.135 |
+| Function calls | 200,000 calls | 39.173 | 55.441 | 140.115 |
+| Startup | Empty script | 32.977 | 34.526 | 6.011 |
+
+Measured locally on ARM64,
+with 15 samples after 3 warmups per workload/runtime.
+Scripta uses an optimized native release build. PHP runs without php.ini,
+with CLI OPcache, PHP JIT, and PCRE JIT disabled; Python runs in isolated mode.
+Timings include startup, parsing, execution, and output validation work inside each script;
+filesystem caches are warm. These workloads compare their implementations and runtime APIs,
+including collection copying and regex compilation/caching; they are not an overall language ranking.
+See the [methodology and reproduction commands](benchmarks/comparison/README.md)
+and [raw samples and environment details](benchmarks/comparison/evidence/macos-arm64-20261122-step8.json).
+<!-- END LANGUAGE BENCHMARKS -->
 
 ## Try Scripta Playground
 
@@ -35,9 +89,6 @@ Standard packages include SQLite, reference documentation, and runnable examples
 See [installation and uninstallation](docs/install.md) for checksum verification
 and PATH setup, and [compatibility](docs/compatibility.md) for target architectures
 and OS baselines.
-
-[Release procedures](docs/releases.md) cover publishing and promotion of existing
-packages without rebuilding.
 
 ## What Scripta provides
 
@@ -353,7 +404,7 @@ cargo install --path crates/scr-cli --target x86_64-pc-windows-msvc --locked
 Restart the terminal if PATH was just updated, then run `scripta version --verbose`.
 For a downloaded binary, follow the [per-user installation steps](docs/install.md)
 instead. The `dist` profile optimizes and strips the executable while preserving
-panic unwinding and overflow checks; see [release procedures](docs/releases.md).
+panic unwinding and overflow checks.
 
 ## Linux server automation
 
@@ -643,8 +694,8 @@ SCR_MAX_STEPS=1000000 SCR_MAX_VALUE_BYTES=8388608 SCR_MAX_SCOPES=1024 scripta ru
 In PowerShell set `$env:SCR_MAX_STEPS = '1000000'` before invoking `scripta`.
 Source files default to an 8 MiB ceiling and value nesting is bounded at 128.
 Optional value/scope budgets are logical limits, not a hard process RSS ceiling.
-See the [performance and safety report](docs/performance.md) and
-[release limitations](docs/releases.md#limitations).
+See [resource behavior](docs/standard-library.md#distribution-and-resource-behavior)
+and [platform compatibility](docs/compatibility.md).
 
 ## Documentation
 
@@ -654,7 +705,7 @@ See the [performance and safety report](docs/performance.md) and
 [Compatibility](docs/compatibility.md) ·
 [Architecture](docs/architecture.md) ·
 [Development](docs/development.md) ·
-[Release procedures](docs/releases.md)
+[Performance](docs/performance.md)
 
 ## License
 

@@ -217,28 +217,14 @@ source. A full workspace build/test also builds `scr-ext-sqlite` as a member,
 even when the CLI uses `--no-default-features`.
 Use `-p scr-cli --no-default-features` to build only the CLI without SQLite.
 
-For a native release, the CLI and packager both default to SQLite. The following
-example runs on macOS ARM64. Set `RELEASE_VERSION` to the workspace version, and use a fresh
-output directory for each packaging run:
+For a native source build, use the corresponding target from the
+[platform guide](compatibility.md). For example, on Apple Silicon:
 
 ```sh
-export MACOSX_DEPLOYMENT_TARGET=15.0
-cargo build -p scr-cli --profile dist --target aarch64-apple-darwin --locked
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- package --binary target/aarch64-apple-darwin/dist/scripta --target aarch64-apple-darwin --out-dir dist/standard
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- verify --archive "dist/standard/scripta-${RELEASE_VERSION}-aarch64-apple-darwin.tar.gz"
-cargo run -p scr-release --locked --target aarch64-apple-darwin -- smoke --archive "dist/standard/scripta-${RELEASE_VERSION}-aarch64-apple-darwin.tar.gz"
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo build -p scr-cli --release --target aarch64-apple-darwin --locked
 ```
 
-On other native hosts, use the corresponding target from the
-[platform guide](compatibility.md). Windows Cargo commands need an explicit
-`--target x86_64-pc-windows-msvc` to retain static-CRT settings. See the
-[release procedure](releases.md#local-native-package-procedure) for complete
-packaging commands.
-
-The archive records its declared extensions and includes the selected dependency
-notices. Smoke validates the executable's extension list against that metadata
-and executes the SQLite example. Custom minimal source builds use
-`--no-default-features` for the CLI and `--features none` for the packager; keep
-those custom archives in separate output directories. Official releases publish
-one SQLite-enabled archive per platform.
-These commands do not publish a release or establish support for untested targets.
+Windows Cargo commands need an explicit `--target x86_64-pc-windows-msvc` to
+retain static-CRT settings. Official downloads include SQLite; custom minimal
+source builds use `--no-default-features`. No separately installed SQLite
+library is required by the downloaded executable.

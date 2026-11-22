@@ -940,3 +940,42 @@ fn strict_helpers_keep_callable_and_object_identity() {
     };
     assert_eq!(values.len(), 2);
 }
+
+#[test]
+fn indexed_script_maps_compose_with_native_remove_merge_and_copy_independence() {
+    let mut runtime = runtime(None);
+    runtime
+        .set_global(
+            "map",
+            Value::Map(
+                (0..256)
+                    .map(|i| (MapKey::Int(i), Value::List(vec![Value::Int(i)])))
+                    .collect(),
+            ),
+        )
+        .unwrap();
+    execute(
+        &mut runtime,
+        r#"
+        $warm = $map[128]; $saved = $map;
+        $map = Map::remove($map, 0);
+        $first = $map[1];
+        $map = Map::merge($map, ["1" => [900], 0 => [800]]);
+        $text = $map["1"]; $int = $map[1];
+        $map[1][] = 999; $old = $saved[1];
+        $keys = Map::keys($map);
+    "#,
+    );
+    assert_eq!(runtime.get_global("first"), Some(&ints(&[1])));
+    assert_eq!(runtime.get_global("text"), Some(&ints(&[900])));
+    assert_eq!(runtime.get_global("int"), Some(&ints(&[1])));
+    assert_eq!(runtime.get_global("old"), Some(&ints(&[1])));
+    let Some(Value::List(keys)) = runtime.get_global("keys") else {
+        panic!()
+    };
+    assert_eq!(keys.first(), Some(&Value::Int(1)));
+    assert_eq!(
+        &keys[keys.len() - 2..],
+        &[Value::String("1".into()), Value::Int(0)]
+    );
+}

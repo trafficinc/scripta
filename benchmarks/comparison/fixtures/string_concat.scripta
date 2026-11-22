@@ -1,0 +1,5 @@
+$text = "";
+for ($i = 0; $i < 100000; $i += 1) {
+    $text = $text . "abcdefgh";
+}
+echo str(len($text)) . ":" . str(int(String::replace($text, "abcdefgh", "") === "")) . "\n";

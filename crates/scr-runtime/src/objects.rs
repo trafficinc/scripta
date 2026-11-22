@@ -5,8 +5,29 @@ use std::{
     collections::HashMap,
 };
 
+// Runtime declarations share method bodies with escaped and direct invocations.
+// Keep the parser's public AST independent of runtime ownership.
+pub(crate) struct ClassDefinition {
+    pub name: scr_ast::Binding,
+    pub parent: Option<TypeAnnotation>,
+    pub interfaces: Vec<TypeAnnotation>,
+    pub fields: Vec<scr_ast::FieldDeclaration>,
+    pub methods: Vec<Rc<scr_ast::FunctionDeclaration>>,
+}
+impl From<&ClassDeclaration> for ClassDefinition {
+    fn from(declaration: &ClassDeclaration) -> Self {
+        Self {
+            name: declaration.name.clone(),
+            parent: declaration.parent.clone(),
+            interfaces: declaration.interfaces.clone(),
+            fields: declaration.fields.clone(),
+            methods: declaration.methods.iter().cloned().map(Rc::new).collect(),
+        }
+    }
+}
+
 pub(crate) struct ScriptClass {
-    pub declaration: ClassDeclaration,
+    pub declaration: ClassDefinition,
     pub is_interface: bool,
     pub builtin: bool,
     pub parent: OnceCell<Option<Rc<ScriptClass>>>,
@@ -64,6 +85,11 @@ impl ScriptClass {
         }
     }
 }
+enum ResolvedProperty {
+    Method(Function),
+    Value(Value),
+}
+
 pub(crate) struct ScriptObject {
     pub class: Rc<ScriptClass>,
     pub scope: usize,
@@ -179,7 +205,7 @@ impl Runtime {
             );
         }
         let class = Rc::new(ScriptClass {
-            declaration: declaration.clone(),
+            declaration: declaration.into(),
             is_interface,
             builtin: false,
             parent: OnceCell::new(),
@@ -473,13 +499,33 @@ impl Runtime {
         Ok(object)
     }
 
-    fn bound_method(
-        &mut self,
-        object: Rc<dyn NativeObject>,
-        class: &Rc<ScriptClass>,
+    fn bound_method(&mut self, function: Function) -> Value {
+        let function = Rc::new(function);
+        self.environments.track_function(&function);
+        Value::Callable(Callable(function))
+    }
+
+    // Resolve before evaluating arguments. Fields (including callable fields)
+    // and native properties retain their ordinary property-access semantics.
+    fn resolve_property(
+        &self,
+        object: &Rc<dyn NativeObject>,
         name: &str,
         span: Span,
-    ) -> Result<Value> {
+    ) -> Result<ResolvedProperty> {
+        let Some(instance) = self.checked_object(object, span)? else {
+            return self
+                .property_result(object.get_property(name), span)
+                .map(ResolvedProperty::Value);
+        };
+        let class = &instance.class;
+        if instance.exception.borrow().is_some() && exceptions::PROPERTIES.contains(&name)
+            || class.fields().any(|(_, f)| f.binding.name == name)
+        {
+            return self
+                .object_field(object, name, span)
+                .map(ResolvedProperty::Value);
+        }
         let class = class.method_owner(name).ok_or_else(|| {
             self.native_error(
                 NativeError::new("PropertyError", format!("unknown method {name}")),
@@ -491,21 +537,57 @@ impl Runtime {
             .methods
             .iter()
             .find(|m| m.name == name)
-            .ok_or_else(|| {
-                self.native_error(
-                    NativeError::new("PropertyError", format!("unknown method {name}")),
-                    span,
-                )
-            })?;
-        let function = Rc::new(Function::User {
-            declaration: declaration.clone(),
+            .expect("resolved method owner");
+        Ok(ResolvedProperty::Method(Function::User {
+            declaration: Rc::clone(declaration),
             environment: class.environment,
             owner: self.identity.clone(),
             source: class.source.clone(),
-            receiver: Some(Value::NativeObject(object)),
-        });
-        self.environments.track_function(&function);
-        Ok(Value::Callable(Callable(function)))
+            receiver: Some(Value::NativeObject(object.clone())),
+        }))
+    }
+
+    pub(super) fn call_property(
+        &mut self,
+        base: &Expr,
+        name: &str,
+        arguments: &[Expr],
+        property_span: Span,
+        call_span: Span,
+        output: &mut dyn ScriptOutput,
+    ) -> Result<Value> {
+        let Value::NativeObject(object) = self.evaluate(base, output)? else {
+            return self.fail("property access requires a native object", property_span);
+        };
+        let function = match self.resolve_property(&object, name, property_span)? {
+            ResolvedProperty::Method(function) => function,
+            ResolvedProperty::Value(callee) => {
+                self.validate_value(&callee, 0, property_span)?;
+                return self.call(callee, arguments, call_span, output);
+            }
+        };
+        // Like a bound callable, a direct method accounts for one Value slot
+        // before argument evaluation, without allocating a callable identity.
+        if self
+            .options
+            .max_value_bytes
+            .is_some_and(|limit| std::mem::size_of::<Value>() > limit)
+        {
+            return self.fail("execution value byte limit exceeded", property_span);
+        }
+        let Function::User { environment, .. } = &function else {
+            unreachable!()
+        };
+        // The receiver remains an external object root via `function`. Its class
+        // environment can differ from an inherited method's lexical environment,
+        // so protect the latter explicitly across argument evaluation and entry.
+        self.environments.temporary_roots.push(*environment);
+        let result = (|| {
+            let values = self.evaluate_arguments(arguments, call_span, output)?;
+            self.call_function(&function, values, call_span, output)
+        })();
+        self.environments.temporary_roots.pop();
+        result
     }
 
     pub(super) fn object_property(
@@ -514,16 +596,10 @@ impl Runtime {
         name: &str,
         span: Span,
     ) -> Result<Value> {
-        if let Some(instance) = self.checked_object(object, span)? {
-            let class = instance.class.clone();
-            if instance.exception.borrow().is_some() && exceptions::PROPERTIES.contains(&name)
-                || class.fields().any(|(_, f)| f.binding.name == name)
-            {
-                return self.object_field(object, name, span);
-            }
-            return self.bound_method(object.clone(), &class, name, span);
+        match self.resolve_property(object, name, span)? {
+            ResolvedProperty::Method(function) => Ok(self.bound_method(function)),
+            ResolvedProperty::Value(value) => Ok(value),
         }
-        self.property_result(object.get_property(name), span)
     }
 
     pub(super) fn object_field(
@@ -828,7 +904,7 @@ impl Runtime {
             };
             if class.method_owner("__construct").is_some() {
                 let Value::Callable(constructor) =
-                    self.bound_method(object.clone(), &class, "__construct", span)?
+                    self.object_property(&object, "__construct", span)?
                 else {
                     unreachable!()
                 };
@@ -849,5 +925,86 @@ impl Runtime {
         })();
         self.stack.pop();
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inherited_direct_methods_protect_lexical_owners_during_arguments_and_unwind() {
+        for grouped in [false, true] {
+            for fail in [false, true] {
+                let mut runtime = Runtime::new();
+                // Model a base class declared by an include in a captured local
+                // scope, then an exception subclass in a different lexical scope.
+                let previous = runtime.environments.enter(0);
+                runtime.execute_source(
+                    "$secret = 42; class Base extends Error { function read($value: int): int { return $secret + $value; } }",
+                    &mut Vec::new(),
+                ).unwrap();
+                let base = runtime
+                    .environments
+                    .scope(runtime.environments.current)
+                    .classes["Base"]
+                    .clone();
+                runtime.environments.leave(previous);
+                runtime
+                    .environments
+                    .scope_mut(0)
+                    .classes
+                    .insert("Base".into(), base);
+                runtime.execute_source(
+                    "class Child extends Base {} $object = new Child(''); $other = new Child(''); $result = 0;",
+                    &mut Vec::new(),
+                ).unwrap();
+                runtime
+                    .register(
+                        "prune",
+                        NativeFunction::reentrant(
+                            NativeSignature::new(vec![], NativeType::Int),
+                            move |context, _| {
+                                let globals = context.runtime.environments.scope_mut(0);
+                                globals.variables.remove("object");
+                                globals.variables.remove("other");
+                                globals.classes.clear();
+                                context.runtime.collect_garbage();
+                                if fail {
+                                    Err(context
+                                        .error(NativeError::new("ProbeError", "argument failed")))
+                                } else {
+                                    Ok(Value::Int(1))
+                                }
+                            },
+                        ),
+                    )
+                    .unwrap();
+                let source = if grouped {
+                    "$result = ($object->read)(($other->read)(prune()));"
+                } else {
+                    "$result = $object->read($other->read(prune()));"
+                };
+                let outcome = runtime.execute_source(source, &mut Vec::new());
+                if fail {
+                    assert!(
+                        outcome
+                            .unwrap_err()
+                            .message
+                            .contains("ProbeError: argument failed")
+                    );
+                    assert_eq!(runtime.get_global("result"), Some(&Value::Int(0)));
+                } else {
+                    outcome.unwrap();
+                    assert_eq!(runtime.get_global("result"), Some(&Value::Int(85)));
+                }
+                assert!(runtime.environments.temporary_roots.is_empty());
+                runtime.collect_garbage();
+                assert_eq!(
+                    runtime.environments.live, 1,
+                    "temporary owners leaked after dispatch"
+                );
+            }
+        }
     }
 }

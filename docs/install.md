@@ -17,7 +17,9 @@ matching checksum entry and stop before extraction if verification fails.
 
 A checksum checks file integrity; obtain both the archive and checksums from a
 trusted release source. Consult that release's notes for signing or notarization
-details. Installation uses per-user paths and ordinary archive tools.
+details. Packages are not publisher-signed or notarized and do not include an
+MSI, PKG, automatic updater, or privileged installer. Installation uses per-user
+paths and ordinary archive tools.
 
 The extracted directory contains the standalone executable, LICENSE, dependency
 notices, examples, runnable playgrounds and their fixtures, reference

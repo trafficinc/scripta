@@ -54,7 +54,7 @@ pub(crate) enum Function {
         function: NativeFunction,
     },
     User {
-        declaration: FunctionDeclaration,
+        declaration: Rc<FunctionDeclaration>,
         receiver: Option<Value>,
         environment: usize,
         owner: Rc<()>,

@@ -1,0 +1,10 @@
+$data = ["name" => "sample", "values" => [1, 2, 3, 4], "meta" => ["ok" => true, "count" => 7]];
+$total = 0;
+for ($i = 0; $i < 20000; $i += 1) {
+    $decoded = Json::decode(Json::encode($data));
+    if ($decoded !== $data) {
+        throw "roundtrip mismatch";
+    }
+    $total += $decoded["meta"]["count"] + $decoded["values"][3];
+}
+echo str($total) . "\n";

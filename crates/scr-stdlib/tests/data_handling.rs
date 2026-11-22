@@ -184,6 +184,115 @@ fn regex_is_small_unicode_aware_and_uses_literal_replacements() {
 }
 
 #[test]
+fn warm_regex_cache_preserves_output_limits_errors_and_failed_assignment() {
+    let slot = std::mem::size_of::<Value>();
+    let mut runtime = runtime(Some(3 * slot));
+    run(
+        &mut runtime,
+        "$result = 'unchanged'; Regex::isMatch('x', '^x');",
+    )
+    .unwrap();
+    // Replacement accounts for the result Value slot as well as its payload.
+    runtime
+        .set_global("input", Value::String("x".repeat(2 * slot)))
+        .unwrap();
+    run(&mut runtime, "$result = Regex::replace($input, '^x', 'x');").unwrap();
+    error(
+        &mut runtime,
+        "$result = Regex::replace($input, '^x', 'xx');",
+        "ResourceLimitError",
+    );
+    assert_eq!(
+        runtime.get_global("result"),
+        Some(&Value::String("x".repeat(2 * slot)))
+    );
+    run(&mut runtime, "$result = 'unchanged';").unwrap();
+    error(
+        &mut runtime,
+        "$result = Regex::findAll('xxx', 'x');",
+        "ResourceLimitError",
+    );
+    for _ in 0..2 {
+        error(
+            &mut runtime,
+            "$result = Regex::isMatch('x', '[');",
+            "RegexError",
+        );
+        assert_eq!(
+            runtime.get_global("result"),
+            Some(&Value::String("unchanged".into()))
+        );
+    }
+}
+
+#[test]
+fn warm_regex_cache_preserves_list_boundary_and_error_locations() {
+    let mut runtime = runtime(Some(3 * std::mem::size_of::<Value>() + 2));
+    run(
+        &mut runtime,
+        "Regex::isMatch('x', 'x'); $result = Regex::findAll('xx', 'x');",
+    )
+    .unwrap();
+    assert_eq!(
+        runtime.get_global("result"),
+        Some(&Value::List(vec![Value::String("x".into()); 2]))
+    );
+    error(
+        &mut runtime,
+        "$result = Regex::findAll('xxx', 'x');",
+        "ResourceLimitError",
+    );
+    assert_eq!(
+        runtime.get_global("result"),
+        Some(&Value::List(vec![Value::String("x".into()); 2]))
+    );
+    run(
+        &mut runtime,
+        "function invalid(): bool { return Regex::isMatch('x', '['); }",
+    )
+    .unwrap();
+    let first = run(&mut runtime, "invalid();").unwrap_err();
+    let repeated = run(&mut runtime, "invalid();").unwrap_err();
+    assert_eq!(first, repeated);
+    assert!(first.message.starts_with("RegexError:"));
+    assert!(!first.trace.is_empty());
+}
+
+#[test]
+fn warm_regex_cache_observes_cancellation() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let cancellation = Arc::new(AtomicBool::new(false));
+    let mut runtime = Runtime::with_options(RuntimeOptions {
+        interrupt_flag: Some(Arc::clone(&cancellation)),
+        ..Default::default()
+    });
+    scr_stdlib::register(&mut runtime).unwrap();
+    run(
+        &mut runtime,
+        "Regex::isMatch('é', '.'); $result = 'unchanged';",
+    )
+    .unwrap();
+    for call in [
+        "Regex::isMatch('é', '.')",
+        "Regex::findAll('é', '.')",
+        "Regex::replace('é', '.', '-')",
+    ] {
+        cancellation.store(true, Ordering::Relaxed);
+        let interrupted = run(&mut runtime, &format!("$result = {call};")).unwrap_err();
+        assert_eq!(interrupted.message, "execution interrupted");
+        assert_eq!(
+            runtime.get_global("result"),
+            Some(&Value::String("unchanged".into()))
+        );
+        cancellation.store(false, Ordering::Relaxed);
+        run(&mut runtime, &format!("{call};")).unwrap();
+    }
+}
+
+#[test]
 fn graphemes_keep_skin_tones_flags_combining_accents_and_zwj_sequences_together() {
     let mut runtime = runtime(None);
     runtime

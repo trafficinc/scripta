@@ -93,7 +93,7 @@ impl Runtime {
         }
         let parent = (name != "Error").then(|| self.builtin_exception_class("Error"));
         let class = Rc::new(ScriptClass {
-            declaration: ClassDeclaration {
+            declaration: (&ClassDeclaration {
                 name: Binding {
                     name: name.into(),
                     span: Span::default(),
@@ -102,7 +102,8 @@ impl Runtime {
                 interfaces: Vec::new(),
                 fields: Vec::new(),
                 methods: Vec::new(),
-            },
+            })
+                .into(),
             is_interface: false,
             builtin: true,
             parent: OnceCell::from(parent),

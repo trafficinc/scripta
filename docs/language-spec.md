@@ -812,7 +812,8 @@ for diagnostic codes, exact formatter policy, exit codes, and parser resource li
 
 Runtime-created values have a maximum nesting depth of 128. Optional per-value
 logical-byte, live-scope, instruction, and source budgets affect resource use, not
-value/coercion semantics. See [performance and safety](performance.md) for
+value/coercion semantics. See
+[resource behavior](standard-library.md#distribution-and-resource-behavior) for
 configuration and current limitations.
 
 

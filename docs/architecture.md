@@ -134,6 +134,23 @@ inside lists/maps, variables, and function bindings. Unreachable captured scopes
 including recursive environment/function cycles, are dropped and slots reused.
 A callable from one runtime cannot execute in another runtime.
 
+Name resolution walks current lexical maps and returns the value with its scope,
+so successful variable/function reads avoid hashing the same name a second time.
+Assignment places borrow names from the live AST; overwriting a variable updates
+its existing map entry, allocating a key only for a new binding. No binding-index
+cache or identifier interner is introduced: includes, shadowing, host injection,
+and isolated-module native fallback continue to observe current scope contents.
+
+Released scope storage is reused through a best-effort runtime-local pool of at
+most 64 empty scopes. A scope is eligible only when the sum of its five map/set
+capacities is at most 32 slots (at most 2,048 retained capacity slots across the
+pool). All values, function/class/alias bindings, module paths, parents, capture
+flags, and function-boundary flags are cleared before pooling. Captured scopes
+are eligible only after tracing proves them unreachable. Oversized scopes and
+pool-allocation failures use ordinary destruction. The pool retains no graph
+roots, does not count as live scopes, and is released with the runtime; these
+capacity bounds are not an exact heap/RSS limit.
+
 A weak user-function registry supports host/evaluator roots without changing the
 public Value API: the collector counts callable references in every arena value,
 then compares those counts with each function's Rc strong count, discounting its
@@ -261,7 +278,11 @@ files, and exclusive publication after a successful transfer.
 CSV combines a bounded, strict record scanner with the Rust `csv` parser/writer.
 File readers retain descriptors and return complete records across line breaks.
 Regex uses a small API backed by Rust's `regex` crate with fixed pattern/compiled
-size limits. Explicit grapheme helpers use `unicode-segmentation`; existing scalar
+size limits. Its native registration closures share a runtime-local LRU cache
+in `scr-stdlib`, bounded to 8 successful compilations and 256 KiB of pattern text.
+The cache retains `Rc<Regex>` values without cloning engine scratch state; failed
+compilations leave the cache unchanged. No backend cache state enters
+`scr-runtime`. Explicit grapheme helpers use `unicode-segmentation`; existing scalar
 length and substring operations are unchanged.
 
 Local loading is a runtime statement. The loader canonicalizes identity, tracks
@@ -297,13 +318,46 @@ original phase category. Parser depth/complexity guards and property tests bound
 common stack-exhaustion paths on malformed source.
 
 
-## Measured execution hot paths and limits
+## Execution hot paths and limits
+
+Scripta executes through its AST evaluator in every feature configuration. The
+evaluated bytecode prototype was removed; there is no engine-selection API or
+bytecode build feature. Native registration and the public Value representation
+retain their existing contracts.
 
 The AST evaluator and owned public Value representation remain. Borrowed index
 traversal avoids cloning an entire variable collection before selecting an item;
 effectful indices retain snapshot evaluation. Discarded assignments move values,
-and pure string concatenation assignments reuse buffers. Indexed writes modify
+and discarded variable-string appends reuse buffers for pure `$s .= suffix`
+and `$s = $s . suffix` forms. Self-concatenation accepts grouping around the
+concat or prefix, but requires that prefix to be exactly the destination variable.
+The suffix is evaluated into an owned value before mutation, so self-reference
+and independent string copies keep their value semantics. Checked byte growth
+and fallible reservation precede the append; errors use the original concat span
+for `=` and target span for `.=`. Used assignment results, effectful suffixes,
+concat chains with a non-variable prefix, indexed targets, and properties retain
+the general snapshot path. No checkpoints are added or removed. Indexed writes modify
 owned roots while explicitly budgeted updates use a transactional candidate.
+Ordered maps keep the public `Value::Map(Vec<(MapKey, Value)>)` representation.
+Core indexed reads and updates compare borrowed typed keys, cloning string keys
+only when inserting a new entry. The first map segment of a variable-rooted
+index path can use runtime-local position hints for maps with 64–4,096 entries.
+Hints own typed keys and positions, retain no values or graph roots, and are
+checked against the actual current vector key before use. Misses always fall
+back to normal lookup; a stale hint cannot establish absence. Whole-variable
+writes, host `set_global`, and destructuring invalidate matching hints. Verification
+also protects against reordered maps and reused scope IDs. Nested segments,
+properties, small/oversized maps, and native helper lookups retain normal lookup.
+
+The hint cache is bounded to 8 indexes, 4,096 indexed positions in total, and
+256 KiB of UTF-8 string-key and variable-name bytes. Reads build indexes lazily;
+writes only use existing hints, avoiding repeated builds during insertion-only
+growth. Allocation failure declines the optimization. A newly built index may
+briefly coexist with the bounded cache before eviction. These limits are not an
+exact process heap cap. Insertion order, independent owned collection copies,
+logical accounting, full validation, and checkpoint/cancellation semantics remain
+unchanged.
+
 No function declaration AST is cloned per call; the registration clone owns data
 that can outlive the caller’s Program. Value validation is iterative and bounded
 at depth 128; map duplicate validation uses typed hashed keys.
@@ -316,7 +370,8 @@ remain roots; opaque native ownership cycles require host cleanup. Collection
 does not enforce an aggregate RSS ceiling. Runtime error redaction is
 separate from script exception values. Process waiters receive monitor completion
 notifications while timeout/cancellation/capture checks remain bounded polling.
-See [measurements and safety details](performance.md).
+See [resource behavior](standard-library.md#distribution-and-resource-behavior)
+for CLI configuration and logical accounting.
 
 ## Web request hosting
 
@@ -552,7 +607,17 @@ The AST includes construction, class declarations, and interface declarations. A
 validation, and formatter layout include class methods and defaults.
 `objects.rs` keeps class/interface metadata (declaration, lexical scope, source,
 owner), caches resolved interface identities after successful conformance checks, creates instance field scopes, enforces class identity and field types,
-and returns receiver-bound user callables. Script instances use the existing
+and returns receiver-bound user callables. Runtime class metadata stores immutable
+method declarations behind `Rc`; escaped bound methods share those declarations
+while retaining distinct callable identities, receivers, lexical owners, and
+source records. Direct property calls resolve script methods before arguments
+and invoke the same call-frame implementation without allocating a temporary
+bound callable or adding it to the weak function registry. Callable fields and
+native properties use ordinary value invocation. A direct invocation retains its
+receiver as an external object root and temporarily roots the declaring method's
+lexical environment across argument evaluation and call entry, including inherited
+methods whose lexical owner differs from the receiver's class. Those temporary
+roots unwind on errors, interruption, and exit. Script instances use the existing
 NativeObject value carrier with an internal checked type; ordinary native object
 APIs remain unchanged. Fields are stored in the tracing arena, not an Rc-owned
 field graph. Weak object tracking and receiver edges extend the collector's

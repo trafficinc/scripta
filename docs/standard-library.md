@@ -225,7 +225,15 @@ patterns raise `RegexError`; patterns are limited to 65,536 UTF-8 bytes, compile
 regex size to 1 MiB, and DFA cache size to 1 MiB. Captures, compiled script objects,
 callbacks, and regex splitting are not exposed. Output growth is checked against
 runtime value limits before each append; cancellation is checked between matches.
-A single native match/compile runs synchronously.
+Successful compilations are shared by these three APIs within each runtime in a
+least-recently-used cache of at most 8 entries and 256 KiB of retained pattern
+text. Invalid patterns are not cached and do not evict successful entries. Cache
+hits still check cancellation and obey the same output limits. Cache storage is
+separate from script value budgets and is released with the registered native
+functions at runtime teardown. The per-regex engine limits are not an exact
+process heap cap; metadata and scratch space add overhead. A cache miss may
+briefly retain one extra compiled regex before eviction. A single native
+match/compile runs synchronously.
 
 ## CSV
 
@@ -1881,13 +1889,29 @@ for tested targets and [installation](install.md) for binary installation.
 RuntimeOptions controls max_source_bytes (default 8 MiB), max_value_bytes,
 max_scopes, instruction_limit, and bounded recursion. CLI equivalents are
 SCR_MAX_SOURCE_BYTES, SCR_MAX_VALUE_BYTES, SCR_MAX_SCOPES, and SCR_MAX_STEPS.
-Except source/value depth, new budgets are opt-in. A logical-value limit is not
+Except source/value depth, budgets are opt-in. A logical-value limit is not
 an aggregate native-object/process heap ceiling. A tracing collector reclaims
 unreachable captured environments during execution and at execution boundaries;
 hosts can also request collection with `Runtime::collect_garbage()`. Host-retained
 callables remain roots, and opaque native ownership cycles require host cleanup.
-Freed storage need not immediately reduce RSS. See [safety details](performance.md)
-for exact accounting and tests.
+Freed storage need not immediately reduce RSS. See
+[execution limits](language-spec.md#output-exit-and-errors) and
+[architecture](architecture.md#execution-hot-paths-and-limits) for runtime behavior.
+
+For example, configure CLI budgets with:
+
+```sh
+SCR_MAX_STEPS=1000000 SCR_MAX_VALUE_BYTES=8388608 SCR_MAX_SCOPES=1024 SCR_MAX_SOURCE_BYTES=1048576 scripta run automation.scripta
+```
+
+Logical bytes count Value slots, UTF-8 string payloads, map-key slots/strings,
+and nested values. Allocator capacity, temporary candidates, source/AST storage,
+opaque native-object internals, and other values can require additional memory.
+Instruction budgets count statement/loop checkpoints, not CPU instructions or
+blocking native work; includes share the enclosing execution budget. Use OS or
+container limits when a hard process memory ceiling is required.
+Runtime lifecycle and limit regressions live in `crates/scr-runtime/tests`;
+native I/O boundaries and failure cleanup are covered in `crates/scr-stdlib/tests`.
 
 Diagnostics mask literal/comment excerpts and redact known credential values;
 ContextOptions.redacted_values adds host-provided values. Script catch values and

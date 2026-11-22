@@ -1,5 +1,10 @@
 # Repeatable interpreter benchmarks
 
+The [PHP/Python/Scripta comparison](comparison/README.md) adds verified numeric,
+recursive, collection, string, object, regex, JSON, call, and startup workloads
+and generates the README and [performance table](../docs/performance.md)
+from saved measurement evidence.
+
 Build and run from the repository root:
 
 ```sh
@@ -43,11 +48,19 @@ The Rust `interpreter` harness emits CSV:
 uses nine fresh runtimes with setup outside the timer. Sharing experiment rows
 instead report one 10,000-operation batch total for owned clone, Rc clone, and
 Rc::make_mut after snapshot. Capture stdout to a new CSV if retaining a local run.
-Baseline rows predate the representation experiment; final rows include it.
+The [current performance table](../docs/performance.md) uses the separate
+PHP/Python/Scripta suite. Performance is not gated on noisy wall-time thresholds;
+correctness and cleanup regressions have deterministic tests.
 
-Actual Phase 13 measurements, platform details, caveats, and the safety audit are
-in [docs/performance.md](../docs/performance.md). Performance is not gated on noisy
-wall-time thresholds; correctness and cleanup regressions have deterministic tests.
+## Collection helpers
+
+Run `cargo bench -p scr-stdlib --bench collections --locked --offline` to compare
+map helpers at 128, 512, and 2048 entries, including mixed integer/string keys.
+The dependency-free harness reports CSV medians from nine measured runs after
+two warmups and checks result lengths. Parsing, registration, and fixture setup
+are excluded; argument copying, runtime validation, and result assignment are
+included. These are end-to-end helper timings. Value-based comparisons support
+nested collections and identity-based objects and can take quadratic time.
 
 ## Long-running memory behavior
 
@@ -172,4 +185,4 @@ Use the matching native target on each host. The driver exercises SQLite, defaul
 password hashing, checked binary transfers, streaming, paced readers, overload,
 recycling, repeated failures/disconnects, RSS sampling, and cleanup. Reports never
 overwrite existing files. Retained local evidence and limitations are in
-[the HTTP measurements](../docs/performance.md#standalone-http-hosting--2026-11-15).
+[the retained HTTP report](evidence/serve-macos-arm64-20261115.json).

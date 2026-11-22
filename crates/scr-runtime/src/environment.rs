@@ -38,11 +38,18 @@ pub(crate) struct Scope {
     pub function_boundary: bool,
 }
 
+// Empty scope storage is a best-effort runtime-local optimization. Bound both
+// the number of spares and their aggregate map/set capacity per spare. Names,
+// values, module paths, class identities, and capture flags are never retained.
+const MAX_SPARE_SCOPES: usize = 64;
+const MAX_SPARE_SCOPE_SLOTS: usize = 32;
+
 /// Owned arena: closures refer to scope IDs, so function/environment cycles
 /// cannot form Rc cycles. Transient scopes are released and their slots reused.
 pub(crate) struct Environments {
     scopes: Vec<Option<Scope>>,
     free: Vec<usize>,
+    spare_scopes: Vec<Scope>,
     // Includes suspended callers, which need not be lexical parents of current.
     active: Vec<usize>,
     functions: Vec<Weak<Function>>,
@@ -53,6 +60,8 @@ pub(crate) struct Environments {
     last_collection: CollectionWork,
     #[cfg(test)]
     collections: usize,
+    // Lexical owners of direct methods awaiting argument evaluation/call entry.
+    pub temporary_roots: Vec<usize>,
     pub current: usize,
     pub live: usize,
     // Successful isolated module instances are roots for this runtime's lifetime.
@@ -64,6 +73,7 @@ impl Default for Environments {
         Self {
             scopes: vec![Some(Scope::default())],
             free: Vec::new(),
+            spare_scopes: Vec::new(),
             active: vec![0],
             functions: Vec::new(),
             objects: Vec::new(),
@@ -73,6 +83,7 @@ impl Default for Environments {
             last_collection: CollectionWork::default(),
             #[cfg(test)]
             collections: 0,
+            temporary_roots: Vec::new(),
             current: 0,
             live: 1,
             module_cache: HashMap::new(),
@@ -89,10 +100,8 @@ impl Environments {
     }
     pub fn enter(&mut self, parent: usize) -> usize {
         self.live += 1;
-        let scope = Scope {
-            parent: Some(parent),
-            ..Scope::default()
-        };
+        let mut scope = self.spare_scopes.pop().unwrap_or_default();
+        scope.parent = Some(parent);
         let id = if let Some(id) = self.free.pop() {
             self.scopes[id] = Some(scope);
             id
@@ -112,10 +121,40 @@ impl Environments {
         self.current = previous;
         if !self.scope(id).captured {
             self.live -= 1;
-            self.scopes[id] = None;
+            let scope = self.scopes[id].take().expect("live lexical scope");
+            Self::recycle_scope(&mut self.spare_scopes, scope);
             self.free.push(id);
         }
     }
+    fn recycle_scope(spares: &mut Vec<Scope>, mut scope: Scope) {
+        let slots = [
+            scope.variables.capacity(),
+            scope.functions.capacity(),
+            scope.classes.capacity(),
+            scope.aliases.capacity(),
+            scope.loaded_modules.capacity(),
+        ]
+        .into_iter()
+        .fold(0usize, usize::saturating_add);
+        if spares.len() >= MAX_SPARE_SCOPES
+            || slots > MAX_SPARE_SCOPE_SLOTS
+            || spares.try_reserve(1).is_err()
+        {
+            return;
+        }
+        // Release all graph edges at the same lifetime boundary as dropping the
+        // original scope. Only empty map allocations and their hash seeds survive.
+        scope.variables.clear();
+        scope.functions.clear();
+        scope.classes.clear();
+        scope.aliases.clear();
+        scope.loaded_modules.clear();
+        scope.parent = None;
+        scope.captured = false;
+        scope.function_boundary = false;
+        spares.push(scope);
+    }
+
     pub fn capture(&mut self) {
         let mut id = Some(self.current);
         while let Some(current) = id {
@@ -189,6 +228,7 @@ impl Environments {
         let mut object_environments = HashMap::new();
         let mut environments = HashMap::new();
         let mut pending = self.active.clone();
+        pending.extend(self.temporary_roots.iter().copied());
         pending.extend(self.module_cache.values().copied());
         for object in &objects {
             let instance = object
@@ -284,7 +324,10 @@ impl Environments {
         let mut reclaimed = 0;
         for (id, scope) in self.scopes.iter_mut().enumerate() {
             if !marked[id] && scope.is_some() {
-                *scope = None;
+                Self::recycle_scope(
+                    &mut self.spare_scopes,
+                    scope.take().expect("unmarked live scope"),
+                );
                 self.free.push(id);
                 self.live -= 1;
                 reclaimed += 1;
@@ -334,6 +377,12 @@ impl Environments {
     }
 
     pub fn find(&self, name: &str, function: bool) -> Option<usize> {
+        self.lookup(name, function).map(|(scope, _)| scope)
+    }
+
+    // Return the value with its scope so readers do not hash the successful name
+    // again. Every lookup observes the current lexical maps; no binding cache.
+    pub fn lookup(&self, name: &str, function: bool) -> Option<(usize, &Value)> {
         let mut id = Some(self.current);
         let mut in_function = false;
         while let Some(current) = id {
@@ -342,12 +391,13 @@ impl Environments {
             }
             let scope = self.scope(current);
             in_function |= scope.function_boundary;
-            if if function {
-                scope.functions.contains_key(name)
+            let value = if function {
+                scope.functions.get(name)
             } else {
-                scope.variables.contains_key(name)
-            } {
-                return Some(current);
+                scope.variables.get(name)
+            };
+            if let Some(value) = value {
+                return Some((current, value));
             }
             id = scope.parent;
         }
@@ -538,5 +588,169 @@ mod tests {
         runtime.set_global("kept", crate::Value::Null).unwrap();
         runtime.collect_garbage();
         assert_eq!(runtime.environments.collection_threshold, 256);
+    }
+
+    #[test]
+    fn direct_method_calls_avoid_temporary_callable_collection_pressure() {
+        let mut measurements = Vec::new();
+        for callee in ["$counter->next", "($counter->next)"] {
+            let mut runtime = crate::Runtime::new();
+            execute(
+                &mut runtime,
+                "class Counter { $value = 0; function next(): int { $this->value += 1; return $this->value; } } $counter = new Counter();",
+            );
+            let before = runtime.environments.collections;
+            execute(
+                &mut runtime,
+                &format!(
+                    "$total = 0; for ($i = 0; $i < 20000; $i += 1) {{ $total += {callee}(); }}"
+                ),
+            );
+            let collections = runtime.environments.collections - before;
+            assert_eq!(
+                runtime.get_global("total"),
+                Some(&crate::Value::Int(200010000))
+            );
+            assert_eq!(runtime.environments.live, 2);
+            assert!(runtime.environments.functions.is_empty());
+            assert!(runtime.environments.temporary_roots.is_empty());
+            eprintln!("{callee}: {collections} collections for 20000 calls");
+            measurements.push(collections);
+        }
+        assert_eq!(
+            measurements[0], 2,
+            "direct calls should collect only at execute boundaries"
+        );
+        assert!(measurements[1] > measurements[0]);
+    }
+
+    #[test]
+    fn spare_scope_storage_drops_values_and_all_binding_namespaces() {
+        use crate::{NativeFunction, NativeSignature, NativeType, Runtime, Value};
+        use std::{path::PathBuf, rc::Rc};
+        let mut runtime = Runtime::new();
+        execute(&mut runtime, "class Local {}");
+        let class = runtime
+            .environments
+            .scope_mut(0)
+            .classes
+            .remove("Local")
+            .unwrap();
+        let class_weak = Rc::downgrade(&class);
+        let callable = Value::native_function(
+            "local",
+            NativeFunction::new(NativeSignature::new(vec![], NativeType::Null), |_, _| {
+                Ok(Value::Null)
+            }),
+        );
+        let Value::Callable(ref function) = callable else {
+            unreachable!()
+        };
+        let function_weak = Rc::downgrade(&function.0);
+        let previous = runtime.environments.enter(0);
+        let scope = runtime.environments.scope_mut(runtime.environments.current);
+        scope
+            .variables
+            .insert("old".into(), Value::String("payload".into()));
+        scope.functions.insert("local".into(), callable);
+        scope.classes.insert("Local".into(), class);
+        scope.aliases.insert(
+            "Alias".into(),
+            super::ModuleAlias {
+                path: PathBuf::from("old.scripta"),
+                scope: 0,
+            },
+        );
+        scope.loaded_modules.insert(PathBuf::from("old.scripta"));
+        scope.function_boundary = true;
+        runtime.environments.leave(previous);
+        assert_eq!(runtime.environments.spare_scopes.len(), 1);
+        assert!(class_weak.upgrade().is_none());
+        assert!(function_weak.upgrade().is_none());
+        let previous = runtime.environments.enter(0);
+        let scope = runtime.environments.scope(runtime.environments.current);
+        assert!(scope.variables.is_empty());
+        assert!(scope.functions.is_empty());
+        assert!(scope.classes.is_empty());
+        assert!(scope.aliases.is_empty());
+        assert!(scope.loaded_modules.is_empty());
+        assert!(!scope.function_boundary);
+        assert!(!scope.captured);
+        assert_eq!(scope.parent, Some(0));
+        runtime.environments.leave(previous);
+    }
+
+    #[test]
+    fn spare_scope_storage_is_bounded_and_skips_oversized_maps() {
+        let mut environments = Environments::default();
+        let mut callers = Vec::new();
+        for _ in 0..=super::MAX_SPARE_SCOPES {
+            callers.push(environments.enter(environments.current));
+        }
+        for caller in callers.into_iter().rev() {
+            environments.leave(caller);
+        }
+        assert_eq!(environments.live, 1);
+        assert_eq!(environments.spare_scopes.len(), super::MAX_SPARE_SCOPES);
+        let mut spares = Vec::new();
+        let scope = super::Scope {
+            variables: std::collections::HashMap::with_capacity(super::MAX_SPARE_SCOPE_SLOTS + 1),
+            ..Default::default()
+        };
+        Environments::recycle_scope(&mut spares, scope);
+        assert!(spares.is_empty());
+        let scope = super::Scope {
+            variables: std::collections::HashMap::with_capacity(1),
+            ..Default::default()
+        };
+        Environments::recycle_scope(&mut spares, scope);
+        assert_eq!(spares.len(), 1);
+        assert!(spares[0].variables.capacity() <= super::MAX_SPARE_SCOPE_SLOTS);
+    }
+
+    #[test]
+    fn borrowed_assignment_names_survive_reentrant_global_map_growth_and_prior_effects() {
+        use crate::{NativeError, NativeFunction, NativeSignature, NativeType, Runtime, Value};
+        for fail in [false, true] {
+            let mut runtime = Runtime::new();
+            execute(&mut runtime, "$target = 0;");
+            runtime
+                .register(
+                    "grow",
+                    NativeFunction::reentrant(
+                        NativeSignature::new(vec![], NativeType::Int),
+                        move |context, _| {
+                            for index in 0..1000 {
+                                context
+                                    .runtime
+                                    .set_global(format!("injected{index}"), Value::Int(index))
+                                    .unwrap();
+                            }
+                            context.runtime.set_global("target", Value::Int(7)).unwrap();
+                            if fail {
+                                Err(context.error(NativeError::new("ProbeError", "after mutation")))
+                            } else {
+                                Ok(Value::Int(42))
+                            }
+                        },
+                    ),
+                )
+                .unwrap();
+            let result = runtime.execute_source("$target = grow();", &mut Vec::new());
+            if fail {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .message
+                        .contains("ProbeError: after mutation")
+                );
+                assert_eq!(runtime.get_global("target"), Some(&Value::Int(7)));
+            } else {
+                result.unwrap();
+                assert_eq!(runtime.get_global("target"), Some(&Value::Int(42)));
+            }
+            assert_eq!(runtime.get_global("injected999"), Some(&Value::Int(999)));
+            execute(&mut runtime, "$target += 1;");
+        }
     }
 }

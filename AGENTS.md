@@ -14,7 +14,6 @@ Use these documents for context, keeping them aligned with code changes:
 - `docs/architecture.md`: crate boundaries and runtime design.
 - `docs/development.md`: development and validation workflows.
 - `docs/writing-extensions.md`: native registration and extension patterns.
-- `docs/releases.md`: packaging and releases.
 
 ## Code ownership
 
@@ -129,14 +128,8 @@ receipts and hashes when updating names.
 
 Keep validation guidance in this file. Do not create GitHub Actions workflows
 unless the user explicitly requests them.
-The authorized release process uses local `scripts/prepare_release.py`, then
-manual Build release candidate and Publish release candidate workflows. Keep
-both workflows manual-only; do not add branch, PR, or tag-push triggers. Building
-must not create tags or releases. Publication requires an explicit successful
-build run ID and derives `v<version>` from that build's source commit; do not
-accept an independently entered tag or silently choose the latest build.
-Reuse the saved validated platform archives and native receipts without rebuilding;
-regenerate only release metadata, evidence packaging, and checksums.
+Keep existing workflow triggers unchanged. Do not publish releases, replace
+published assets, or move tags without an explicit user request.
 Build Linux x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon;
 publish release downloads only after every native test/package job succeeds.
 Keep release downloads compact: exactly four platform packages, all with SQLite,
@@ -182,9 +175,9 @@ Validate natively on the candidate platform baselines when hosts are available:
 - Record the tested revision, compiler, native OS/architecture, and results.
   When native hosts are unavailable, report validation as pending; successful
   local macOS tests do not establish Linux or Windows correctness.
-- Debug tests and lint checks do not establish release support. Follow
-  `docs/releases.md` and the guidance above for dist-profile tests,
-  dependency inspection, archive verification, and extracted-package smoke.
+- Debug tests and lint checks do not establish release support. Native evidence
+  must include dist-profile tests, dependency inspection, archive verification,
+  and extracted-package smoke.
   Update `docs/compatibility.md` only with the required native evidence.
 
 Report what changed, the checks actually run, and any remaining limitations.

@@ -1,0 +1,8 @@
+function increment($value: int): int {
+    return $value + 1;
+}
+$total = 0;
+for ($i = 0; $i < 200000; $i += 1) {
+    $total += increment($i);
+}
+echo str($total) . "\n";

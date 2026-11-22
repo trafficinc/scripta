@@ -6,6 +6,7 @@ mod environment;
 mod error;
 mod exceptions;
 mod invocation;
+mod map_index;
 mod modules;
 mod objects;
 pub use invocation::{ExecutionOutcome, InvocationContext, InvocationError, InvocationResult};
@@ -100,6 +101,7 @@ type Result<T> = std::result::Result<T, Signal>;
 #[derive(Default)]
 pub struct Runtime {
     environments: Environments,
+    map_indexes: std::cell::RefCell<map_index::MapIndexes>,
     exception_classes:
         std::cell::RefCell<std::collections::HashMap<String, Rc<objects::ScriptClass>>>,
     stack: Vec<StackFrame>,
@@ -117,18 +119,18 @@ pub struct Runtime {
 
 /// A resolved assignment target. Index expressions and object receivers are
 /// evaluated once, before the RHS, even for compound assignment.
-enum Root {
+enum Root<'a> {
     Variable {
         scope: usize,
-        name: String,
+        name: &'a str,
     },
     Property {
         object: Rc<dyn NativeObject>,
-        name: String,
+        name: &'a str,
     },
 }
-struct Place {
-    root: Root,
+struct Place<'a> {
+    root: Root<'a>,
     path: Vec<Value>,
     append: bool,
 }
@@ -307,10 +309,9 @@ impl Runtime {
         value
             .measure(0, self.options.max_value_bytes)
             .map_err(|message| *self.error(message, Span::default()))?;
-        self.environments
-            .scope_mut(0)
-            .variables
-            .insert(name.into(), value);
+        let name = name.into();
+        self.map_indexes.get_mut().invalidate(0, &name);
+        self.environments.scope_mut(0).variables.insert(name, value);
         Ok(())
     }
 
@@ -805,10 +806,10 @@ impl Runtime {
                 Ok(Value::String(text))
             }
             ExprKind::Variable(name) => {
-                let Some(scope) = self.environments.find(name, false) else {
+                let Some((_, value)) = self.environments.lookup(name, false) else {
                     return self.fail(format!("undefined variable ${name}"), expr.span);
                 };
-                Ok(self.environments.scope(scope).variables[name].clone())
+                Ok(value.clone())
             }
             ExprKind::Identifier(name) => self.function(name, expr.span),
             ExprKind::Function(declaration) => self.user_function(declaration),
@@ -887,6 +888,9 @@ impl Runtime {
                 self.assignment(target, *op, rhs, true, output)
             }
             ExprKind::Call(callee, args) => {
+                if let ExprKind::PropertyAccess(base, name) = &callee.kind {
+                    return self.call_property(base, name, args, callee.span, expr.span, output);
+                }
                 let callee = self.evaluate(callee, output)?;
                 self.call(callee, args, expr.span, output)
             }
@@ -966,7 +970,7 @@ impl Runtime {
     }
 
     fn function(&self, name: &str, span: Span) -> Result<Value> {
-        let Some(scope) = self.environments.find(name, true) else {
+        let Some((_, value)) = self.environments.lookup(name, true) else {
             // Isolated modules have no caller/global lexical parent. Only host
             // native registrations remain visible across that boundary.
             if let Some(value @ Value::Callable(callable)) =
@@ -978,7 +982,7 @@ impl Runtime {
             }
             return self.fail(format!("undefined function {name}"), span);
         };
-        Ok(self.environments.scope(scope).functions[name].clone())
+        Ok(value.clone())
     }
 
     fn validate_function(&self, declaration: &scr_ast::FunctionDeclaration) -> Result<()> {
@@ -1014,7 +1018,7 @@ impl Runtime {
         self.validate_function(declaration)?;
         self.environments.capture();
         let function = Rc::new(Function::User {
-            declaration: declaration.clone(),
+            declaration: Rc::new(declaration.clone()),
             receiver: None,
             environment: self.environments.current,
             owner: self.identity.clone(),
@@ -1045,17 +1049,30 @@ impl Runtime {
         span: Span,
         output: &mut dyn ScriptOutput,
     ) -> Result<Value> {
+        self.call_function(callable.0.as_ref(), values, span, output)
+    }
+
+    fn call_function(
+        &mut self,
+        function: &Function,
+        values: Vec<Value>,
+        span: Span,
+        output: &mut dyn ScriptOutput,
+    ) -> Result<Value> {
         if self.stack.len().saturating_sub(1)
             >= self.options.recursion_limit.min(MAX_RECURSION_LIMIT)
         {
             return self.fail("maximum call depth exceeded", span);
         }
         self.stack.push(StackFrame {
-            function: callable.name().into(),
+            function: match function {
+                Function::Native { name, .. } => name.clone(),
+                Function::User { declaration, .. } => declaration.name.clone(),
+            },
             source: self.source.clone(),
             span,
         });
-        let result = match callable.0.as_ref() {
+        let result = match function {
             Function::Native { name, function } if function.is_reentrant() => {
                 let mut context = InvocationContext {
                     runtime: self,
@@ -1267,7 +1284,7 @@ impl Runtime {
         Ok(())
     }
 
-    fn place(&mut self, target: &Expr, output: &mut dyn ScriptOutput) -> Result<Place> {
+    fn place<'a>(&mut self, target: &'a Expr, output: &mut dyn ScriptOutput) -> Result<Place<'a>> {
         match &target.kind {
             ExprKind::Grouped(inner) => self.place(inner, output),
             ExprKind::Variable(name) if name == "this" => {
@@ -1279,7 +1296,7 @@ impl Runtime {
                         .environments
                         .find(name, false)
                         .unwrap_or(self.environments.current),
-                    name: name.clone(),
+                    name,
                 },
                 path: Vec::new(),
                 append: false,
@@ -1311,10 +1328,7 @@ impl Runtime {
                     return self.fail("property assignment requires a native object", target.span);
                 };
                 Ok(Place {
-                    root: Root::Property {
-                        object,
-                        name: name.clone(),
-                    },
+                    root: Root::Property { object, name },
                     path: Vec::new(),
                     append: false,
                 })
@@ -1323,7 +1337,7 @@ impl Runtime {
         }
     }
 
-    fn variable_ref<'a>(&'a self, place: &Place, span: Span) -> Result<Option<&'a Value>> {
+    fn variable_ref<'a>(&'a self, place: &Place<'_>, span: Span) -> Result<Option<&'a Value>> {
         let Root::Variable { scope, name } = &place.root else {
             return Ok(None);
         };
@@ -1331,22 +1345,38 @@ impl Runtime {
             .environments
             .scope(*scope)
             .variables
-            .get(name)
+            .get(*name)
             .ok_or_else(|| {
                 Signal::Error(self.error(format!("undefined variable ${name}"), span))
             })?;
-        for key in &place.path {
+        for (depth, key) in place.path.iter().enumerate() {
+            if depth == 0 {
+                if let Value::Map(entries) = value {
+                    if !map_index::eligible_size(entries.len()) {
+                        value = self.operation(ops::index_ref(value, key), span)?;
+                        continue;
+                    }
+                    if let Some(position) = self
+                        .map_indexes
+                        .borrow_mut()
+                        .position(*scope, name, entries, key, true)
+                    {
+                        value = &entries[position].1;
+                        continue;
+                    }
+                }
+            }
             value = self.operation(ops::index_ref(value, key), span)?;
         }
         Ok(Some(value))
     }
-    fn check_place(&self, place: &Place, span: Span) -> Result<()> {
+    fn check_place(&self, place: &Place<'_>, span: Span) -> Result<()> {
         if self.variable_ref(place, span)?.is_none() {
             self.read_place(place, span)?;
         }
         Ok(())
     }
-    fn read_place(&self, place: &Place, span: Span) -> Result<Value> {
+    fn read_place(&self, place: &Place<'_>, span: Span) -> Result<Value> {
         if let Some(value) = self.variable_ref(place, span)? {
             return Ok(value.clone());
         }
@@ -1409,24 +1439,33 @@ impl Runtime {
                 target.span,
             );
         }
-        // Only pure RHS expressions can use the existing string buffer: a call
-        // or assignment could mutate the LHS after its original value was read.
-        if !retain && op == AssignmentOp::Concat && pure(rhs) && place.path.is_empty() {
+        // Only discarded assignments with a pure suffix may reuse a variable's
+        // buffer. Effectful suffixes need the original left-value snapshot.
+        if !retain && place.path.is_empty() && !place.append {
             if let Root::Variable { scope, name } = &place.root {
-                if matches!(
-                    self.environments.scope(*scope).variables.get(name),
-                    Some(Value::String(_))
-                ) {
-                    let value = self.evaluate(rhs, output)?;
+                let append = match op {
+                    AssignmentOp::Concat if pure(rhs) => Some((rhs, target.span)),
+                    AssignmentOp::Assign => self_concat_suffix(rhs, name),
+                    _ => None,
+                };
+                if let Some((suffix, span)) = append.filter(|_| {
+                    matches!(
+                        self.environments.scope(*scope).variables.get(*name),
+                        Some(Value::String(_))
+                    )
+                }) {
+                    // Own the suffix before mutation, including reads of the
+                    // destination itself or of independent string copies.
+                    let value = self.evaluate(suffix, output)?;
                     let Value::String(suffix) = value else {
                         return self.operation(
                             Err(ops::Error::Type(
                                 "concatenation requires two strings; use str(value)",
                             )),
-                            target.span,
+                            span,
                         );
                     };
-                    let Value::String(text) = &self.environments.scope(*scope).variables[name]
+                    let Value::String(text) = &self.environments.scope(*scope).variables[*name]
                     else {
                         unreachable!()
                     };
@@ -1435,32 +1474,38 @@ impl Runtime {
                         .checked_add(suffix.len())
                         .and_then(|n| n.checked_add(std::mem::size_of::<Value>()))
                         .ok_or_else(|| {
-                            Signal::Error(self.error("string size overflow", target.span))
+                            let message = if op == AssignmentOp::Concat {
+                                "string size overflow"
+                            } else if self.options.max_value_bytes.is_some() {
+                                "execution value byte limit exceeded"
+                            } else {
+                                "string allocation failed"
+                            };
+                            Signal::Error(self.error(message, span))
                         })?;
                     if self
                         .options
                         .max_value_bytes
                         .is_some_and(|limit| length > limit)
                     {
-                        return self.fail("execution value byte limit exceeded", target.span);
+                        return self.fail("execution value byte limit exceeded", span);
                     }
                     let Value::String(text) = self
                         .environments
                         .scope_mut(*scope)
                         .variables
-                        .get_mut(name)
+                        .get_mut(*name)
                         .unwrap()
                     else {
                         unreachable!()
                     };
-                    text.try_reserve(suffix.len()).map_err(|_| {
-                        Signal::Error(self.error("string allocation failed", target.span))
-                    })?;
+                    text.try_reserve(suffix.len())
+                        .map_err(|_| Signal::Error(self.error("string allocation failed", span)))?;
                     let Value::String(text) = self
                         .environments
                         .scope_mut(*scope)
                         .variables
-                        .get_mut(name)
+                        .get_mut(*name)
                         .unwrap()
                     else {
                         unreachable!()
@@ -1495,7 +1540,7 @@ impl Runtime {
             Ok(Value::Null)
         }
     }
-    fn write_place(&mut self, place: &Place, replacement: Value, span: Span) -> Result<()> {
+    fn write_place(&mut self, place: &Place<'_>, replacement: Value, span: Span) -> Result<()> {
         self.validate_value(
             &replacement,
             place.path.len() + usize::from(place.append),
@@ -1504,41 +1549,66 @@ impl Runtime {
         match &place.root {
             Root::Variable { scope, name } => {
                 if place.path.is_empty() && !place.append {
-                    self.environments
-                        .scope_mut(*scope)
-                        .variables
-                        .insert(name.clone(), replacement);
+                    self.map_indexes.get_mut().invalidate(*scope, name);
+                    let variables = &mut self.environments.scope_mut(*scope).variables;
+                    if let Some(value) = variables.get_mut(*name) {
+                        *value = replacement;
+                    } else {
+                        variables.insert((*name).into(), replacement);
+                    }
                     return Ok(());
                 }
+                let hint = place.path.first().and_then(|key| {
+                    let Value::Map(entries) =
+                        self.environments.scope(*scope).variables.get(*name)?
+                    else {
+                        return None;
+                    };
+                    if !map_index::eligible_size(entries.len()) {
+                        return None;
+                    }
+                    self.map_indexes
+                        .borrow_mut()
+                        .position(*scope, name, entries, key, false)
+                });
                 if self.options.max_value_bytes.is_some() {
                     // The explicitly configured budget uses a transactional candidate.
                     let mut value = self
                         .environments
                         .scope(*scope)
                         .variables
-                        .get(name)
+                        .get(*name)
                         .unwrap()
                         .clone();
                     self.operation(
-                        ops::set_index(&mut value, &place.path, replacement, place.append),
+                        ops::set_index_with_hint(
+                            &mut value,
+                            &place.path,
+                            replacement,
+                            place.append,
+                            hint,
+                        ),
                         span,
                     )?;
                     self.validate_value(&value, 0, span)?;
-                    self.environments
+                    *self
+                        .environments
                         .scope_mut(*scope)
                         .variables
-                        .insert(name.clone(), value);
+                        .get_mut(*name)
+                        .unwrap() = value;
                     return Ok(());
                 }
-                let result = ops::set_index(
+                let result = ops::set_index_with_hint(
                     self.environments
                         .scope_mut(*scope)
                         .variables
-                        .get_mut(name)
+                        .get_mut(*name)
                         .unwrap(),
                     &place.path,
                     replacement,
                     place.append,
+                    hint,
                 );
                 self.operation(result, span)
             }
@@ -1576,5 +1646,26 @@ fn borrowable(expr: &Expr) -> bool {
         ExprKind::Grouped(e) => borrowable(e),
         ExprKind::IndexAccess(a, b) => borrowable(a) && pure(b),
         _ => false,
+    }
+}
+
+// Parentheses do not alter evaluation. Restrict the prefix to exactly the same
+// variable: flattening chains or inspecting properties could change snapshots,
+// intermediate value budgets, error spans, or user-code evaluation order.
+fn self_concat_suffix<'a>(rhs: &'a Expr, name: &str) -> Option<(&'a Expr, Span)> {
+    fn ungroup(mut expr: &Expr) -> &Expr {
+        while let ExprKind::Grouped(inner) = &expr.kind {
+            expr = inner;
+        }
+        expr
+    }
+    let concat = ungroup(rhs);
+    let ExprKind::Binary(left, BinaryOp::Concat, suffix) = &concat.kind else {
+        return None;
+    };
+    if matches!(&ungroup(left).kind, ExprKind::Variable(prefix) if prefix == name) && pure(suffix) {
+        Some((suffix, concat.span))
+    } else {
+        None
     }
 }

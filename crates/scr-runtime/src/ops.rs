@@ -122,6 +122,21 @@ pub(crate) fn binary(op: BinaryOp, left: Value, right: Value) -> Result<Value> {
     }
 }
 
+pub(crate) fn key_matches(key: &crate::MapKey, value: &Value) -> bool {
+    match (key, value) {
+        (crate::MapKey::Int(a), Value::Int(b)) => a == b,
+        (crate::MapKey::String(a), Value::String(b)) => a == b,
+        _ => false,
+    }
+}
+fn valid_key(key: &Value) -> Result<()> {
+    if matches!(key, Value::Int(_) | Value::String(_)) {
+        Ok(())
+    } else {
+        Err(Error::Type("map keys must be int or string"))
+    }
+}
+
 pub(crate) fn index(value: &Value, key: &Value) -> Result<Value> {
     index_ref(value, key).cloned()
 }
@@ -131,11 +146,10 @@ pub(crate) fn index_ref<'a>(value: &'a Value, key: &Value) -> Result<&'a Value> 
             .get(list_index(key, items.len())?)
             .ok_or(Error::Index("list index out of bounds")),
         Value::Map(entries) => {
-            let key = crate::MapKey::from_value(key.clone())
-                .map_err(|_| Error::Type("map keys must be int or string"))?;
+            valid_key(key)?;
             entries
                 .iter()
-                .find(|(candidate, _)| candidate == &key)
+                .find(|(candidate, _)| key_matches(candidate, key))
                 .map(|(_, value)| value)
                 .ok_or(Error::Index("map key not found"))
         }
@@ -191,12 +205,17 @@ pub(crate) fn set_index(
             set_index(item, rest, replacement, append)
         }
         Value::Map(entries) => {
-            let key = crate::MapKey::from_value(key.clone())
-                .map_err(|_| Error::Type("map keys must be int or string"))?;
-            if let Some((_, item)) = entries.iter_mut().find(|(candidate, _)| candidate == &key) {
+            valid_key(key)?;
+            if let Some((_, item)) = entries
+                .iter_mut()
+                .find(|(candidate, _)| key_matches(candidate, key))
+            {
                 set_index(item, rest, replacement, append)
             } else if rest.is_empty() && !append {
-                entries.push((key, replacement));
+                entries.push((
+                    crate::MapKey::from_value(key.clone()).expect("validated map key"),
+                    replacement,
+                ));
                 Ok(())
             } else {
                 Err(Error::Index("map key not found"))
@@ -204,4 +223,24 @@ pub(crate) fn set_index(
         }
         _ => Err(Error::Type("index assignment requires a list or map")),
     }
+}
+
+pub(crate) fn set_index_with_hint(
+    value: &mut Value,
+    path: &[Value],
+    replacement: Value,
+    append: bool,
+    hint: Option<usize>,
+) -> Result<()> {
+    if let (Some(position), Some((key, rest)), Value::Map(entries)) =
+        (hint, path.split_first(), &mut *value)
+    {
+        if entries
+            .get(position)
+            .is_some_and(|(stored, _)| key_matches(stored, key))
+        {
+            return set_index(&mut entries[position].1, rest, replacement, append);
+        }
+    }
+    set_index(value, path, replacement, append)
 }

@@ -315,6 +315,7 @@ impl Runtime {
             self.validate_value(replacement, 0, span)?;
         }
         for ((scope, name), replacement) in bindings.into_iter().zip(replacements) {
+            self.map_indexes.get_mut().invalidate(scope, &name);
             self.environments
                 .scope_mut(scope)
                 .variables
