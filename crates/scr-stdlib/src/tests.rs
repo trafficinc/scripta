@@ -1,5 +1,27 @@
 use super::*;
 
+fn registered_float(args: &[Value]) -> Result<Value, String> {
+    let mut runtime = Runtime::new();
+    runtime
+        .register("float", NativeFunction::float_conversion())
+        .unwrap();
+    let mut arguments = Vec::new();
+    for (index, value) in args.iter().enumerate() {
+        let name = format!("arg{index}");
+        runtime
+            .set_global(&name, value.clone())
+            .map_err(|error| error.to_string())?;
+        arguments.push(format!("${name}"));
+    }
+    runtime
+        .execute_source(
+            &format!("$result=float({});", arguments.join(",")),
+            &mut Vec::new(),
+        )
+        .map_err(|error| error.message)?;
+    Ok(runtime.get_global("result").unwrap().clone())
+}
+
 #[test]
 fn explicit_scalar_conversions() {
     for (input, expected) in [
@@ -27,7 +49,7 @@ fn explicit_scalar_conversions() {
         (Value::Float(1.5), 1.5),
         (Value::String("1.25e2".into()), 125.0),
     ] {
-        assert_eq!(float_value(&[input]).unwrap(), Value::Float(expected));
+        assert_eq!(registered_float(&[input]).unwrap(), Value::Float(expected));
     }
     for (input, expected) in [
         (Value::Bool(true), true),
@@ -65,7 +87,7 @@ fn invalid_conversions_do_not_coerce_or_truncate() {
         Value::String("1e999".into()),
         Value::List(vec![]),
     ] {
-        assert!(float_value(&[input]).is_err());
+        assert!(registered_float(&[input]).is_err());
     }
     for input in [
         Value::Null,
@@ -84,7 +106,7 @@ fn invalid_conversions_do_not_coerce_or_truncate() {
 
 #[test]
 fn conversion_arity_is_exactly_one() {
-    for convert in [str_value, int_value, float_value, bool_value] {
+    for convert in [str_value, int_value, registered_float, bool_value] {
         assert!(convert(&[]).unwrap_err().contains("exactly one argument"));
         assert!(
             convert(&[Value::Null, Value::Null])

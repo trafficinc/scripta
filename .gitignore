@@ -52,3 +52,7 @@ id_ed25519.*
 
 # Local runtime optimization checklist.
 /docs/temporary-runtime-optimization-plan.md
+/docs/temporary-call-dispatch-plan.md
+
+# Local static type checking checklist.
+/docs/temporary-type-checking-plan.md

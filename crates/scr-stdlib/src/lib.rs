@@ -58,6 +58,7 @@ pub fn register_with_filesystem_policy(
 }
 
 pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> NativeResult<()> {
+    runtime.register_native("float", NativeFunction::float_conversion())?;
     for (name, convert, returns) in [
         (
             "str",
@@ -65,7 +66,6 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
             NativeType::String,
         ),
         ("int", int_value, NativeType::Int),
-        ("float", float_value, NativeType::Float),
         ("bool", bool_value, NativeType::Bool),
     ] {
         runtime.register_native(
@@ -216,27 +216,6 @@ fn int_value(args: &[Value]) -> Result<Value, String> {
         _ => return Err(invalid()),
     };
     Ok(Value::Int(value))
-}
-
-fn float_value(args: &[Value]) -> Result<Value, String> {
-    let invalid = || "invalid conversion to float; expected a finite numeric value".to_string();
-    let value = match argument("float", args)? {
-        Value::Float(value) => *value,
-        Value::Int(value) => *value as f64,
-        Value::Bool(value) => {
-            if *value {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        Value::String(value) => value.parse::<f64>().map_err(|_| invalid())?,
-        _ => return Err(invalid()),
-    };
-    if !value.is_finite() {
-        return Err(invalid());
-    }
-    Ok(Value::Float(value))
 }
 
 fn bool_value(args: &[Value]) -> Result<Value, String> {

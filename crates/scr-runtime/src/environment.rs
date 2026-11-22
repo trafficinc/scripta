@@ -28,7 +28,7 @@ pub(crate) struct ModuleAlias {
 #[derive(Default)]
 pub(crate) struct Scope {
     pub parent: Option<usize>,
-    pub variables: HashMap<String, Value>,
+    pub variables: crate::bindings::Bindings,
     pub functions: HashMap<String, Value>,
     pub classes: HashMap<String, Rc<ScriptClass>>,
     pub aliases: HashMap<String, ModuleAlias>,
@@ -48,6 +48,8 @@ const MAX_SPARE_SCOPE_SLOTS: usize = 32;
 /// cannot form Rc cycles. Transient scopes are released and their slots reused.
 pub(crate) struct Environments {
     scopes: Vec<Option<Scope>>,
+    #[cfg(test)]
+    force_hash: bool,
     free: Vec<usize>,
     spare_scopes: Vec<Scope>,
     // Includes suspended callers, which need not be lexical parents of current.
@@ -72,6 +74,8 @@ impl Default for Environments {
     fn default() -> Self {
         Self {
             scopes: vec![Some(Scope::default())],
+            #[cfg(test)]
+            force_hash: false,
             free: Vec::new(),
             spare_scopes: Vec::new(),
             active: vec![0],
@@ -101,6 +105,10 @@ impl Environments {
     pub fn enter(&mut self, parent: usize) -> usize {
         self.live += 1;
         let mut scope = self.spare_scopes.pop().unwrap_or_default();
+        #[cfg(test)]
+        if self.force_hash {
+            scope.variables.force_hash();
+        }
         scope.parent = Some(parent);
         let id = if let Some(id) = self.free.pop() {
             self.scopes[id] = Some(scope);
@@ -376,26 +384,46 @@ impl Environments {
             .any(|scope| scope.aliases.contains_key(name))
     }
 
-    pub fn find(&self, name: &str, function: bool) -> Option<usize> {
-        self.lookup(name, function).map(|(scope, _)| scope)
+    #[cfg(test)]
+    pub fn force_hash_bindings(&mut self) {
+        self.force_hash = true;
+        for scope in self.scopes.iter_mut().flatten() {
+            scope.variables.force_hash();
+        }
     }
 
-    // Return the value with its scope so readers do not hash the successful name
-    // again. Every lookup observes the current lexical maps; no binding cache.
-    pub fn lookup(&self, name: &str, function: bool) -> Option<(usize, &Value)> {
+    pub fn resolve_variable(&self, name: &str) -> Option<(usize, usize, &Value)> {
         let mut id = Some(self.current);
         let mut in_function = false;
         while let Some(current) = id {
-            if !function && in_function && current == 0 {
+            if in_function && current == 0 {
                 return None;
             }
             let scope = self.scope(current);
             in_function |= scope.function_boundary;
-            let value = if function {
-                scope.functions.get(name)
-            } else {
-                scope.variables.get(name)
-            };
+            if let Some((slot, value)) = scope.variables.resolve(name) {
+                return Some((current, slot, value));
+            }
+            id = scope.parent;
+        }
+        None
+    }
+
+    pub fn find(&self, name: &str, function: bool) -> Option<usize> {
+        self.lookup(name, function).map(|(scope, _)| scope)
+    }
+
+    // Every lookup observes the current lexical stores; no cross-execution hints.
+    pub fn lookup(&self, name: &str, function: bool) -> Option<(usize, &Value)> {
+        if !function {
+            return self
+                .resolve_variable(name)
+                .map(|(scope, _, value)| (scope, value));
+        }
+        let mut id = Some(self.current);
+        while let Some(current) = id {
+            let scope = self.scope(current);
+            let value = scope.functions.get(name);
             if let Some(value) = value {
                 return Some((current, value));
             }
@@ -694,13 +722,14 @@ mod tests {
         assert_eq!(environments.spare_scopes.len(), super::MAX_SPARE_SCOPES);
         let mut spares = Vec::new();
         let scope = super::Scope {
-            variables: std::collections::HashMap::with_capacity(super::MAX_SPARE_SCOPE_SLOTS + 1),
+            variables: std::collections::HashMap::with_capacity(super::MAX_SPARE_SCOPE_SLOTS + 1)
+                .into(),
             ..Default::default()
         };
         Environments::recycle_scope(&mut spares, scope);
         assert!(spares.is_empty());
         let scope = super::Scope {
-            variables: std::collections::HashMap::with_capacity(1),
+            variables: std::collections::HashMap::with_capacity(1).into(),
             ..Default::default()
         };
         Environments::recycle_scope(&mut spares, scope);

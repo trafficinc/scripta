@@ -314,6 +314,7 @@ pub struct NativeFunction {
     signature: NativeSignature,
     callback: Rc<Callback>,
     reentrant: Option<Rc<ReentrantCallback>>,
+    int_to_float: bool,
 }
 impl NativeFunction {
     pub fn new(
@@ -324,8 +325,47 @@ impl NativeFunction {
             signature,
             callback: Rc::new(callback),
             reentrant: None,
+            int_to_float: false,
         }
     }
+    /// The strict language float converter, including finite-value validation.
+    /// Its private identity permits integer conversion in bounded numeric plans.
+    pub fn float_conversion() -> Self {
+        let mut function = Self::new(
+            NativeSignature::new(vec![NativeType::Any], NativeType::Float),
+            |_, args| {
+                let invalid = || {
+                    NativeError::type_error(
+                        "invalid conversion to float; expected a finite numeric value",
+                    )
+                };
+                let value = match &args[0] {
+                    Value::Float(value) => *value,
+                    Value::Int(value) => *value as f64,
+                    Value::Bool(value) => {
+                        if *value {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    }
+                    Value::String(value) => value.parse::<f64>().map_err(|_| invalid())?,
+                    _ => return Err(invalid()),
+                };
+                if !value.is_finite() {
+                    return Err(invalid());
+                }
+                Ok(Value::Float(value))
+            },
+        );
+        function.int_to_float = true;
+        function
+    }
+
+    pub(crate) fn is_float_conversion(&self) -> bool {
+        self.int_to_float
+    }
+
     /// A host callable that may invoke script callbacks without losing their
     /// exception identity, control flow, source, or shared execution budget.
     pub fn reentrant(
@@ -341,6 +381,7 @@ impl NativeFunction {
                 ))
             }),
             reentrant: Some(Rc::new(callback)),
+            int_to_float: false,
         }
     }
     pub(crate) fn is_reentrant(&self) -> bool {

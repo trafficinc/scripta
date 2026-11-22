@@ -60,8 +60,8 @@ class RenderTests(unittest.TestCase):
         self.assertIn("](benchmarks/comparison/README.md)", text)
         self.assertIn("retained locally in ignored benchmark JSON files", text)
         self.assertNotIn(".json)", text)
-        self.assertIn("Measured locally on ARM64", text)
-        for detail in ("test CPU", "test OS", "2026-11-22"):
+        self.assertIn("Measured locally,", text)
+        for detail in ("test CPU", "test OS", "2026-11-22", "ARM64", "arm64"):
             self.assertNotIn(detail, text)
 
     def test_performance_reference_contains_only_the_same_table(self):

@@ -2,9 +2,11 @@
 #![forbid(unsafe_code)]
 
 mod arrays;
+mod bindings;
 mod environment;
 mod error;
 mod exceptions;
+mod float_loop;
 mod integer_loop;
 mod invocation;
 mod map_index;
@@ -113,6 +115,8 @@ pub struct Runtime {
     disable_integer_loops: bool,
     #[cfg(test)]
     integer_loops_executed: usize,
+    #[cfg(test)]
+    float_loops_executed: usize,
     class_resolution_depth: usize,
     error_stream: Option<Box<dyn Write>>,
     input_stream: Option<Box<dyn std::io::BufRead>>,
@@ -128,6 +132,7 @@ enum Root<'a> {
     Variable {
         scope: usize,
         name: &'a str,
+        slot: usize,
     },
     Property {
         object: Rc<dyn NativeObject>,
@@ -590,6 +595,11 @@ impl Runtime {
                     self.expressions(initializer, output)?;
                     if let Some(result) =
                         self.integer_loop(condition, increment, body, statement.span)
+                    {
+                        return result;
+                    }
+                    if let Some(result) =
+                        self.float_loop(condition, increment, body, statement.span)
                     {
                         return result;
                     }
@@ -1300,17 +1310,18 @@ impl Runtime {
             ExprKind::Variable(name) if name == "this" => {
                 self.fail("$this cannot be reassigned", target.span)
             }
-            ExprKind::Variable(name) => Ok(Place {
-                root: Root::Variable {
-                    scope: self
-                        .environments
-                        .find(name, false)
-                        .unwrap_or(self.environments.current),
-                    name,
-                },
-                path: Vec::new(),
-                append: false,
-            }),
+            ExprKind::Variable(name) => {
+                let (scope, slot) = self
+                    .environments
+                    .resolve_variable(name)
+                    .map(|(scope, slot, _)| (scope, slot))
+                    .unwrap_or((self.environments.current, usize::MAX));
+                Ok(Place {
+                    root: Root::Variable { scope, name, slot },
+                    path: Vec::new(),
+                    append: false,
+                })
+            }
             ExprKind::IndexAccess(base, index) => {
                 let mut place = self.place(base, output)?;
                 // Reading the base rejects implicit creation of indexed variables.
@@ -1348,14 +1359,14 @@ impl Runtime {
     }
 
     fn variable_ref<'a>(&'a self, place: &Place<'_>, span: Span) -> Result<Option<&'a Value>> {
-        let Root::Variable { scope, name } = &place.root else {
+        let Root::Variable { scope, name, slot } = &place.root else {
             return Ok(None);
         };
         let mut value = self
             .environments
             .scope(*scope)
             .variables
-            .get(*name)
+            .get_slot(*slot, name)
             .ok_or_else(|| {
                 Signal::Error(self.error(format!("undefined variable ${name}"), span))
             })?;
@@ -1452,7 +1463,7 @@ impl Runtime {
         // Only discarded assignments with a pure suffix may reuse a variable's
         // buffer. Effectful suffixes need the original left-value snapshot.
         if !retain && place.path.is_empty() && !place.append {
-            if let Root::Variable { scope, name } = &place.root {
+            if let Root::Variable { scope, name, slot } = &place.root {
                 let append = match op {
                     AssignmentOp::Concat if pure(rhs) => Some((rhs, target.span)),
                     AssignmentOp::Assign => self_concat_suffix(rhs, name),
@@ -1460,7 +1471,10 @@ impl Runtime {
                 };
                 if let Some((suffix, span)) = append.filter(|_| {
                     matches!(
-                        self.environments.scope(*scope).variables.get(*name),
+                        self.environments
+                            .scope(*scope)
+                            .variables
+                            .get_slot(*slot, name),
                         Some(Value::String(_))
                     )
                 }) {
@@ -1475,7 +1489,12 @@ impl Runtime {
                             span,
                         );
                     };
-                    let Value::String(text) = &self.environments.scope(*scope).variables[*name]
+                    let Value::String(text) = self
+                        .environments
+                        .scope(*scope)
+                        .variables
+                        .get_slot(*slot, name)
+                        .unwrap()
                     else {
                         unreachable!()
                     };
@@ -1504,7 +1523,7 @@ impl Runtime {
                         .environments
                         .scope_mut(*scope)
                         .variables
-                        .get_mut(*name)
+                        .get_slot_mut(*slot, name)
                         .unwrap()
                     else {
                         unreachable!()
@@ -1515,7 +1534,7 @@ impl Runtime {
                         .environments
                         .scope_mut(*scope)
                         .variables
-                        .get_mut(*name)
+                        .get_slot_mut(*slot, name)
                         .unwrap()
                     else {
                         unreachable!()
@@ -1557,11 +1576,11 @@ impl Runtime {
             span,
         )?;
         match &place.root {
-            Root::Variable { scope, name } => {
+            Root::Variable { scope, name, slot } => {
                 if place.path.is_empty() && !place.append {
                     self.map_indexes.get_mut().invalidate(*scope, name);
                     let variables = &mut self.environments.scope_mut(*scope).variables;
-                    if let Some(value) = variables.get_mut(*name) {
+                    if let Some(value) = variables.get_slot_mut(*slot, name) {
                         *value = replacement;
                     } else {
                         variables.insert((*name).into(), replacement);
@@ -1569,8 +1588,11 @@ impl Runtime {
                     return Ok(());
                 }
                 let hint = place.path.first().and_then(|key| {
-                    let Value::Map(entries) =
-                        self.environments.scope(*scope).variables.get(*name)?
+                    let Value::Map(entries) = self
+                        .environments
+                        .scope(*scope)
+                        .variables
+                        .get_slot(*slot, name)?
                     else {
                         return None;
                     };
@@ -1587,7 +1609,7 @@ impl Runtime {
                         .environments
                         .scope(*scope)
                         .variables
-                        .get(*name)
+                        .get_slot(*slot, name)
                         .unwrap()
                         .clone();
                     self.operation(
@@ -1605,7 +1627,7 @@ impl Runtime {
                         .environments
                         .scope_mut(*scope)
                         .variables
-                        .get_mut(*name)
+                        .get_slot_mut(*slot, name)
                         .unwrap() = value;
                     return Ok(());
                 }
@@ -1613,7 +1635,7 @@ impl Runtime {
                     self.environments
                         .scope_mut(*scope)
                         .variables
-                        .get_mut(*name)
+                        .get_slot_mut(*slot, name)
                         .unwrap(),
                     &place.path,
                     replacement,

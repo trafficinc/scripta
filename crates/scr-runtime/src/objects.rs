@@ -755,7 +755,7 @@ impl Runtime {
             let annotation = self.annotation(&field.annotation, &value, span, false);
             self.environments.current = previous;
             annotation?;
-            let values = self.environments.scope(scope).variables.clone();
+            let values = self.environments.scope(scope).variables.clone().into_map();
             let payload = self.object_size(&class, &values, Some((name, &value)), span)?;
             if self.options.max_value_bytes.is_some_and(|limit| {
                 payload
@@ -891,7 +891,7 @@ impl Runtime {
                 let root = self.environments.scope_mut(scope);
                 root.parent = None;
                 root.captured = true;
-                root.variables = values;
+                root.variables = values.into();
                 let object: Rc<dyn NativeObject> = Rc::new(ScriptObject {
                     class: class.clone(),
                     scope,

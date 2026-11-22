@@ -45,7 +45,7 @@ def render(report, methodology_link="benchmarks/comparison/README.md", table_onl
     lines = ["Median whole-process wall time in milliseconds; **lower is better**.", ""] + lines
     lines.extend([
         "",
-        f"Measured locally on {report['machine'].upper()},",
+        "Measured locally,",
         f"with {samples} samples after {report['warmups']} warmups per workload/runtime.",
         "Scripta uses an optimized native release build. PHP runs without php.ini,",
         "with CLI OPcache, PHP JIT, and PCRE JIT disabled; Python runs in isolated mode.",
