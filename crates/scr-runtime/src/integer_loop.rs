@@ -285,14 +285,14 @@ impl Action {
                 statements,
             } => {
                 runtime.checkpoint(*checkpoint)?;
-                let previous = runtime.enter_scope(runtime.environments.current, *scope)?;
+                let previous = runtime.enter_empty_scope(runtime.environments.current, *scope)?;
                 let result = (|| {
                     for statement in statements {
                         statement.execute(slots, runtime)?;
                     }
                     Ok(())
                 })();
-                runtime.environments.leave(previous);
+                runtime.environments.leave_empty(previous);
                 result
             }
             Self::If {
@@ -457,7 +457,7 @@ impl Runtime {
                     break;
                 }
                 self.checkpoint(body.span)?;
-                let previous = self.enter_scope(self.environments.current, block.span)?;
+                let previous = self.enter_empty_scope(self.environments.current, block.span)?;
                 let result = (|| {
                     for assignment in &assignments {
                         self.checkpoint(assignment.checkpoint)?;
@@ -465,7 +465,7 @@ impl Runtime {
                     }
                     Ok(())
                 })();
-                self.environments.leave(previous);
+                self.environments.leave_empty(previous);
                 result?;
                 increment.execute(&mut slots, self)?;
             }

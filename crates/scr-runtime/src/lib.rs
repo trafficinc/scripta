@@ -1501,6 +1501,25 @@ impl Runtime {
         }
         Ok(self.environments.enter(parent))
     }
+    fn enter_empty_scope(&mut self, parent: usize, span: Span) -> Result<usize> {
+        if self
+            .options
+            .max_scopes
+            .is_some_and(|limit| self.environments.live >= limit)
+        {
+            self.collect_garbage();
+        }
+        if self
+            .options
+            .max_scopes
+            .is_some_and(|limit| self.environments.live >= limit)
+        {
+            return Err(Signal::Interrupted(
+                self.error("execution scope limit exceeded", span),
+            ));
+        }
+        Ok(self.environments.enter_empty(parent))
+    }
     fn assignment(
         &mut self,
         target: &Expr,

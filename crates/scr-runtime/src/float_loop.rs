@@ -338,7 +338,7 @@ impl Runtime {
                     break;
                 }
                 self.checkpoint(body.span)?;
-                let previous = self.enter_scope(self.environments.current, block.span)?;
+                let previous = self.enter_empty_scope(self.environments.current, block.span)?;
                 let result = (|| {
                     for assignment in &assignments {
                         self.checkpoint(assignment.checkpoint)?;
@@ -346,7 +346,7 @@ impl Runtime {
                     }
                     Ok(())
                 })();
-                self.environments.leave(previous);
+                self.environments.leave_empty(previous);
                 result?;
                 increment.execute(&mut slots, self)?;
             }

@@ -43,6 +43,7 @@ pub(crate) struct Scope {
 // values, module paths, class identities, and capture flags are never retained.
 const MAX_SPARE_SCOPES: usize = 64;
 const MAX_SPARE_SCOPE_SLOTS: usize = 32;
+const MAX_EMPTY_SCOPES: usize = 8;
 
 /// Owned arena: closures refer to scope IDs, so function/environment cycles
 /// cannot form Rc cycles. Transient scopes are released and their slots reused.
@@ -50,8 +51,13 @@ pub(crate) struct Environments {
     scopes: Vec<Option<Scope>>,
     #[cfg(test)]
     force_hash: bool,
+    #[cfg(test)]
+    pub disable_empty_reuse: bool,
     free: Vec<usize>,
     spare_scopes: Vec<Scope>,
+    // Dormant, proven-empty numeric blocks retain their arena storage, not
+    // lexical parents or Values. They do not count toward live scope limits.
+    empty_scopes: Vec<usize>,
     // Includes suspended callers, which need not be lexical parents of current.
     active: Vec<usize>,
     functions: Vec<Weak<Function>>,
@@ -76,8 +82,11 @@ impl Default for Environments {
             scopes: vec![Some(Scope::default())],
             #[cfg(test)]
             force_hash: false,
+            #[cfg(test)]
+            disable_empty_reuse: false,
             free: Vec::new(),
             spare_scopes: Vec::new(),
+            empty_scopes: Vec::new(),
             active: vec![0],
             functions: Vec::new(),
             objects: Vec::new(),
@@ -133,6 +142,47 @@ impl Environments {
             Self::recycle_scope(&mut self.spare_scopes, scope);
             self.free.push(id);
         }
+    }
+    // Only bounded numeric plans can use these operations: their blocks cannot
+    // declare bindings, capture scopes, or call arbitrary/reentrant code.
+    pub fn enter_empty(&mut self, parent: usize) -> usize {
+        #[cfg(test)]
+        if self.disable_empty_reuse {
+            return self.enter(parent);
+        }
+        let Some(id) = self.empty_scopes.pop() else {
+            return self.enter(parent);
+        };
+        self.scope_mut(id).parent = Some(parent);
+        self.live += 1;
+        let previous = self.current;
+        self.current = id;
+        self.active.push(id);
+        previous
+    }
+
+    pub fn leave_empty(&mut self, previous: usize) {
+        #[cfg(test)]
+        if self.disable_empty_reuse {
+            self.leave(previous);
+            return;
+        }
+        if self.empty_scopes.len() >= MAX_EMPTY_SCOPES {
+            self.leave(previous);
+            return;
+        }
+        let id = self.current;
+        let scope = self.scope_mut(id);
+        debug_assert!(!scope.captured && !scope.function_boundary);
+        debug_assert!(scope.variables.iter().next().is_none());
+        debug_assert!(scope.functions.is_empty() && scope.classes.is_empty());
+        debug_assert!(scope.aliases.is_empty() && scope.loaded_modules.is_empty());
+        scope.parent = None;
+        let active = self.active.pop();
+        debug_assert_eq!(active, Some(id));
+        self.current = previous;
+        self.live -= 1;
+        self.empty_scopes.push(id);
     }
     fn recycle_scope(spares: &mut Vec<Scope>, mut scope: Scope) {
         let slots = [
@@ -236,6 +286,9 @@ impl Environments {
         let mut object_environments = HashMap::new();
         let mut environments = HashMap::new();
         let mut pending = self.active.clone();
+        // Dormant numeric records are empty and have no parent. Keep their
+        // storage reserved without counting them as live lexical scopes.
+        pending.extend(self.empty_scopes.iter().copied());
         pending.extend(self.temporary_roots.iter().copied());
         pending.extend(self.module_cache.values().copied());
         for object in &objects {
@@ -455,6 +508,111 @@ fn visit_values(scope: &Scope, mut visit: impl FnMut(&Value)) {
 #[cfg(test)]
 mod tests {
     use super::Environments;
+
+    #[test]
+    fn numeric_scope_storage_is_bounded_empty_and_survives_collection() {
+        let mut env = Environments::default();
+        let mut previous = Vec::new();
+        for _ in 0..12 {
+            previous.push(env.enter_empty(env.current));
+        }
+        assert_eq!(env.live, 13);
+        for parent in previous.into_iter().rev() {
+            env.collect();
+            env.leave_empty(parent);
+        }
+        assert_eq!(env.live, 1);
+        assert_eq!(env.empty_scopes.len(), super::MAX_EMPTY_SCOPES);
+        for _ in 0..50 {
+            assert_eq!(env.collect(), 0);
+            let previous = env.enter_empty(0);
+            assert_eq!(env.scope(env.current).parent, Some(0));
+            assert_eq!(env.live, 2);
+            env.leave_empty(previous);
+            for id in &env.empty_scopes {
+                let scope = env.scope(*id);
+                assert_eq!(scope.parent, None);
+                assert!(scope.variables.is_empty());
+                assert!(!env.free.contains(id));
+            }
+            assert_eq!(env.live, 1);
+        }
+        let id = env.enter(0);
+        env.scope_mut(env.current)
+            .variables
+            .insert("payload".into(), crate::Value::String("owned".into()));
+        env.leave(id);
+        assert_eq!(env.collect(), 0);
+        assert_eq!(
+            env.scopes.iter().flatten().count(),
+            1 + env.empty_scopes.len()
+        );
+    }
+
+    #[test]
+    fn dormant_numeric_records_do_not_keep_captured_parents_alive() {
+        let mut env = Environments::default();
+        let previous = env.enter(0);
+        let parent = env.current;
+        env.scope_mut(parent).captured = true;
+        let caller = env.enter_empty(parent);
+        env.leave_empty(caller);
+        env.leave(previous);
+        assert_eq!(env.collect(), 1);
+        assert!(env.scopes[parent].is_none());
+        assert_eq!(env.live, 1);
+        let previous = env.enter_empty(0);
+        env.collect();
+        assert_eq!(env.scope(env.current).parent, Some(0));
+        env.leave_empty(previous);
+        assert_eq!(env.live, 1);
+    }
+
+    #[test]
+    fn reused_numeric_blocks_match_original_scope_limits_failures_and_recovery() {
+        use crate::{NativeFunction, Runtime, RuntimeOptions};
+        let sources = [
+            "$total=0;for($i=0;$i<5;$i+=1){if($i>1){{$total+=$i;}}else{$total+=1;}}",
+            "$total=0.0;for($i=0;$i<5;$i+=1){$total+=float($i);}",
+            "$total=0;for($i=0;$i<5;$i+=1){$total+=1;$total/=2-$i;}",
+            "$total=0.0;for($i=0;$i<5;$i+=1){$total+=1.0;$total/=float(2-$i);}",
+        ];
+        for source in sources {
+            for scopes in 0..9 {
+                for instructions in 0..110 {
+                    let options = RuntimeOptions {
+                        max_scopes: Some(scopes),
+                        instruction_limit: Some(instructions),
+                        ..RuntimeOptions::default()
+                    };
+                    let mut fast = Runtime::with_options(options.clone());
+                    let mut old = Runtime::with_options(options);
+                    old.environments.disable_empty_reuse = true;
+                    for runtime in [&mut fast, &mut old] {
+                        runtime
+                            .register("float", NativeFunction::float_conversion())
+                            .unwrap();
+                    }
+                    for text in [source, "$recovered=1;"] {
+                        let mut a = Vec::new();
+                        let mut b = Vec::new();
+                        assert_eq!(
+                            fast.execute_source(text, &mut a),
+                            old.execute_source(text, &mut b),
+                            "{source}; {scopes}/{instructions}"
+                        );
+                        assert_eq!(a, b);
+                        assert_eq!(fast.steps, old.steps);
+                        assert_eq!(fast.environments.live, old.environments.live);
+                        assert_eq!(fast.environments.current, old.environments.current);
+                        for name in ["total", "i", "recovered"] {
+                            assert_eq!(fast.get_global(name), old.get_global(name));
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn transient_scope_slots_are_reused_across_many_batches() {
