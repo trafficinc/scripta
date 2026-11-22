@@ -53,16 +53,16 @@ Median whole-process wall time in milliseconds; **lower is better**.
 
 | Benchmark | Work size | PHP (ms) | Python (ms) | Scripta (ms) |
 | --- | --- | ---: | ---: | ---: |
-| Numeric loop | 1,000,000 iterations | 48.920 | 109.811 | 402.862 |
-| Recursive Fibonacci | fib(28), no memoization | 62.044 | 101.277 | 435.955 |
-| List pipeline | 2,000 items × 200 passes | 55.045 | 67.289 | 168.773 |
-| String concatenation | 100,000 × 8-byte appends | 825.968 | 44.064 | 42.086 |
-| Dictionary operations | 256 keys; 40,960 updates; 128 copy-removals | 35.898 | 47.739 | 59.385 |
-| Class dispatch | 200,000 method calls | 40.994 | 80.030 | 204.872 |
-| Regex match | 20,000 matches attempted | 35.156 | 67.620 | 21.877 |
-| JSON roundtrip | 20,000 encode/decode pairs | 49.467 | 152.479 | 78.135 |
-| Function calls | 200,000 calls | 39.173 | 55.441 | 140.115 |
-| Startup | Empty script | 32.977 | 34.526 | 6.011 |
+| Numeric loop | 1,000,000 iterations | 49.283 | 108.201 | 54.501 |
+| Recursive Fibonacci | fib(28), no memoization | 66.316 | 100.410 | 443.070 |
+| List pipeline | 2,000 items × 200 passes | 60.742 | 67.625 | 173.582 |
+| String concatenation | 100,000 × 8-byte appends | 858.404 | 39.978 | 42.309 |
+| Dictionary operations | 256 keys; 40,960 updates; 128 copy-removals | 37.472 | 44.118 | 59.715 |
+| Class dispatch | 200,000 method calls | 43.696 | 79.444 | 210.665 |
+| Regex match | 20,000 matches attempted | 36.297 | 63.912 | 22.094 |
+| JSON roundtrip | 20,000 encode/decode pairs | 53.478 | 155.062 | 80.211 |
+| Function calls | 200,000 calls | 41.819 | 54.235 | 142.255 |
+| Startup | Empty script | 36.206 | 32.057 | 6.984 |
 
 Measured locally on ARM64,
 with 15 samples after 3 warmups per workload/runtime.
@@ -72,7 +72,7 @@ Timings include startup, parsing, execution, and output validation work inside e
 filesystem caches are warm. These workloads compare their implementations and runtime APIs,
 including collection copying and regex compilation/caching; they are not an overall language ranking.
 See the [methodology and reproduction commands](benchmarks/comparison/README.md)
-and [raw samples and environment details](benchmarks/comparison/evidence/macos-arm64-20261122-step8.json).
+and [raw samples and environment details](benchmarks/comparison/evidence/macos-arm64-20261122-integer-loops.json).
 <!-- END LANGUAGE BENCHMARKS -->
 
 ## Try Scripta Playground

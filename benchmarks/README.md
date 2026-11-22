@@ -184,5 +184,4 @@ python3 -m unittest discover -s benchmarks -p 'test_*.py'
 Use the matching native target on each host. The driver exercises SQLite, default
 password hashing, checked binary transfers, streaming, paced readers, overload,
 recycling, repeated failures/disconnects, RSS sampling, and cleanup. Reports never
-overwrite existing files. Retained local evidence and limitations are in
-[the retained HTTP report](evidence/serve-macos-arm64-20261115.json).
+overwrite existing files.

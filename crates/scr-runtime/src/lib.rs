@@ -5,6 +5,7 @@ mod arrays;
 mod environment;
 mod error;
 mod exceptions;
+mod integer_loop;
 mod invocation;
 mod map_index;
 mod modules;
@@ -108,6 +109,10 @@ pub struct Runtime {
     identity: Rc<()>,
     options: RuntimeOptions,
     steps: u64,
+    #[cfg(test)]
+    disable_integer_loops: bool,
+    #[cfg(test)]
+    integer_loops_executed: usize,
     class_resolution_depth: usize,
     error_stream: Option<Box<dyn Write>>,
     input_stream: Option<Box<dyn std::io::BufRead>>,
@@ -583,6 +588,11 @@ impl Runtime {
                 let previous = self.enter_scope(self.environments.current, statement.span)?;
                 let result = (|| {
                     self.expressions(initializer, output)?;
+                    if let Some(result) =
+                        self.integer_loop(condition, increment, body, statement.span)
+                    {
+                        return result;
+                    }
                     loop {
                         self.checkpoint(statement.span)?;
                         if let Some(value) = self.expressions(condition, output)? {

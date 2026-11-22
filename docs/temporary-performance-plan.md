@@ -130,8 +130,8 @@ live stacks and CPU allocation activity were retained alongside them.
 
 Evidence:
 
-- [Execution observations](../benchmarks/comparison/evidence/step1-execution.json).
-- [Profile summary and raw-capture hashes](../benchmarks/comparison/evidence/step1-profile-summary.json).
+- Execution observations.
+- Profile summary and raw-capture hashes.
 - Raw CPU captures: `target/performance-baselines/step1/cpu/`.
 - Raw peak/live allocation captures and logs:
   `target/performance-baselines/step1/alloc/`.
@@ -221,7 +221,7 @@ maximum cache occupancy or establish an exact heap bound.
 
 Raw observations, binary/source hashes, native capture manifests and hashes,
 host/compiler information, and validation receipts are retained in
-[`step2-regex.json`](../benchmarks/comparison/evidence/step2-regex.json).
+`step2-regex.json`.
 Ignored local binaries (`baseline`, `candidate`), allocation stacks, test logs,
 and the timing reproduction script (`measure.py`) remain under
 `target/performance-baselines/step2/`. The baseline was rebuilt from the unchanged
@@ -334,7 +334,7 @@ it is not an instrumented historical-baseline counter.
 
 Raw observations, binary/source hashes, allocation manifests and stack hashes,
 collector observations, host/compiler information, and validation receipts are in
-[`step3-methods.json`](../benchmarks/comparison/evidence/step3-methods.json).
+`step3-methods.json`.
 The preserved baseline is the Step 2 candidate; its identity matches the Step 2
 evidence. Ignored binaries, raw allocation stacks, test/lint logs, and timing
 reproduction script (`measure.py`) remain in `target/performance-baselines/step3/`.
@@ -453,7 +453,7 @@ end-of-fixture correctness checks, and other copies.
 
 Raw observations, baseline/candidate source and binary hashes, native CPU and
 allocation manifests/stack hashes, compiler/host details, and validation receipts
-are in [`step4-strings.json`](../benchmarks/comparison/evidence/step4-strings.json).
+are in `step4-strings.json`.
 The preserved baseline is the Step 3 candidate, verified against its evidence.
 Ignored binaries, the baseline runtime source snapshot, native stacks, test/lint
 logs, and timing reproduction script (`measure.py`) remain under
@@ -583,7 +583,7 @@ captures measure the resulting change.
 
 Raw timings, baseline/candidate source and binary hashes, allocation manifests and
 stack hashes, pool policy, test-source hashes, compiler/host details, and validation
-receipts are in [`step5-bindings.json`](../benchmarks/comparison/evidence/step5-bindings.json).
+receipts are in `step5-bindings.json`.
 The baseline is the preserved Step 4 candidate, verified against its evidence.
 Ignored binaries, baseline runtime/environment source snapshots, native stacks,
 test/lint logs, and timing reproduction script (`measure.py`) remain under
@@ -696,10 +696,10 @@ Compare binaries within a probe row; work differs by size. Each complete run use
 runtimes. Builds, tests, timing, and allocation profiling ran separately.
 
 The first complete run had wide main-workload timing swings. It is retained at
-[`step6-collections.json`](../benchmarks/comparison/evidence/step6-collections.json).
+`step6-collections.json`.
 A second complete run used identical binaries, fixtures, seed, and sample counts;
 the steadier repeat below is recorded in
-[`step6-collections-repeat.json`](../benchmarks/comparison/evidence/step6-collections-repeat.json).
+`step6-collections-repeat.json`.
 Residual outliers and overlapping ranges remain visible; these are local
 observations rather than speedup guarantees.
 
@@ -906,7 +906,7 @@ overlap in this run (53.171–55.054 versus 56.228–57.945 ms), so that default
 regression requires investigation before integration approval. No claim of
 unchanged default-engine performance is made. All observations and ranges,
 including outliers, are retained in
-[`step7-bytecode.json`](../benchmarks/comparison/evidence/step7-bytecode.json).
+`step7-bytecode.json`.
 
 Entry compile medians range from **1.833 µs** for the empty program to
 **22.333 µs** for the list fixture; these are not whole-program ahead-of-time
@@ -934,7 +934,7 @@ dominated by profiler startup, so they do not establish equal workload peaks.
 Recorded events can omit compacted immediate alloc/free pairs. Instrumented
 heap/VM totals include launch/profiler overhead, are not RSS, and cumulative volume
 is not simultaneous live storage. The allocation report and raw stack hashes are
-in [`step7-allocations.json`](../benchmarks/comparison/evidence/step7-allocations.json).
+in `step7-allocations.json`.
 
 Validation at base revision `4c962c9e939b7f381a770955f42deba25f33f21b` plus these
 working-tree changes, pinned Rust 1.99.1, native `aarch64-apple-darwin`, macOS
@@ -958,7 +958,7 @@ working-tree changes, pinned Rust 1.99.1, native `aarch64-apple-darwin`, macOS
 
 Raw timing/allocation evidence, source/binary/fixture/driver hashes, and a linked
 validation summary are retained in
-[`step7-review.json`](../benchmarks/comparison/evidence/step7-review.json).
+`step7-review.json`.
 Ignored baseline/candidate binaries, pre-change runtime sources, logs, native
 stacks, expected outputs, and validation receipts remain under
 `target/performance-baselines/step7/`. The tracked comparison README documents
@@ -1034,7 +1034,7 @@ common-path changes as well as VM dispatch. Matched-control medians were 53.266 
 54.202 ms for two copies of that identical binary; their spread is not a code
 regression. The rejected AST reference was 56.628 ms but uses the different debug
 information profile and is historical context, not a clean attribution control.
-See [`step8-dictionary-control-matched.json`](../benchmarks/comparison/evidence/step8-dictionary-control-matched.json).
+See `step8-dictionary-control-matched.json`.
 The initial mismatched auxiliary check is also retained as
 `step8-dictionary-control.json`; neither supplies published language tables.
 
@@ -1075,7 +1075,7 @@ Published results: a fresh complete **30-row** PHP/Python/Scripta matrix with
 15 measured samples after 3 warmups per workload/runtime, seed 1729. Every output
 was validated: 450 measured invocations plus 90 warmups. Both README and
 `docs/performance.md` are generated from the single immutable
-[`macos-arm64-20261122-step8.json`](../benchmarks/comparison/evidence/macos-arm64-20261122-step8.json)
+`macos-arm64-20261122-step8.json`
 report. Exact runtime versions, host details, binary/fixture hashes, and every
 sample remain in the raw report; presentation stays generic. No builds, tests,
 other timing runs, or allocation profiling overlapped these measurements.
@@ -1085,7 +1085,7 @@ binary and final AST binary on the same idle host, with 3 warmups and 15 measure
 observations per binary/workload. Its medians below are **not substituted** for
 Scripta times in the independently collected three-language table. Raw samples,
 order, source hashes, original baseline manifest, and the exact driver source
-are in [`step8-before-after.json`](../benchmarks/comparison/evidence/step8-before-after.json).
+are in `step8-before-after.json`.
 
 | Workload | Original CLI median, ms | Final AST CLI median, ms | Median change |
 | --- | ---: | ---: | ---: |
@@ -1123,7 +1123,7 @@ original worker with the final AST worker, in baseline → final order:
 | regex_match | 5,487,261 → 82,545 | 860.9 MB → 7.9 MB | 317 KB → 323 KB | 1 MB → 1 MB |
 
 Raw capture manifests and peak/live stack hashes are retained in
-[`step8-memory.json`](../benchmarks/comparison/evidence/step8-memory.json).
+`step8-memory.json`.
 Recorded events are not exact Rust allocation counts; compacted logs can omit
 immediate pairs. Cumulative volume is not simultaneous live storage; allocated
 heap/VM totals include launch and instrumentation and are not RSS. Rounded 1 MB
@@ -1141,7 +1141,7 @@ scope, clearing values and graph edges. Logical value limits remain distinct
 from retained capacity and process memory; no public owned-collection semantics
 were traded away for these gains.
 
-The [integration evidence](../benchmarks/comparison/evidence/step8-review.json)
+The integration evidence
 links all reports, validation logs/hashes, build manifests, restoration checks,
 and pending platforms. Ignored binaries, native stacks, reproduction scripts,
 source archives and logs remain under `target/performance-baselines/step8/` and
