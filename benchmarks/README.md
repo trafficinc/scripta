@@ -185,3 +185,33 @@ Use the matching native target on each host. The driver exercises SQLite, defaul
 password hashing, checked binary transfers, streaming, paced readers, overload,
 recycling, repeated failures/disconnects, RSS sampling, and cleanup. Reports never
 overwrite existing files.
+
+## Extended performance tests
+
+Requires Python 3.9+ with `sqlite3`, PHP 8+ with SQLite3, and a release Scripta build
+with default SQLite support. From the repository root on Apple Silicon:
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo build -p scr-cli --release --locked --offline --target aarch64-apple-darwin
+python3 -B benchmarks/extended/run.py --scripta target/aarch64-apple-darwin/release/scripta
+```
+
+Use the matching native target/executable on other hosts and omit the macOS
+setting. Run without concurrent builds or tests; the HTTP fixture needs localhost
+socket access. Override runtimes with `--php PATH --python PATH`; add
+`--php-extension sqlite3` if PHP needs that extension loaded under `-n`.
+
+Select cases, extend same-process batches, or save an optional new JSON report:
+
+```sh
+python3 -B benchmarks/extended/run.py --scripta target/aarch64-apple-darwin/release/scripta --workload numeric_calls --workload numeric_bounds --batches 50 --samples 3 --timeout 180 --output target/extended-local.json
+SCRIPTA_BENCH_BINARY=target/aarch64-apple-darwin/release/scripta python3 -B -m unittest discover -s benchmarks/extended -p 'test_*.py'
+```
+
+Use `--help` to list all workloads. Defaults are 5 samples, 1 warmup, 3 batches per
+worker, and 20,000 numeric iterations; override with `--samples`, `--warmups`,
+`--batches`, and `--iterations`. Startup is reported per launch; other timings are
+execution per batch, with throughput and whole-process peak RSS where supported
+(unavailable on Windows). Missing runtimes/extensions produce a partial run and
+nonzero exit. Results are printed only unless `--output` supplies a new path;
+this suite does not update the existing benchmark tables.

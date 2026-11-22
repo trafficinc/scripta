@@ -1,0 +1,147 @@
+function mix($value: int): int {
+    return($value % 97) * 3 + 1;
+}
+function work($case: string, $n: int, $directory: string, $url: string, $python: string): int {
+    if ($case === "numeric_float") {
+        $total = 0.0;
+        for ($i = 0; $i < $n; $i += 1) {
+            $total += float($i % 97) * 0.5;
+        }
+        return int($total * 2.0);
+    }
+    if ($case === "numeric_nested") {
+        $total = 0;
+        $width = $n / 20;
+        if ($width < 1) {
+            $width = 1;
+        }
+        for ($outer = 0; $outer < 20; $outer += 1) {
+            for ($i = 0; $i < $width; $i += 1) {
+                $total +=($outer + $i) % 97;
+            }
+        }
+        return $total;
+    }
+    if ($case === "numeric_bounds") {
+        $total = 0;
+        $bound = $n;
+        for ($i = 0; $i < $bound; $i += 1) {
+            if ($i % 11 === 0) {
+                $bound -= 1;
+            }
+            $total += $i;
+        }
+        return $total;
+    }
+    if ($case === "numeric_calls") {
+        $total = 0;
+        for ($i = 0; $i < $n; $i += 1) {
+            $total += mix($i);
+        }
+        return $total;
+    }
+    if ($case === "files") {
+        $source = File::openLines(Path::join($directory, "input.txt"));
+        $text = "";
+        $count = 0;
+        try {
+            while (($line = File::readLine($source)) !== null) {
+                $text .= String::upper($line) . "\n";
+                $count += 1;
+            }
+        } finally {
+            File::close($source);
+        }
+        $target = Path::join($directory, "output-scripta.txt");
+        File::write($target, $text);
+        return $count * 100000 + len(File::read($target));
+    }
+    if ($case === "csv_json") {
+        $reader = Csv::open(Path::join($directory, "input.csv"));
+        $rows = [];
+        try {
+            while (($row = Csv::readRow($reader)) !== null) {
+                $rows[] = $row;
+            }
+        } finally {
+            Csv::close($reader);
+        }
+        if ($rows[0][1] !== "comma, quote\" and\nline é") {
+            exit(1);
+        }
+        $values = [];
+        foreach ($rows as $row) {
+            $values[] = ["id" => int($row[0]), "name" => $row[1], "value" => int($row[2]) * 3];
+        }
+        $decoded = Json::decode(Json::encode($values));
+        if ($decoded !== $values) {
+            exit(1);
+        }
+        $total = 0;
+        foreach ($decoded as $row) {
+            $total += $row["id"] + $row["value"];
+        }
+        return $total;
+    }
+    if ($case === "subprocess") {
+        $total = 0;
+        for ($i = 0; $i < 3; $i += 1) {
+            $result = Process::run($python, ["-I", Path::join($directory, "child.py")], ["timeoutMs" => 5000]);
+            if (!$result->success || $result->stdout !== "child-ok\n" || $result->stderr !== "") {
+                exit(1);
+            }
+            $total += len($result->stdout);
+        }
+        return $total;
+    }
+    if ($case === "http_stream") {
+        $expected = File::readBytes(Path::join($directory, "payload.bin"));
+        $stream = Stream::open($url, "r", ["timeoutMs" => 5000, "maxBodyBytes" => 65536]);
+        $offset = 0;
+        try {
+            if ($stream->status !== 200) {
+                exit(1);
+            }
+            while (($chunk = Stream::read($stream, 4096)) !== null) {
+                if ($chunk !== Bytes::slice($expected, $offset, len($chunk))) {
+                    exit(1);
+                }
+                $offset += len($chunk);
+            }
+        } finally {
+            Stream::close($stream);
+        }
+        return $offset;
+    }
+    if ($case === "sqlite") {
+        $db = Sqlite::open(":memory:");
+        try {
+            Sqlite::execute($db, "CREATE TABLE items (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)");
+            Sqlite::execute($db, "BEGIN");
+            for ($i = 0; $i < 256; $i += 1) {
+                Sqlite::execute($db, "INSERT INTO items VALUES (?, ?)", [$i, $i % 17]);
+            }
+            Sqlite::execute($db, "COMMIT");
+            $rows = Sqlite::query($db, "SELECT COUNT(*) AS count, SUM(value) AS total FROM items");
+            return $rows[0]["count"] * 10000 + $rows[0]["total"];
+        } finally {
+            Sqlite::close($db);
+        }
+    }
+    exit(2);
+}
+$case = Cli::arg(0);
+$n = int(Cli::arg(1));
+$batches = int(Cli::arg(2));
+$directory = Cli::arg(3);
+$url = Cli::arg(4);
+$python = Cli::arg(5);
+$times = [];
+$checksums = [];
+for ($batch = 0; $batch < $batches; $batch += 1) {
+    $started = Clock::monotonicMs();
+    $checksum = work($case, $n, $directory, $url, $python);
+    $times[] = Clock::monotonicMs() - $started;
+    $checksums[] = $checksum;
+}
+echo Json::encode(["case" => $case, "elapsed_ms" => $times, "checksums" => $checksums]) . "\n";

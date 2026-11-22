@@ -1,0 +1,2 @@
+$db = Sqlite::open(":memory:");
+Sqlite::close($db);
