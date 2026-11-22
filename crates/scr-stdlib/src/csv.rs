@@ -11,7 +11,7 @@ use scr_runtime::{
 use std::{
     cell::RefCell,
     fs::File,
-    io::{self, BufRead, BufReader, Cursor, Read, Write},
+    io::{self, BufRead, BufReader, Cursor, Write},
     mem::size_of,
     rc::Rc,
 };
@@ -69,6 +69,7 @@ struct Records<R> {
     options: Options,
     width: Option<usize>,
     record: usize,
+    parser: Option<csv::Reader<Cursor<Vec<u8>>>>,
 }
 impl<R: BufRead> Records<R> {
     fn next(&mut self, context: &RuntimeContext<'_>) -> NativeResult<Option<Value>> {
@@ -159,17 +160,29 @@ impl<R: BufRead> Records<R> {
         }
         // Prefix a synthetic empty field so csv never strips a field's BOM or
         // omits a blank record. Only the scanner strips the document's initial BOM.
-        let prefix = [self.options.delimiter];
-        let input = prefix.as_slice().chain(raw.as_slice());
-        let mut parser = csv::ReaderBuilder::new()
-            .has_headers(false)
-            .flexible(true)
-            .delimiter(self.options.delimiter)
-            .from_reader(input);
+        raw.try_reserve(1)
+            .map_err(|_| resource("CSV record allocation failed"))?;
+        raw.insert(0, self.options.delimiter);
+        let parser = self.parser.get_or_insert_with(|| {
+            let mut parser = csv::ReaderBuilder::new()
+                .has_headers(false)
+                .flexible(true)
+                .delimiter(self.options.delimiter)
+                .from_reader(Cursor::new(Vec::new()));
+            // The first record is data. Prevent the library's implicit header
+            // cache from retaining a potentially large first row.
+            parser.set_byte_headers(csv::ByteRecord::new());
+            parser
+        });
+        *parser.get_mut() = Cursor::new(raw);
         let mut record = csv::StringRecord::new();
-        parser
-            .read_record(&mut record)
-            .map_err(|e| error(self.record, e))?;
+        let result = parser
+            .seek_raw(io::SeekFrom::Start(0), csv::Position::new())
+            .and_then(|()| parser.read_record(&mut record));
+        // Keep only the parser's fixed buffers/state between records. Release
+        // the scanned input even on decode failure, before constructing Values.
+        *parser.get_mut() = Cursor::new(Vec::new());
+        result.map_err(|e| error(self.record, e))?;
         let count = record.len() - 1;
         if self.width.is_some_and(|width| width != count) {
             return Err(error(
@@ -259,6 +272,7 @@ pub(crate) fn register(runtime: &mut Runtime, policy: FilesystemPolicy) -> Nativ
                     options: options(args.get(1))?,
                     width: None,
                     record: 0,
+                    parser: None,
                 };
                 let mut rows = Vec::new();
                 let mut total = size_of::<Value>();
@@ -363,6 +377,7 @@ pub(crate) fn register(runtime: &mut Runtime, policy: FilesystemPolicy) -> Nativ
                         options,
                         width: None,
                         record: 0,
+                        parser: None,
                     })),
                     owner: open_owner.clone(),
                 })))
@@ -410,4 +425,192 @@ pub(crate) fn register(runtime: &mut Runtime, policy: FilesystemPolicy) -> Nativ
         ),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scr_runtime::ContextOptions;
+    use std::{
+        io::Read,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
+
+    fn with_context<T>(
+        flag: Option<Arc<AtomicBool>>,
+        test: impl FnOnce(&mut RuntimeContext<'_>) -> T,
+    ) -> T {
+        let mut settings = ContextOptions::default();
+        let mut input = Cursor::new(Vec::<u8>::new());
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        test(&mut RuntimeContext {
+            working_directory: &mut settings.working_directory,
+            script_path: None,
+            cli_arguments: &[],
+            environment: &mut settings.environment,
+            input: &mut input,
+            output: &mut output,
+            error: &mut error,
+            runtime_identity: None,
+            cancellation: flag,
+            permissions: &settings.permissions,
+            call_span: Default::default(),
+            max_value_bytes: None,
+        })
+    }
+
+    fn records<R: BufRead>(input: R) -> Records<R> {
+        Records {
+            input,
+            options: Options {
+                delimiter: b',',
+                limit: 1024 * 1024,
+            },
+            width: None,
+            record: 0,
+            parser: None,
+        }
+    }
+
+    fn assert_no_record_retained<R: BufRead>(records: &mut Records<R>) {
+        let parser = records.parser.as_mut().unwrap();
+        assert_eq!(parser.get_ref().get_ref().capacity(), 0);
+        assert!(parser.byte_headers().unwrap().is_empty());
+        assert!(parser.headers().unwrap().is_empty());
+    }
+
+    #[test]
+    fn csv_parser_does_not_retain_a_large_first_record() {
+        with_context(None, |context| {
+            let large = "x".repeat(256 * 1024);
+            let mut reader = records(Cursor::new(format!("{large}\nsmall\n\nlast")));
+            assert_eq!(
+                reader.next(context).unwrap(),
+                Some(Value::List(vec![Value::String(large)]))
+            );
+            assert_no_record_retained(&mut reader);
+            for expected in ["small", "", "last"] {
+                assert_eq!(
+                    reader.next(context).unwrap(),
+                    Some(Value::List(vec![Value::String(expected.into())]))
+                );
+                assert_no_record_retained(&mut reader);
+            }
+            assert_eq!(reader.next(context).unwrap(), None);
+            assert_eq!(reader.next(context).unwrap(), None);
+            assert_no_record_retained(&mut reader);
+        });
+    }
+
+    #[test]
+    fn csv_parser_releases_input_after_a_later_utf8_error() {
+        with_context(None, |context| {
+            let mut reader = records(Cursor::new(b"first\n\xff\nlast\n".to_vec()));
+            assert!(reader.next(context).unwrap().is_some());
+            let error = reader.next(context).unwrap_err();
+            assert_eq!(error.kind, "CsvError");
+            assert!(error.message.contains("record 2"));
+            assert_no_record_retained(&mut reader);
+            assert_eq!(
+                reader.next(context).unwrap(),
+                Some(Value::List(vec![Value::String("last".into())]))
+            );
+            assert_no_record_retained(&mut reader);
+        });
+    }
+
+    struct CancellingInput {
+        input: Cursor<Vec<u8>>,
+        flag: Arc<AtomicBool>,
+    }
+    impl Read for CancellingInput {
+        fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+            self.input.read(output)
+        }
+    }
+    impl BufRead for CancellingInput {
+        fn fill_buf(&mut self) -> io::Result<&[u8]> {
+            self.input.fill_buf()
+        }
+        fn consume(&mut self, amount: usize) {
+            self.input.consume(amount);
+            if self.input.position() >= 9 {
+                self.flag.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+
+    #[test]
+    fn csv_parser_reuse_keeps_scanner_cancellation_checkpoints() {
+        let flag = Arc::new(AtomicBool::new(false));
+        with_context(Some(flag.clone()), |context| {
+            let mut reader = records(CancellingInput {
+                input: Cursor::new(b"first\nsecond\n".to_vec()),
+                flag,
+            });
+            assert!(reader.next(context).unwrap().is_some());
+            assert_no_record_retained(&mut reader);
+            assert_eq!(reader.next(context).unwrap_err().kind, "Interrupted");
+            assert_no_record_retained(&mut reader);
+        });
+    }
+
+    #[test]
+    fn csv_cached_parser_is_released_on_close_error_and_runtime_drop() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("rows.csv");
+        std::fs::write(&path, b"first\n\xff\n").unwrap();
+        let mut runtime = Runtime::new();
+        register(&mut runtime, FilesystemPolicy::default()).unwrap();
+        runtime
+            .set_global("path", Value::String(path.to_str().unwrap().into()))
+            .unwrap();
+        runtime
+            .execute_source(
+                "$r=Csv::open($path);$row=Csv::readRow($r);",
+                &mut Vec::new(),
+            )
+            .unwrap();
+        let Some(Value::NativeObject(object)) = runtime.get_global("r").cloned() else {
+            panic!()
+        };
+        let reader = object.as_any().unwrap().downcast_ref::<Reader>().unwrap();
+        assert!(reader.state.borrow().as_ref().unwrap().parser.is_some());
+        runtime
+            .execute_source("Csv::close($r);", &mut Vec::new())
+            .unwrap();
+        assert!(reader.state.borrow().is_none());
+        runtime
+            .execute_source(
+                "$r=Csv::open($path);$row=Csv::readRow($r);",
+                &mut Vec::new(),
+            )
+            .unwrap();
+        let Some(Value::NativeObject(object)) = runtime.get_global("r").cloned() else {
+            panic!()
+        };
+        let reader = object.as_any().unwrap().downcast_ref::<Reader>().unwrap();
+        assert!(
+            runtime
+                .execute_source("$row=Csv::readRow($r);", &mut Vec::new())
+                .is_err()
+        );
+        assert!(reader.state.borrow().is_none());
+        runtime
+            .execute_source(
+                "$r=Csv::open($path);$row=Csv::readRow($r);",
+                &mut Vec::new(),
+            )
+            .unwrap();
+        let Some(Value::NativeObject(object)) = runtime.get_global("r") else {
+            panic!()
+        };
+        let weak = Rc::downgrade(object);
+        drop(runtime);
+        assert!(weak.upgrade().is_none());
+    }
 }

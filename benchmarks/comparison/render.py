@@ -13,7 +13,7 @@ START = "<!-- BEGIN LANGUAGE BENCHMARKS -->"
 END = "<!-- END LANGUAGE BENCHMARKS -->"
 
 
-def render(report, evidence_link, methodology_link="benchmarks/comparison/README.md", table_only=False):
+def render(report, methodology_link="benchmarks/comparison/README.md", table_only=False):
     if report.get("schema") != 1 or report.get("status") != "complete" or report.get("unavailable"):
         raise ValueError("only a complete comparison can supply the README table")
     samples = report["samples"]
@@ -52,8 +52,8 @@ def render(report, evidence_link, methodology_link="benchmarks/comparison/README
         "Timings include startup, parsing, execution, and output validation work inside each script;",
         "filesystem caches are warm. These workloads compare their implementations and runtime APIs,",
         "including collection copying and regex compilation/caching; they are not an overall language ranking.",
-        f"See the [methodology and reproduction commands]({methodology_link})",
-        f"and [raw samples and environment details]({evidence_link}).", "",
+        f"See the [methodology and reproduction commands]({methodology_link}).",
+        "Raw samples and environment details are retained locally in ignored benchmark JSON files.", "",
     ])
     return "\n".join(lines)
 
@@ -82,15 +82,14 @@ def main():
         if path is None:
             continue
         parent = path.resolve().parent
-        link = Path(os.path.relpath(args.evidence.resolve(), parent)).as_posix()
         methodology = Path(os.path.relpath(Path(__file__).resolve().parent / "README.md", parent)).as_posix()
-        section = render(report, link, methodology, table_only=table_only)
+        section = render(report, methodology, table_only=table_only)
         updates.append((path, replace_section(path.read_bytes(), section)))
     # Validate all destinations before writing either document.
     for path, data in updates:
         path.write_bytes(data)
     if not updates:
-        print(render(report, args.evidence.as_posix()), end="")
+        print(render(report), end="")
 
 
 if __name__ == "__main__":

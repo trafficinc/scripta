@@ -7,5 +7,6 @@ results*
 
 # Keep local measurement/profiling evidence out of Git by default.
 **/evidence/*
-# Published tables link to this retained measurement record.
-!/comparison/evidence/macos-arm64-20261122-integer-loops.json
+
+# Benchmark JSON inputs and outputs remain local, including nested suites.
+*.json

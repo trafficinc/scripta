@@ -34,9 +34,10 @@ and a network connection are not needed to run local scripts after installation.
 Archive extraction/checksum utilities are installation tools, not interpreter
 runtime dependencies.
 
-Developer documentation can link to benchmark harnesses and raw measurements in
-the source repository. Those source-checkout files are not included in the
-binary archive; runnable examples and playground fixtures are included.
+Developer documentation links to benchmark harnesses in the source repository;
+raw benchmark JSON measurements remain local and are ignored by Git. Benchmark
+tooling and measurements are not included in the binary archive; runnable
+examples and playground fixtures are included.
 
 ## Optional local browser playground
 

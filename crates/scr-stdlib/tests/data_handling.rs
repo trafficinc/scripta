@@ -860,3 +860,108 @@ fn csv_readers_cannot_cross_registrations() {
         ]))
     );
 }
+
+#[test]
+fn csv_reused_parser_later_failures_close_and_preserve_assignment() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("later-errors.csv");
+    for newline in [b"\n".as_slice(), b"\r\n".as_slice()] {
+        for tail in [
+            b"\xff".as_slice(),
+            b"wrong,width",
+            b"\"unterminated",
+            b"\"quoted\"junk",
+            b"un\"quoted",
+        ] {
+            let data = [b"first".as_slice(), newline, tail, newline].concat();
+            std::fs::write(&file, data).unwrap();
+            let mut runtime = runtime(None);
+            path(&mut runtime, &file);
+            run(
+                &mut runtime,
+                "$r=Csv::open($path);$first=Csv::readRow($r);$result='unchanged';",
+            )
+            .unwrap();
+            let failure = run(&mut runtime, "$result=Csv::readRow($r);").unwrap_err();
+            assert!(failure.message.starts_with("CsvError:"), "{failure}");
+            assert!(failure.message.contains("record 2"), "{failure}");
+            assert_eq!(
+                runtime.get_global("result"),
+                Some(&Value::String("unchanged".into()))
+            );
+            run(&mut runtime, "$closed=$r->closed;").unwrap();
+            assert_eq!(runtime.get_global("closed"), Some(&Value::Bool(true)));
+            error(&mut runtime, "Csv::readRow($r);", "StreamError");
+        }
+    }
+}
+
+#[test]
+fn csv_reused_parser_obeys_exact_later_record_and_value_limits() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("later-limits.csv");
+    let slot = std::mem::size_of::<Value>();
+    for newline in [b"\n".as_slice(), b"\r\n".as_slice()] {
+        let data = [b"x".as_slice(), newline, b"abc", newline, b"z", newline].concat();
+        std::fs::write(&file, data).unwrap();
+        let exact = 3 + newline.len();
+        let mut runtime = runtime(Some(2048));
+        path(&mut runtime, &file);
+        runtime
+            .set_global("exact", Value::Int(exact as i64))
+            .unwrap();
+        run(&mut runtime, "$r=Csv::open($path,['maxRecordBytes'=>$exact]);$a=Csv::readRow($r);$b=Csv::readRow($r);$c=Csv::readRow($r);$end=Csv::readRow($r);Csv::close($r);").unwrap();
+        assert_eq!(
+            runtime.get_global("b"),
+            Some(&Value::List(vec![Value::String("abc".into())]))
+        );
+        assert_eq!(runtime.get_global("end"), Some(&Value::Null));
+        run(
+            &mut runtime,
+            "$r=Csv::open($path,['maxRecordBytes'=>$exact-1]);$result=Csv::readRow($r);",
+        )
+        .unwrap();
+        error(
+            &mut runtime,
+            "$result=Csv::readRow($r);",
+            "ResourceLimitError",
+        );
+        assert_eq!(
+            runtime.get_global("result"),
+            Some(&Value::List(vec![Value::String("x".into())]))
+        );
+        run(&mut runtime, "$closed=$r->closed;").unwrap();
+        assert_eq!(runtime.get_global("closed"), Some(&Value::Bool(true)));
+
+        for payload_bytes in [2, 3] {
+            let mut bounded = Runtime::with_options(RuntimeOptions {
+                max_value_bytes: Some(slot * 2 + payload_bytes),
+                context: scr_runtime::ContextOptions {
+                    working_directory: directory.path().to_owned(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+            scr_stdlib::register(&mut bounded).unwrap();
+            bounded
+                .set_global("path", Value::String("later-limits.csv".into()))
+                .unwrap();
+            run(&mut bounded, "$r=Csv::open($path);$b=Csv::readRow($r);").unwrap();
+            if payload_bytes == 3 {
+                run(&mut bounded, "$b=Csv::readRow($r);").unwrap();
+                assert_eq!(
+                    bounded.get_global("b"),
+                    Some(&Value::List(vec![Value::String("abc".into())]))
+                );
+            } else {
+                error(&mut bounded, "$b=Csv::readRow($r);", "ResourceLimitError");
+                assert_eq!(
+                    bounded.get_global("b"),
+                    Some(&Value::List(vec![Value::String("x".into())]))
+                );
+                run(&mut bounded, "$closed=$r->closed;").unwrap();
+                assert_eq!(bounded.get_global("closed"), Some(&Value::Bool(true)));
+            }
+        }
+    }
+}

@@ -23,6 +23,8 @@ Windows), and omit `MACOSX_DEPLOYMENT_TARGET`. Omit `--offline` if dependencies
 are not cached. PHP and Python must also be native executables on the same host.
 Use `--php PATH` and `--python PATH` to choose them explicitly. Choose a new
 output filename for every run; the driver never replaces existing evidence.
+All JSON files under `benchmarks/` are ignored by Git. Keep raw measurement and
+profiling reports locally; only rendered Markdown summaries belong in the repository.
 
 The default is 3 warmups followed by 15 measured samples per workload/runtime.
 Languages run sequentially in a seeded, shuffled order for each round. There is

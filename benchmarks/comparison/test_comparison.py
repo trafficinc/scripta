@@ -53,19 +53,21 @@ class RenderTests(unittest.TestCase):
                      "observations_ms": [3.0, 1.0, 2.0], "median_ms": 2.0}
                     for name, label, size, _ in run.WORKLOADS for language in run.LANGUAGES]}
 
-    def test_table_uses_medians_and_links_to_evidence_without_runtime_versions(self):
-        text = render.render(self.report(), "evidence.json")
+    def test_table_uses_medians_without_links_to_local_evidence_or_runtime_versions(self):
+        text = render.render(self.report())
         self.assertIn("| PHP (ms) | Python (ms) | Scripta (ms) |", text)
         self.assertEqual(text.count("| 2.000 | 2.000 | 2.000 |"), len(run.WORKLOADS))
-        self.assertIn("](evidence.json)", text)
+        self.assertIn("](benchmarks/comparison/README.md)", text)
+        self.assertIn("retained locally in ignored benchmark JSON files", text)
+        self.assertNotIn(".json)", text)
         self.assertIn("Measured locally on ARM64", text)
         for detail in ("test CPU", "test OS", "2026-11-22"):
             self.assertNotIn(detail, text)
 
     def test_performance_reference_contains_only_the_same_table(self):
         report = self.report()
-        summary = render.render(report, "evidence.json")
-        table = render.render(report, "evidence.json", table_only=True)
+        summary = render.render(report)
+        table = render.render(report, table_only=True)
         self.assertEqual(table.splitlines(), [line for line in summary.splitlines() if line.startswith("|")])
 
     def test_cli_updates_both_documents_and_validates_before_writing(self):
@@ -82,9 +84,11 @@ class RenderTests(unittest.TestCase):
             args = ["render.py", str(evidence), "--readme", str(readme), "--performance", str(performance)]
             with patch.object(sys, "argv", args):
                 render.main()
-            self.assertIn("](evidence.json)", readme.read_text())
+            self.assertNotIn("](evidence.json)", readme.read_text())
+            self.assertIn("retained locally", readme.read_text())
+            self.assertEqual(json.loads(evidence.read_text()), self.report())
             expected = render.replace_section(original.replace(b"\n", b"\r\n"),
-                                              render.render(self.report(), "", table_only=True))
+                                              render.render(self.report(), table_only=True))
             self.assertEqual(performance.read_bytes(), expected)
             # An invalid second destination must leave the first untouched.
             readme.write_bytes(original)
@@ -103,7 +107,7 @@ class RenderTests(unittest.TestCase):
         report = self.report(); report["results"][0]["median_ms"] = 99; cases.append(report)
         for report in cases:
             with self.subTest(report=report), self.assertRaises(ValueError):
-                render.render(report, "evidence.json")
+                render.render(report)
 
     def test_readme_updates_preserve_lf_and_crlf_bytes(self):
         for newline in (b"\n", b"\r\n"):
