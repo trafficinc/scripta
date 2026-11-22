@@ -1,1 +1,11 @@
+# Locally retained benchmark executables.
 *-scr
+*-scripta
+
+# Generated results throughout the benchmark suites.
+results*
+
+# Keep local measurement/profiling evidence out of Git by default.
+**/evidence/*
+# Published tables link to this retained measurement record.
+!/comparison/evidence/macos-arm64-20261122-integer-loops.json
