@@ -91,6 +91,15 @@ impl ScriptClass {
         }
     }
 }
+struct FieldSize {
+    bytes: usize,
+    has_handles: bool,
+}
+enum FieldValues<'a> {
+    Pending(&'a HashMap<String, Value>),
+    Live(usize),
+}
+
 enum ResolvedProperty {
     Method(Function),
     Value(Value),
@@ -100,6 +109,9 @@ pub(crate) struct ScriptObject {
     pub class: Rc<ScriptClass>,
     pub scope: usize,
     pub(super) payload: Cell<usize>,
+    // Sticky: shared/native handles can expose counts during host measurement.
+    // Exceptions also retain snapshots for hidden fields/diagnostic ownership.
+    pub(super) requires_snapshot: Cell<bool>,
     pub exception: RefCell<Option<exceptions::ExceptionData>>,
 }
 impl std::fmt::Debug for ScriptObject {
@@ -644,7 +656,12 @@ impl Runtime {
     }
 
     // Object references occupy handles, rather than recursively expanding cycles.
-    fn field_measure(&self, value: &Value, depth: usize, span: Span) -> Result<usize> {
+    fn field_measure<const TRACK_HANDLES: bool>(
+        &self,
+        value: &Value,
+        depth: usize,
+        span: Span,
+    ) -> Result<FieldSize> {
         if self
             .options
             .interrupt_flag
@@ -659,21 +676,34 @@ impl Runtime {
             return self.fail("value nesting exceeds 128 levels", span);
         }
         let mut bytes = std::mem::size_of::<Value>();
+        let mut has_handles = false;
         let add = |left: usize, right: usize| {
             left.checked_add(right)
                 .ok_or_else(|| Signal::Error(self.error("object size overflow", span)))
         };
         match value {
             Value::String(value) => bytes = add(bytes, value.len())?,
-            Value::Bytes(value) => bytes = add(bytes, value.len())?,
-            Value::NativeObject(value)
-                if value.as_any().is_none_or(|o| !o.is::<ScriptObject>()) =>
-            {
-                bytes = add(bytes, value.payload_bytes())?
+            Value::Bytes(value) => {
+                if TRACK_HANDLES {
+                    has_handles = true;
+                }
+                bytes = add(bytes, value.len())?;
+            }
+            Value::NativeObject(value) => {
+                if TRACK_HANDLES {
+                    has_handles = true;
+                }
+                if value.as_any().is_none_or(|o| !o.is::<ScriptObject>()) {
+                    bytes = add(bytes, value.payload_bytes())?;
+                }
             }
             Value::List(values) => {
                 for value in values {
-                    bytes = add(bytes, self.field_measure(value, depth + 1, span)?)?;
+                    let size = self.field_measure::<TRACK_HANDLES>(value, depth + 1, span)?;
+                    bytes = add(bytes, size.bytes)?;
+                    if TRACK_HANDLES {
+                        has_handles |= size.has_handles;
+                    }
                 }
             }
             Value::Map(values) => {
@@ -682,7 +712,11 @@ impl Runtime {
                     if let MapKey::String(key) = key {
                         bytes = add(bytes, key.len())?;
                     }
-                    bytes = add(bytes, self.field_measure(value, depth + 1, span)?)?;
+                    let size = self.field_measure::<TRACK_HANDLES>(value, depth + 1, span)?;
+                    bytes = add(bytes, size.bytes)?;
+                    if TRACK_HANDLES {
+                        has_handles |= size.has_handles;
+                    }
                 }
             }
             _ => {}
@@ -694,31 +728,45 @@ impl Runtime {
         {
             return self.fail("execution value byte limit exceeded", span);
         }
-        Ok(bytes)
+        Ok(FieldSize { bytes, has_handles })
     }
 
-    fn object_size(
+    fn object_size<const TRACK_HANDLES: bool>(
         &mut self,
         class: &ScriptClass,
-        values: &HashMap<String, Value>,
+        values: FieldValues<'_>,
         replacement: Option<(&str, &Value)>,
         span: Span,
-    ) -> Result<usize> {
+    ) -> Result<FieldSize> {
         let mut bytes = std::mem::size_of::<Value>();
+        let mut has_handles = false;
         for (_, field) in class.fields() {
             self.checkpoint(span)?;
             let value = replacement
                 .filter(|(name, _)| *name == field.binding.name)
                 .map(|(_, v)| v)
-                .or_else(|| values.get(&field.binding.name));
+                .or_else(|| match &values {
+                    FieldValues::Pending(values) => values.get(&field.binding.name),
+                    FieldValues::Live(scope) => self
+                        .environments
+                        .scope(*scope)
+                        .variables
+                        .get(&field.binding.name),
+                });
             let size = if let Some(value) = value {
-                self.field_measure(value, 1, span)?
+                self.field_measure::<TRACK_HANDLES>(value, 1, span)?
             } else {
-                std::mem::size_of::<Value>()
+                FieldSize {
+                    bytes: std::mem::size_of::<Value>(),
+                    has_handles: false,
+                }
             };
+            if TRACK_HANDLES {
+                has_handles |= size.has_handles;
+            }
             bytes = bytes
                 .checked_add(field.binding.name.len())
-                .and_then(|n| n.checked_add(size))
+                .and_then(|n| n.checked_add(size.bytes))
                 .ok_or_else(|| Signal::Error(self.error("object size overflow", span)))?;
             if self
                 .options
@@ -728,7 +776,10 @@ impl Runtime {
                 return self.fail("execution value byte limit exceeded", span);
             }
         }
-        Ok(bytes - std::mem::size_of::<Value>())
+        Ok(FieldSize {
+            bytes: bytes - std::mem::size_of::<Value>(),
+            has_handles,
+        })
     }
 
     pub(super) fn set_object_field(
@@ -761,8 +812,29 @@ impl Runtime {
             let annotation = self.annotation(&field.annotation, &value, span, false);
             self.environments.current = previous;
             annotation?;
-            let values = self.environments.scope(scope).variables.clone().into_map();
-            let payload = self.object_size(&class, &values, Some((name, &value)), span)?;
+            let track_handles = !instance.requires_snapshot.get();
+            let snapshot = !track_handles;
+            #[cfg(test)]
+            let snapshot = snapshot || self.force_field_snapshot;
+            let values =
+                snapshot.then(|| self.environments.scope(scope).variables.clone().into_map());
+            let fields = match &values {
+                Some(values) => FieldValues::Pending(values),
+                None => FieldValues::Live(scope),
+            };
+            // No stored-value borrow crosses a checkpoint: object_size reborrows
+            // after it, and the receiver remains a collector root throughout.
+            let measured = if track_handles {
+                self.object_size::<true>(&class, fields, Some((name, &value)), span)?
+            } else {
+                self.object_size::<false>(
+                    &class,
+                    FieldValues::Pending(values.as_ref().expect("shared handles retain snapshot")),
+                    Some((name, &value)),
+                    span,
+                )?
+            };
+            let payload = measured.bytes;
             if self.options.max_value_bytes.is_some_and(|limit| {
                 payload
                     .saturating_add(
@@ -787,6 +859,9 @@ impl Runtime {
                 .variables
                 .insert(name.into(), value);
             instance.payload.set(payload);
+            if measured.has_handles {
+                instance.requires_snapshot.set(true);
+            }
             return Ok(());
         }
         self.property_result(object.set_property(name, value), span)
@@ -836,7 +911,8 @@ impl Runtime {
             let defaults = (|| {
                 let mut values = HashMap::new();
                 let mut measured = self
-                    .object_size(&class, &values, None, span)?
+                    .object_size::<true>(&class, FieldValues::Pending(&values), None, span)?
+                    .bytes
                     .checked_add(std::mem::size_of::<Value>())
                     .ok_or_else(|| Signal::Error(self.error("object size overflow", span)))?;
                 for (owner, field) in class.fields() {
@@ -852,8 +928,8 @@ impl Runtime {
                     };
                     if let Some(value) = value {
                         self.annotation(&field.annotation, &value, span, false)?;
-                        let extra =
-                            self.field_measure(&value, 1, span)? - std::mem::size_of::<Value>();
+                        let extra = self.field_measure::<false>(&value, 1, span)?.bytes
+                            - std::mem::size_of::<Value>();
                         measured = measured.checked_add(extra).ok_or_else(|| {
                             Signal::Error(self.error("object size overflow", span))
                         })?;
@@ -875,7 +951,9 @@ impl Runtime {
             self.environments.current = previous;
             self.source = previous_source;
             let values = defaults?;
-            let payload = self.object_size(&class, &values, None, span)?;
+            let measured =
+                self.object_size::<true>(&class, FieldValues::Pending(&values), None, span)?;
+            let payload = measured.bytes;
             let object: Rc<dyn NativeObject> = if class.is_exception() {
                 let Value::NativeObject(object) =
                     self.construct_exception(class.clone(), arguments.clone(), span)?
@@ -905,6 +983,7 @@ impl Runtime {
                     class: class.clone(),
                     scope,
                     payload: Cell::new(payload),
+                    requires_snapshot: Cell::new(measured.has_handles),
                     exception: RefCell::new(None),
                 });
                 self.environments.track_object(&object);

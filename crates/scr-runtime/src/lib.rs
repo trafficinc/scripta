@@ -8,6 +8,8 @@ mod call_reuse_tests;
 mod environment;
 mod error;
 mod exceptions;
+#[cfg(test)]
+mod field_update_tests;
 mod float_loop;
 mod integer_loop;
 mod invocation;
@@ -115,6 +117,8 @@ pub struct Runtime {
     argument_buffers: Vec<Vec<Value>>,
     #[cfg(test)]
     disable_call_reuse: bool,
+    #[cfg(test)]
+    force_field_snapshot: bool,
     identity: Rc<()>,
     options: RuntimeOptions,
     steps: u64,

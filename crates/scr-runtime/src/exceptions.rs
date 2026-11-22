@@ -226,6 +226,7 @@ impl Runtime {
             class,
             scope,
             payload: Cell::new(0),
+            requires_snapshot: Cell::new(true),
             exception: RefCell::new(Some(data)),
         });
         self.environments.track_object(&object);
