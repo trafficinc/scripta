@@ -9,6 +9,9 @@ mod block_scope_tests;
 mod call_reuse_tests;
 #[cfg(test)]
 mod call_setup_tests;
+mod copy_validation;
+#[cfg(test)]
+mod copy_validation_tests;
 mod environment;
 mod error;
 mod exceptions;
@@ -173,6 +176,10 @@ pub struct Runtime {
     #[cfg(test)]
     numeric_call_loops_executed: usize,
     class_resolution_depth: usize,
+    #[cfg(test)]
+    disable_copy_validation: bool,
+    #[cfg(test)]
+    copy_validations_executed: usize,
     error_stream: Option<Box<dyn Write>>,
     input_stream: Option<Box<dyn std::io::BufRead>>,
     source: Option<Arc<SourceFile>>,
@@ -607,7 +614,19 @@ impl Runtime {
             }
             StatementKind::Expression(expr) => {
                 if let ExprKind::Assignment(target, op, rhs) = &expr.kind {
-                    self.assignment(target, *op, rhs, false, output)?;
+                    #[cfg(test)]
+                    let enabled = !self.disable_copy_validation;
+                    #[cfg(not(test))]
+                    let enabled = true;
+                    if enabled
+                        && *op == AssignmentOp::Assign
+                        && matches!(&target.kind, ExprKind::Variable(_))
+                        && matches!(&rhs.kind, ExprKind::Variable(_))
+                    {
+                        copy_validation::assignment(self, target, rhs, output)?;
+                    } else {
+                        self.assignment(target, *op, rhs, false, output)?;
+                    }
                 } else {
                     self.evaluate(expr, output)?;
                 }
