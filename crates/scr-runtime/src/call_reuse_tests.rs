@@ -292,6 +292,8 @@ fn shared_frames_release_with_callable_but_diagnostic_snapshots_remain_owned() {
 #[test]
 fn buffer_pool_is_bounded_and_discards_oversized_allocations() {
     let mut runtime = Runtime::new();
+    // Exercise ordinary argument pooling independently of prepared recursion.
+    runtime.disable_prepared_calls = true;
     runtime
         .execute_source(
             "function recurse($n){if($n>0){return recurse($n-1);}return 0;}$x=recurse(24);",

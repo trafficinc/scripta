@@ -35,6 +35,7 @@ mod numeric_call;
 mod numeric_call_loop;
 mod ops;
 mod output;
+mod prepared_call;
 pub use output::{OutputAction, ScriptOutput};
 mod value;
 
@@ -171,6 +172,10 @@ pub struct Runtime {
     numeric_parameter_scopes_reused: usize,
     #[cfg(test)]
     numeric_calls_executed: usize,
+    #[cfg(test)]
+    disable_prepared_calls: bool,
+    #[cfg(test)]
+    prepared_calls_executed: usize,
     #[cfg(test)]
     disable_numeric_call_loops: bool,
     #[cfg(test)]
@@ -1290,6 +1295,9 @@ impl Runtime {
                     }
                     if receiver.is_none() && self.options.max_value_bytes.is_none() {
                         if let Some(result) = self.numeric_call(declaration, values) {
+                            return result;
+                        }
+                        if let Some(result) = self.prepared_call(function, declaration, values) {
                             return result;
                         }
                     }

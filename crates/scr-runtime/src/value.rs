@@ -55,6 +55,7 @@ pub(crate) struct UserDeclaration {
     pub variadic: bool,
     pub numeric_call: std::cell::OnceCell<Option<Box<crate::numeric_call::Plan>>>,
     pub numeric_seen: std::cell::Cell<bool>,
+    pub prepared_call: std::cell::OnceCell<Option<Box<crate::prepared_call::Plan>>>,
     parameter_names: std::cell::OnceCell<Box<[Rc<String>]>>,
     receiver_name: std::cell::OnceCell<Rc<String>>,
 }
@@ -69,6 +70,7 @@ impl UserDeclaration {
             variadic: ast.parameters.last().is_some_and(|p| p.variadic),
             numeric_call: std::cell::OnceCell::new(),
             numeric_seen: std::cell::Cell::new(false),
+            prepared_call: std::cell::OnceCell::new(),
             parameter_names: std::cell::OnceCell::new(),
             receiver_name: std::cell::OnceCell::new(),
             ast,

@@ -81,6 +81,9 @@ reused call storage, small binding slots, verified map-position hints, numeric
 plans, indexed construction of large map literals, guarded list-copy validation,
 and buffer reuse. General evaluation handles unsupported cases. These paths
 preserve value semantics, diagnostics, checkpoints, and failed assignments.
+Bounded plans execute eligible global integer self-recursion with explicit frames
+and a shared scalar stack. Base cases, unsupported functions, and configured
+scope/value budgets retain ordinary evaluation.
 
 Small parameter scopes share immutable names with function declarations, falling
 back to ordinary bindings when needed. Successful built-in type checks avoid
