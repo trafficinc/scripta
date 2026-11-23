@@ -109,6 +109,7 @@ impl Runtime {
             parent: OnceCell::from(parent),
             resolving: Cell::new(false),
             interfaces: OnceCell::from(Vec::new()),
+            method_cache: crate::method_cache::MethodCache::default(),
             environment: 0,
             owner: self.identity.clone(),
             source: None,

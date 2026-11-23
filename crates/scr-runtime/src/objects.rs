@@ -39,11 +39,30 @@ pub(crate) struct ScriptClass {
     pub parent: OnceCell<Option<Rc<ScriptClass>>>,
     pub resolving: Cell<bool>,
     pub interfaces: OnceCell<Vec<Rc<ScriptClass>>>,
+    pub method_cache: crate::method_cache::MethodCache,
     pub environment: usize,
     pub owner: Rc<()>,
     pub source: Option<Arc<SourceFile>>,
 }
 impl ScriptClass {
+    fn cached_method(
+        &self,
+        name: &str,
+        span: Span,
+    ) -> Option<(&Self, &Rc<value::UserDeclaration>)> {
+        let hint = self.method_cache.hint(span)?;
+        let mut owner = self;
+        for _ in 0..hint.depth {
+            owner = owner.parent.get().and_then(Option::as_deref)?;
+        }
+        let declaration = owner.declaration.methods.get(hint.method)?;
+        if declaration.name != name {
+            return None;
+        }
+        self.method_cache.hit();
+        Some((owner, declaration))
+    }
+
     pub fn is_a(&self, class: &Rc<Self>) -> bool {
         std::ptr::eq(self, class.as_ref())
             || self
@@ -239,6 +258,7 @@ impl Runtime {
             parent: OnceCell::new(),
             resolving: Cell::new(false),
             interfaces: OnceCell::new(),
+            method_cache: crate::method_cache::MethodCache::default(),
             environment: self.environments.current,
             owner: self.identity.clone(),
             source: self.source.clone(),
@@ -540,6 +560,7 @@ impl Runtime {
         object: &Rc<dyn NativeObject>,
         name: &str,
         span: Span,
+        cache: bool,
     ) -> Result<ResolvedProperty> {
         let Some(instance) = self.checked_object(object, span)? else {
             return self
@@ -547,30 +568,60 @@ impl Runtime {
                 .map(ResolvedProperty::Value);
         };
         let class = &instance.class;
-        if instance.exception.borrow().is_some() && exceptions::PROPERTIES.contains(&name)
-            || class.fields().any(|(_, f)| f.binding.name == name)
-        {
+        if instance.exception.borrow().is_some() && exceptions::PROPERTIES.contains(&name) {
             return self
                 .object_field(object, name, span)
                 .map(ResolvedProperty::Value);
         }
-        let class = class.method_owner(name).ok_or_else(|| {
-            self.native_error(
-                NativeError::new("PropertyError", format!("unknown method {name}")),
-                span,
-            )
-        })?;
-        let declaration = class
-            .declaration
-            .methods
-            .iter()
-            .find(|m| m.name == name)
-            .expect("resolved method owner");
+        let cache = cache && class.method_cache.enabled(span);
+        #[cfg(test)]
+        let cache = cache && !self.disable_method_cache;
+        let cached = cache.then(|| class.cached_method(name, span)).flatten();
+        let (owner, declaration) = if let Some(method) = cached {
+            method
+        } else {
+            if class.fields().any(|(_, f)| f.binding.name == name) {
+                return self
+                    .object_field(object, name, span)
+                    .map(ResolvedProperty::Value);
+            }
+            let owner = class.method_owner(name).ok_or_else(|| {
+                self.native_error(
+                    NativeError::new("PropertyError", format!("unknown method {name}")),
+                    span,
+                )
+            })?;
+            let (method, declaration) = owner
+                .declaration
+                .methods
+                .iter()
+                .enumerate()
+                .find(|(_, m)| m.name == name)
+                .expect("resolved method owner");
+            if cache {
+                let mut depth = 0;
+                let mut current = class.as_ref();
+                while !std::ptr::eq(current, owner) {
+                    current = current
+                        .parent
+                        .get()
+                        .and_then(Option::as_deref)
+                        .expect("resolved method owner");
+                    depth += 1;
+                }
+                class.method_cache.remember(crate::method_cache::Hint {
+                    span,
+                    depth,
+                    method,
+                });
+            }
+            (owner, declaration)
+        };
         Ok(ResolvedProperty::Method(Function::User {
             declaration: Rc::clone(declaration),
-            environment: class.environment,
+            environment: owner.environment,
             owner: self.identity.clone(),
-            source: class.source.clone(),
+            source: owner.source.clone(),
             receiver: Some(Value::NativeObject(object.clone())),
         }))
     }
@@ -587,7 +638,7 @@ impl Runtime {
         let Value::NativeObject(object) = self.evaluate(base, output)? else {
             return self.fail("property access requires a native object", property_span);
         };
-        let function = match self.resolve_property(&object, name, property_span)? {
+        let function = match self.resolve_property(&object, name, property_span, true)? {
             ResolvedProperty::Method(function) => function,
             ResolvedProperty::Value(callee) => {
                 self.validate_value(&callee, 0, property_span)?;
@@ -624,7 +675,7 @@ impl Runtime {
         name: &str,
         span: Span,
     ) -> Result<Value> {
-        match self.resolve_property(object, name, span)? {
+        match self.resolve_property(object, name, span, false)? {
             ResolvedProperty::Method(function) => Ok(self.bound_method(function)),
             ResolvedProperty::Value(value) => Ok(value),
         }

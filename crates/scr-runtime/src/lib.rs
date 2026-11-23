@@ -18,6 +18,9 @@ mod float_loop;
 mod integer_loop;
 mod invocation;
 mod map_index;
+mod method_cache;
+#[cfg(test)]
+mod method_cache_tests;
 mod modules;
 mod objects;
 pub use invocation::{ExecutionOutcome, InvocationContext, InvocationError, InvocationResult};
@@ -129,6 +132,8 @@ pub struct Runtime {
     force_field_snapshot: bool,
     #[cfg(test)]
     force_hashed_fields: bool,
+    #[cfg(test)]
+    disable_method_cache: bool,
     identity: Rc<()>,
     options: RuntimeOptions,
     steps: u64,

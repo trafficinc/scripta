@@ -69,6 +69,9 @@ and lexical owner; direct method calls avoid a temporary bound callable while
 preserving the same invocation semantics. Interface checks use declared type
 identity and signature compatibility. See [objects and classes](objects.md).
 
+Direct calls can use eight class-owned hints that retain no receivers or scopes.
+Repeated misses disable the cache; native properties keep ordinary lookup.
+
 ## Execution hot paths and limits
 
 The AST evaluator uses bounded internal optimizations: shared declarations,
