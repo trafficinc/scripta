@@ -32,6 +32,24 @@ fn float(value: f64) -> Result<Value> {
     }
 }
 
+/// Checked integer arithmetic shared by ordinary and prepared evaluation.
+#[inline]
+pub(crate) fn integer(op: BinaryOp, a: i64, b: i64) -> Result<i64> {
+    use BinaryOp as B;
+    if matches!(op, B::Divide | B::Remainder) && b == 0 {
+        return Err(Error::Arithmetic("division by zero"));
+    }
+    match op {
+        B::Add => a.checked_add(b),
+        B::Subtract => a.checked_sub(b),
+        B::Multiply => a.checked_mul(b),
+        B::Divide => a.checked_div(b),
+        B::Remainder => a.checked_rem(b),
+        _ => return Err(Error::Fatal("invalid arithmetic operator")),
+    }
+    .ok_or(Error::Arithmetic("integer arithmetic overflow"))
+}
+
 pub(crate) fn unary(op: UnaryOp, value: Value) -> Result<Value> {
     match (op, value) {
         (UnaryOp::Not, value) => boolean(value).map(|value| Value::Bool(!value)),
@@ -87,22 +105,7 @@ pub(crate) fn binary(op: BinaryOp, left: Value, right: Value) -> Result<Value> {
         }));
     }
     match (left, right) {
-        (Value::Int(a), Value::Int(b)) => {
-            if matches!(op, B::Divide | B::Remainder) && b == 0 {
-                return Err(Error::Arithmetic("division by zero"));
-            }
-            let value = match op {
-                B::Add => a.checked_add(b),
-                B::Subtract => a.checked_sub(b),
-                B::Multiply => a.checked_mul(b),
-                B::Divide => a.checked_div(b),
-                B::Remainder => a.checked_rem(b),
-                _ => return Err(Error::Fatal("invalid arithmetic operator")),
-            };
-            value
-                .map(Value::Int)
-                .ok_or(Error::Arithmetic("integer arithmetic overflow"))
-        }
+        (Value::Int(a), Value::Int(b)) => integer(op, a, b).map(Value::Int),
         (Value::Float(a), Value::Float(b)) => {
             if matches!(op, B::Divide | B::Remainder) && b == 0.0 {
                 return Err(Error::Arithmetic("division by zero"));
@@ -243,4 +246,45 @@ pub(crate) fn set_index_with_hint(
         }
     }
     set_index(value, path, replacement, append)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_integer_boundaries_have_independent_expected_results() {
+        use BinaryOp as B;
+        // Differential execution now shares this helper, so retain an explicit
+        // arithmetic oracle for signed boundaries, zero division and overflow.
+        for (op, a, b, expected) in [
+            (B::Add, i64::MAX, 0, i64::MAX),
+            (B::Subtract, i64::MIN, 0, i64::MIN),
+            (B::Multiply, i64::MIN, 1, i64::MIN),
+            (B::Divide, -9, 2, -4),
+            (B::Divide, 9, -2, -4),
+            (B::Remainder, -9, 2, -1),
+            (B::Remainder, 9, -2, 1),
+        ] {
+            assert_eq!(integer(op, a, b).unwrap(), expected, "{op:?}: {a}, {b}");
+        }
+        for (op, a, b, message) in [
+            (B::Add, i64::MAX, 1, "integer arithmetic overflow"),
+            (B::Subtract, i64::MIN, 1, "integer arithmetic overflow"),
+            (B::Multiply, i64::MIN, -1, "integer arithmetic overflow"),
+            (B::Divide, i64::MIN, -1, "integer arithmetic overflow"),
+            (B::Remainder, i64::MIN, -1, "integer arithmetic overflow"),
+            (B::Divide, i64::MIN, 0, "division by zero"),
+            (B::Remainder, i64::MIN, 0, "division by zero"),
+        ] {
+            assert!(
+                matches!(integer(op, a, b), Err(Error::Arithmetic(actual)) if actual == message),
+                "{op:?}: {a}, {b}"
+            );
+        }
+        assert!(matches!(
+            integer(B::Concat, 1, 2),
+            Err(Error::Fatal("invalid arithmetic operator"))
+        ));
+    }
 }

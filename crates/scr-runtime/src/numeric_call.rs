@@ -179,7 +179,7 @@ impl Numeric {
             Self::Binary(left, op, right, span) => {
                 let left = left.evaluate_integer(arguments, runtime)?;
                 let right = right.evaluate_integer(arguments, runtime)?;
-                runtime.operation(crate::integer_loop::calculate(*op, left, right), *span)
+                runtime.operation(crate::ops::integer(*op, left, right), *span)
             }
             Self::Literal(Number::Float(_)) => unreachable!("proven integer expression"),
         }

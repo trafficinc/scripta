@@ -2,39 +2,13 @@ use super::*;
 use crate::{NativeFunction, NativeSignature, NativeType, RuntimeOptions};
 
 fn compare(source: &str, options: RuntimeOptions) -> Runtime {
-    let mut fast = Runtime::with_options(options.clone());
+    let (mut fast, mut slow) = crate::test_support::runtimes(options);
     fast.force_numeric_calls = true;
-    let mut slow = Runtime::with_options(options);
     slow.disable_numeric_calls = true;
-    for text in [source, "$recovered=1;"] {
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        assert_eq!(
-            fast.execute_source(text, &mut a),
-            slow.execute_source(text, &mut b),
-            "{source}"
-        );
-        assert_eq!(a, b);
-        assert_eq!(fast.steps, slow.steps);
-        assert_eq!(fast.environments.live, slow.environments.live);
-        assert_eq!(fast.stack.len(), slow.stack.len());
-        for (name, value) in &fast.environments.scope(0).variables {
-            if matches!(value, Value::Callable(_) | Value::NativeObject(_)) {
-                continue;
-            }
-            if let Value::Float(a) = value {
-                let Some(Value::Float(b)) = slow.get_global(name) else {
-                    panic!("{name}");
-                };
-                assert_eq!(a.to_bits(), b.to_bits());
-            } else {
-                assert_eq!(Some(value), slow.get_global(name), "{name}");
-            }
-        }
-    }
+    let _ =
+        crate::test_support::compare_with_recovery(&mut fast, &mut slow, source, "$recovered=1;");
     fast
 }
-
 #[test]
 fn numeric_calls_preserve_values_strict_types_error_order_and_argument_effects() {
     for source in [

@@ -307,32 +307,11 @@ mod tests {
     }
 
     fn compare(fast: &mut Runtime, slow: &mut Runtime, source: &str) -> bool {
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        let result = fast.execute_source(source, &mut a);
-        assert_eq!(result, slow.execute_source(source, &mut b), "{source}");
-        assert_eq!(a, b, "{source}");
-        assert_eq!(fast.steps, slow.steps, "{source}");
-        assert_eq!(fast.environments.live, slow.environments.live);
-        let globals = &fast.environments.scope(0).variables;
-        let others = &slow.environments.scope(0).variables;
-        assert_eq!(globals.len(), others.len());
-        for (name, value) in globals {
-            if let Value::Float(value) = value {
-                let Some(Value::Float(other)) = others.get(name) else {
-                    panic!("{name}")
-                };
-                assert_eq!(value.to_bits(), other.to_bits());
-            } else if !matches!(value, Value::Callable(_) | Value::NativeObject(_)) {
-                assert_eq!(Some(value), others.get(name), "{source}: {name}");
-            }
-        }
-        result.is_ok()
+        crate::test_support::compare_source(fast, slow, source).is_ok()
     }
 
     fn runtimes(options: RuntimeOptions) -> (Runtime, Runtime) {
-        let fast = Runtime::with_options(options.clone());
-        let mut slow = Runtime::with_options(options);
+        let (fast, mut slow) = crate::test_support::runtimes(options);
         slow.environments.force_hash_bindings();
         (fast, slow)
     }

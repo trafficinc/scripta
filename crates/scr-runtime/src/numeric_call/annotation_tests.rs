@@ -1,38 +1,13 @@
 use super::*;
 use crate::RuntimeOptions;
 fn compare(source: &str, options: RuntimeOptions) {
-    let mut fast = Runtime::with_options(options.clone());
-    let mut old = Runtime::with_options(options);
+    let (mut fast, mut old) = crate::test_support::runtimes(options);
     fast.force_numeric_calls = true;
     old.force_numeric_calls = true;
     old.disable_numeric_annotations = true;
     old.disable_primitive_annotations = true;
-    for text in [source, "$recovered=1;"] {
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        assert_eq!(
-            fast.execute_source(text, &mut a),
-            old.execute_source(text, &mut b),
-            "{source}"
-        );
-        assert_eq!(a, b);
-        assert_eq!(fast.steps, old.steps);
-        assert_eq!(fast.environments.live, old.environments.live);
-        assert_eq!(fast.stack.len(), old.stack.len());
-        for (name, value) in &fast.environments.scope(0).variables {
-            if matches!(value, Value::Callable(_) | Value::NativeObject(_)) {
-                continue;
-            }
-            if let Value::Float(a) = value {
-                let Some(Value::Float(b)) = old.get_global(name) else {
-                    panic!()
-                };
-                assert_eq!(a.to_bits(), b.to_bits());
-            } else {
-                assert_eq!(Some(value), old.get_global(name), "{name}");
-            }
-        }
-    }
+    let _ =
+        crate::test_support::compare_with_recovery(&mut fast, &mut old, source, "$recovered=1;");
 }
 #[test]
 fn cached_primitive_types_preserve_values_mismatches_and_general_resolution() {

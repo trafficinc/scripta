@@ -167,7 +167,7 @@ impl Integer {
             Self::Binary(left, op, right, span) => {
                 let a = left.evaluate(slots, runtime, output)?;
                 let b = right.evaluate(slots, runtime, output)?;
-                runtime.operation(crate::integer_loop::calculate(*op, a, b), *span)
+                runtime.operation(crate::ops::integer(*op, a, b), *span)
             }
             Self::Call(callee, args, span) => {
                 let mut values = if args.is_empty() {
@@ -210,7 +210,7 @@ impl Assignment {
                 AssignmentOp::Divide => BinaryOp::Divide,
                 _ => unreachable!("verified assignment"),
             };
-            runtime.operation(crate::integer_loop::calculate(op, old, rhs), self.span)?
+            runtime.operation(crate::ops::integer(op, old, rhs), self.span)?
         };
         slots[self.slot].value = value;
         slots[self.slot].dirty = true;

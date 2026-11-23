@@ -36,6 +36,8 @@ mod numeric_call_loop;
 mod ops;
 mod output;
 mod prepared_call;
+#[cfg(test)]
+mod test_support;
 pub use output::{OutputAction, ScriptOutput};
 mod value;
 

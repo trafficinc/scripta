@@ -78,7 +78,7 @@ impl Scalar {
             BinaryOp::LessEqual => Self::Bool(a <= b),
             BinaryOp::Greater => Self::Bool(a > b),
             BinaryOp::GreaterEqual => Self::Bool(a >= b),
-            _ => Self::Int(crate::integer_loop::calculate(op, a, b)?),
+            _ => Self::Int(crate::ops::integer(op, a, b)?),
         })
     }
 }

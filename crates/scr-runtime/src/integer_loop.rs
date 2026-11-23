@@ -204,22 +204,6 @@ fn arithmetic(op: BinaryOp) -> bool {
     )
 }
 
-pub(super) fn calculate(op: BinaryOp, a: i64, b: i64) -> ops::Result<i64> {
-    use BinaryOp as B;
-    if matches!(op, B::Divide | B::Remainder) && b == 0 {
-        return Err(ops::Error::Arithmetic("division by zero"));
-    }
-    match op {
-        B::Add => a.checked_add(b),
-        B::Subtract => a.checked_sub(b),
-        B::Multiply => a.checked_mul(b),
-        B::Divide => a.checked_div(b),
-        B::Remainder => a.checked_rem(b),
-        _ => unreachable!("verified integer operator"),
-    }
-    .ok_or(ops::Error::Arithmetic("integer arithmetic overflow"))
-}
-
 impl Integer {
     fn evaluate(&self, slots: &[Slot<'_>], runtime: &Runtime) -> Result<i64> {
         match self {
@@ -228,7 +212,7 @@ impl Integer {
             Self::Binary(left, op, right, span) => {
                 let left = left.evaluate(slots, runtime)?;
                 let right = right.evaluate(slots, runtime)?;
-                runtime.operation(calculate(*op, left, right), *span)
+                runtime.operation(ops::integer(*op, left, right), *span)
             }
         }
     }
@@ -248,7 +232,7 @@ impl Assignment {
                 AssignmentOp::Divide => BinaryOp::Divide,
                 _ => unreachable!("verified assignment operator"),
             };
-            runtime.operation(calculate(op, old, rhs), self.span)?
+            runtime.operation(ops::integer(op, old, rhs), self.span)?
         };
         slots[self.slot].value = value;
         slots[self.slot].dirty = true;
@@ -501,30 +485,16 @@ mod tests {
     }
 
     fn compare(source: &str, options: RuntimeOptions) -> Runtime {
-        let mut fast = Runtime::with_options(options.clone());
-        let mut slow = Runtime::with_options(options);
+        let (mut fast, mut slow) = crate::test_support::runtimes(options);
         slow.disable_integer_loops = true;
-        let mut fast_output = Vec::new();
-        let mut slow_output = Vec::new();
-        let fast_result = run(&mut fast, source, &mut fast_output);
-        let slow_result = run(&mut slow, source, &mut slow_output);
-        assert_eq!(fast_result, slow_result, "{source}");
-        assert_eq!(fast_output, slow_output, "{source}");
-        assert_eq!(fast.steps, slow.steps, "{source}");
-        assert_eq!(fast.environments.live, slow.environments.live);
-        let fast_globals = &fast.environments.scope(0).variables;
-        let slow_globals = &slow.environments.scope(0).variables;
-        assert_eq!(fast_globals.len(), slow_globals.len());
-        for (name, value) in fast_globals {
-            if matches!(value, Value::Callable(_)) {
-                assert!(matches!(slow_globals.get(name), Some(Value::Callable(_))));
-            } else {
-                assert_eq!(Some(value), slow_globals.get(name), "{source}: {name}");
-            }
-        }
+        let _ = crate::test_support::compare_execution(
+            &mut fast,
+            &mut slow,
+            source,
+            |runtime, output| run(runtime, source, output),
+        );
         fast
     }
-
     #[test]
     fn arithmetic_aliasing_dynamic_bounds_and_captured_bindings() {
         for source in [

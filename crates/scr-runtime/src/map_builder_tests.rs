@@ -37,8 +37,7 @@ fn rows(count: usize) -> Vec<(Expr, Expr)> {
         .collect()
 }
 fn paired() -> (Runtime, Runtime) {
-    let fast = Runtime::new();
-    let mut slow = Runtime::new();
+    let (fast, mut slow) = crate::test_support::runtimes(RuntimeOptions::default());
     slow.disable_map_literal_index = true;
     (fast, slow)
 }
@@ -47,19 +46,10 @@ fn compare(
     slow: &mut Runtime,
     program: &Program,
 ) -> std::result::Result<u8, RuntimeError> {
-    let mut a = Vec::new();
-    let mut b = Vec::new();
-    let result = fast.execute(program, &mut a);
-    assert_eq!(result, slow.execute(program, &mut b));
-    assert_eq!(a, b);
-    assert_eq!(fast.steps, slow.steps);
-    assert_eq!(fast.environments.live, slow.environments.live);
-    assert_eq!(fast.environments.current, 0);
-    assert_eq!(slow.environments.current, 0);
-    assert!(fast.stack.is_empty() && slow.stack.is_empty());
-    result
+    crate::test_support::compare_execution(fast, slow, "map literal program", |runtime, output| {
+        runtime.execute(program, output)
+    })
 }
-
 #[test]
 fn literal_indices_keep_typed_keys_order_copies_duplicates_and_allocation_fallback() {
     for count in [8, 63, 64, 95, 96, 120] {

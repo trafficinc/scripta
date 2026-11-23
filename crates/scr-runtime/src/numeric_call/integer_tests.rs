@@ -21,32 +21,8 @@ fn compare(source: &str, options: RuntimeOptions, warm: bool) -> Runtime {
     }
     fast.options = options.clone();
     old.options = options;
-    for text in [source, "$recovered=1;"] {
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        assert_eq!(
-            fast.execute_source(text, &mut a),
-            old.execute_source(text, &mut b),
-            "{source}"
-        );
-        assert_eq!(a, b);
-        assert_eq!(fast.steps, old.steps);
-        assert_eq!(fast.environments.live, old.environments.live);
-        assert_eq!(fast.environments.current, old.environments.current);
-        assert_eq!(fast.stack.len(), old.stack.len());
-        for (name, value) in &fast.environments.scope(0).variables {
-            match value {
-                Value::Callable(_) | Value::NativeObject(_) => continue,
-                Value::Float(a) => {
-                    let Some(Value::Float(b)) = old.get_global(name) else {
-                        panic!("{name}")
-                    };
-                    assert_eq!(a.to_bits(), b.to_bits());
-                }
-                _ => assert_eq!(Some(value), old.get_global(name), "{name}"),
-            }
-        }
-    }
+    let _ =
+        crate::test_support::compare_with_recovery(&mut fast, &mut old, source, "$recovered=1;");
     fast
 }
 

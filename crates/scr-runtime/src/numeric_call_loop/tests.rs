@@ -1,28 +1,10 @@
 use super::*;
 use crate::RuntimeOptions;
 fn compare(source: &str, options: RuntimeOptions) -> Runtime {
-    let mut fast = Runtime::with_options(options.clone());
-    let mut old = Runtime::with_options(options);
+    let (mut fast, mut old) = crate::test_support::runtimes(options);
     old.disable_numeric_call_loops = true;
-    for text in [source, "$recovered=1;"] {
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        assert_eq!(
-            fast.execute_source(text, &mut a),
-            old.execute_source(text, &mut b),
-            "{source}"
-        );
-        assert_eq!(a, b);
-        assert_eq!(fast.steps, old.steps);
-        assert_eq!(fast.environments.live, old.environments.live);
-        assert_eq!(fast.stack.len(), old.stack.len());
-        for (name, value) in &fast.environments.scope(0).variables {
-            if matches!(value, Value::Callable(_) | Value::NativeObject(_)) {
-                continue;
-            }
-            assert_eq!(Some(value), old.get_global(name), "{name}");
-        }
-    }
+    let _ =
+        crate::test_support::compare_with_recovery(&mut fast, &mut old, source, "$recovered=1;");
     fast
 }
 #[test]

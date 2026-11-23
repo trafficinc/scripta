@@ -6,25 +6,16 @@ use std::{
 };
 
 fn pair(options: RuntimeOptions) -> (Runtime, Runtime) {
-    let fast = Runtime::with_options(options.clone());
-    let mut slow = Runtime::with_options(options);
+    let (fast, mut slow) = crate::test_support::runtimes(options);
     slow.force_field_snapshot = true;
     slow.force_hashed_fields = true;
     (fast, slow)
 }
 fn compare(fast: &mut Runtime, slow: &mut Runtime, source: &str) -> bool {
-    let mut a = Vec::new();
-    let mut b = Vec::new();
-    let result = fast.execute_source(source, &mut a);
-    assert_eq!(result, slow.execute_source(source, &mut b), "{source}");
+    let result = crate::test_support::compare_source(fast, slow, source);
     if let Err(error) = &result {
         eprintln!("{source}: {error:?}");
     }
-    assert_eq!(a, b);
-    assert_eq!(fast.steps, slow.steps);
-    assert_eq!(fast.environments.live, slow.environments.live);
-    assert!(fast.stack.is_empty());
-    assert!(slow.stack.is_empty());
     for (name, value) in &fast.environments.scope(0).variables {
         match value {
             Value::NativeObject(object) => {

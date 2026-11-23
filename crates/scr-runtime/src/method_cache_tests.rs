@@ -2,8 +2,7 @@ use super::*;
 use std::cell::Cell;
 
 fn paired() -> (Runtime, Runtime) {
-    let fast = Runtime::new();
-    let mut slow = Runtime::new();
+    let (fast, mut slow) = crate::test_support::runtimes(RuntimeOptions::default());
     slow.disable_method_cache = true;
     (fast, slow)
 }
@@ -13,16 +12,7 @@ fn compare(
     slow: &mut Runtime,
     source: &str,
 ) -> std::result::Result<u8, RuntimeError> {
-    let mut a = Vec::new();
-    let mut b = Vec::new();
-    let result = fast.execute_source(source, &mut a);
-    assert_eq!(result, slow.execute_source(source, &mut b), "{source}");
-    assert_eq!(a, b);
-    assert_eq!(fast.steps, slow.steps);
-    assert_eq!(fast.environments.live, slow.environments.live);
-    assert_eq!(fast.environments.current, slow.environments.current);
-    assert!(fast.stack.is_empty() && slow.stack.is_empty());
-    assert!(fast.environments.temporary_roots.is_empty());
+    let result = crate::test_support::compare_source(fast, slow, source);
     for name in ["seen", "events", "kept"] {
         assert_eq!(
             fast.get_global(name),

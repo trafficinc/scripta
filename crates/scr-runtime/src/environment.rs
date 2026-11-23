@@ -666,7 +666,7 @@ mod tests {
 
     #[test]
     fn reused_numeric_blocks_match_original_scope_limits_failures_and_recovery() {
-        use crate::{NativeFunction, Runtime, RuntimeOptions};
+        use crate::{NativeFunction, RuntimeOptions};
         let sources = [
             "$total=0;for($i=0;$i<5;$i+=1){if($i>1){{$total+=$i;}}else{$total+=1;}}",
             "$total=0.0;for($i=0;$i<5;$i+=1){$total+=float($i);}",
@@ -681,30 +681,19 @@ mod tests {
                         instruction_limit: Some(instructions),
                         ..RuntimeOptions::default()
                     };
-                    let mut fast = Runtime::with_options(options.clone());
-                    let mut old = Runtime::with_options(options);
+                    let (mut fast, mut old) = crate::test_support::runtimes(options);
                     old.environments.disable_empty_reuse = true;
                     for runtime in [&mut fast, &mut old] {
                         runtime
                             .register("float", NativeFunction::float_conversion())
                             .unwrap();
                     }
-                    for text in [source, "$recovered=1;"] {
-                        let mut a = Vec::new();
-                        let mut b = Vec::new();
-                        assert_eq!(
-                            fast.execute_source(text, &mut a),
-                            old.execute_source(text, &mut b),
-                            "{source}; {scopes}/{instructions}"
-                        );
-                        assert_eq!(a, b);
-                        assert_eq!(fast.steps, old.steps);
-                        assert_eq!(fast.environments.live, old.environments.live);
-                        assert_eq!(fast.environments.current, old.environments.current);
-                        for name in ["total", "i", "recovered"] {
-                            assert_eq!(fast.get_global(name), old.get_global(name));
-                        }
-                    }
+                    let _ = crate::test_support::compare_with_recovery(
+                        &mut fast,
+                        &mut old,
+                        source,
+                        "$recovered=1;",
+                    );
                 }
             }
         }

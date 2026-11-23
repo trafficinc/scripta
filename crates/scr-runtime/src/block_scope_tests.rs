@@ -1,33 +1,12 @@
 use super::*;
 
 fn compare(source: &str, options: RuntimeOptions) -> Runtime {
-    let mut fast = Runtime::with_options(options.clone());
-    let mut slow = Runtime::with_options(options);
+    let (mut fast, mut slow) = crate::test_support::runtimes(options);
     slow.environments.disable_empty_reuse = true;
-    for text in [source, "$recovered=7;"] {
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        assert_eq!(
-            fast.execute_source(text, &mut a),
-            slow.execute_source(text, &mut b),
-            "{source}"
-        );
-        assert_eq!(a, b);
-        assert_eq!(fast.steps, slow.steps);
-        assert_eq!(fast.environments.live, slow.environments.live);
-        assert_eq!(fast.environments.current, 0);
-        assert_eq!(slow.environments.current, 0);
-        assert!(fast.stack.is_empty());
-        assert!(slow.stack.is_empty());
-        for (name, value) in &fast.environments.scope(0).variables {
-            if !matches!(value, Value::Callable(_) | Value::NativeObject(_)) {
-                assert_eq!(Some(value), slow.get_global(name), "{name}");
-            }
-        }
-    }
+    let _ =
+        crate::test_support::compare_with_recovery(&mut fast, &mut slow, source, "$recovered=7;");
     fast
 }
-
 #[test]
 fn recursive_functions_methods_and_block_control_flow_preserve_results() {
     for (source, expected) in [

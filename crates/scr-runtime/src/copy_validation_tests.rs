@@ -2,23 +2,13 @@ use super::*;
 use std::cell::{Cell, RefCell};
 
 fn pair(options: RuntimeOptions) -> (Runtime, Runtime) {
-    let fast = Runtime::with_options(options.clone());
-    let mut slow = Runtime::with_options(options);
+    let (fast, mut slow) = crate::test_support::runtimes(options);
     slow.disable_copy_validation = true;
     (fast, slow)
 }
 fn compare(fast: &mut Runtime, slow: &mut Runtime, source: &str) {
-    let mut a = Vec::new();
-    let mut b = Vec::new();
-    assert_eq!(
-        fast.execute_source(source, &mut a),
-        slow.execute_source(source, &mut b)
-    );
-    assert_eq!(a, b);
-    assert_eq!(fast.steps, slow.steps);
-    assert!(fast.stack.is_empty() && slow.stack.is_empty());
+    let _ = crate::test_support::compare_source(fast, slow, source);
 }
-
 #[test]
 fn only_discarded_plain_variable_copies_use_specialized_validation() {
     let (mut fast, mut slow) = pair(RuntimeOptions::default());

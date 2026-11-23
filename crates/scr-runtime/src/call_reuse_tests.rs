@@ -5,33 +5,11 @@ use std::{
 };
 
 fn compare(source: &str, options: RuntimeOptions) -> Runtime {
-    let mut fast = Runtime::with_options(options.clone());
-    let mut slow = Runtime::with_options(options);
+    let (mut fast, mut slow) = crate::test_support::runtimes(options);
     slow.disable_call_reuse = true;
-    let mut a = Vec::new();
-    let mut b = Vec::new();
-    assert_eq!(
-        fast.execute_source(source, &mut a),
-        slow.execute_source(source, &mut b),
-        "{source}"
-    );
-    assert_eq!(a, b, "{source}");
-    assert_eq!(fast.steps, slow.steps, "{source}");
-    assert_eq!(fast.environments.live, slow.environments.live);
-    assert!(fast.stack.is_empty());
-    assert!(slow.stack.is_empty());
-    for (name, value) in &fast.environments.scope(0).variables {
-        if !matches!(value, Value::Callable(_) | Value::NativeObject(_)) {
-            assert_eq!(Some(value), slow.get_global(name), "{source}: {name}");
-        }
-    }
-    assert!(fast.argument_buffers.len() <= MAX_ARGUMENT_BUFFERS);
-    assert!(fast.argument_buffers.iter().all(
-        |buffer| buffer.is_empty() && (1..=MAX_ARGUMENT_CAPACITY).contains(&buffer.capacity())
-    ));
+    let _ = crate::test_support::compare_source(&mut fast, &mut slow, source);
     fast
 }
-
 #[test]
 fn defaults_variadics_recursion_methods_and_failure_traces_match_owned_setup() {
     for source in [

@@ -229,6 +229,9 @@ directory identity rather than spelling.
 
 ## Benchmarks and runtime safety
 
+For runtime changes, follow the
+[contributor checklist](runtime-optimizations.md#contributor-checklist).
+
 The [performance table](performance.md) summarizes the PHP/Python/Scripta
 comparison. Its [methodology](../benchmarks/comparison/README.md) describes
 workloads, output checks, measurement, and regeneration of both published tables.

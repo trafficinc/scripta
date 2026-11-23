@@ -2,32 +2,12 @@ use super::*;
 use crate::{NativeFunction, NativeSignature, NativeType, RuntimeOptions};
 
 fn compare(source: &str, options: RuntimeOptions) -> Runtime {
-    let mut fast = Runtime::with_options(options.clone());
+    let (mut fast, mut slow) = crate::test_support::runtimes(options);
     fast.force_numeric_calls = true;
-    let mut slow = Runtime::with_options(options);
     slow.force_numeric_calls = true;
     slow.disable_prepared_calls = true;
-    for text in [source, "$recovered=7;"] {
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        assert_eq!(
-            fast.execute_source(text, &mut a),
-            slow.execute_source(text, &mut b),
-            "{source}"
-        );
-        assert_eq!(a, b);
-        assert_eq!(fast.steps, slow.steps, "{source}");
-        assert_eq!(fast.environments.live, slow.environments.live);
-        assert_eq!(fast.environments.current, 0);
-        assert!(fast.stack.is_empty());
-        assert!(slow.stack.is_empty());
-        assert!(fast.argument_buffers.iter().all(Vec::is_empty));
-        for (name, value) in &fast.environments.scope(0).variables {
-            if !matches!(value, Value::Callable(_) | Value::NativeObject(_)) {
-                assert_eq!(Some(value), slow.get_global(name), "${name}");
-            }
-        }
-    }
+    let _ =
+        crate::test_support::compare_with_recovery(&mut fast, &mut slow, source, "$recovered=7;");
     fast
 }
 const FIB: &str = "function f($n:int):int{if($n<2){return $n;}return f($n-1)+f($n-2);}";

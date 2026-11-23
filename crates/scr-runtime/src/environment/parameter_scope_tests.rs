@@ -23,28 +23,8 @@ fn compare(source: &str, options: RuntimeOptions) -> (Runtime, Result<u8, Runtim
             .unwrap();
         runtime.options = options.clone();
     }
-    let mut first = Ok(0);
-    for (index, text) in [source, "$recovered=7;"].into_iter().enumerate() {
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        let result = fast.execute_source(text, &mut a);
-        assert_eq!(result, old.execute_source(text, &mut b), "{source}");
-        assert_eq!(a, b);
-        assert_eq!(fast.steps, old.steps);
-        assert_eq!(fast.environments.live, old.environments.live);
-        assert_eq!(fast.environments.current, 0);
-        assert_eq!(old.environments.current, 0);
-        assert!(fast.stack.is_empty() && old.stack.is_empty());
-        assert!(fast.argument_buffers.iter().all(Vec::is_empty));
-        for (name, value) in &fast.environments.scope(0).variables {
-            if !matches!(value, Value::Callable(_) | Value::NativeObject(_)) {
-                assert_eq!(Some(value), old.get_global(name), "{name}");
-            }
-        }
-        if index == 0 {
-            first = result;
-        }
-    }
+    let first =
+        crate::test_support::compare_with_recovery(&mut fast, &mut old, source, "$recovered=7;");
     (fast, first)
 }
 

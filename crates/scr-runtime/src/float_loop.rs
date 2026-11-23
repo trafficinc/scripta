@@ -63,7 +63,7 @@ impl Number {
 
     pub(super) fn binary(self, op: BinaryOp, rhs: Self) -> ops::Result<Self> {
         match (self, rhs) {
-            (Self::Int(a), Self::Int(b)) => super::integer_loop::calculate(op, a, b).map(Self::Int),
+            (Self::Int(a), Self::Int(b)) => ops::integer(op, a, b).map(Self::Int),
             (Self::Float(a), Self::Float(b)) => {
                 if matches!(op, BinaryOp::Divide | BinaryOp::Remainder) && b == 0.0 {
                     return Err(ops::Error::Arithmetic("division by zero"));
@@ -590,40 +590,21 @@ mod tests {
     }
 
     fn compare(source: &str, options: RuntimeOptions) -> Runtime {
-        let mut fast = Runtime::with_options(options.clone());
-        let mut slow = Runtime::with_options(options);
+        let (mut fast, mut slow) = crate::test_support::runtimes(options);
         for runtime in [&mut fast, &mut slow] {
             runtime
                 .register("float", NativeFunction::float_conversion())
                 .unwrap();
         }
         slow.disable_integer_loops = true;
-        let mut a = Vec::new();
-        let mut b = Vec::new();
-        assert_eq!(
-            run(&mut fast, source, &mut a),
-            run(&mut slow, source, &mut b),
-            "{source}"
+        let _ = crate::test_support::compare_execution(
+            &mut fast,
+            &mut slow,
+            source,
+            |runtime, output| run(runtime, source, output),
         );
-        assert_eq!(a, b, "{source}");
-        assert_eq!(fast.steps, slow.steps, "{source}");
-        assert_eq!(fast.environments.live, slow.environments.live);
-        let globals = &fast.environments.scope(0).variables;
-        let others = &slow.environments.scope(0).variables;
-        assert_eq!(globals.len(), others.len());
-        for (name, value) in globals {
-            if let Value::Float(number) = value {
-                let Some(Value::Float(other)) = others.get(name) else {
-                    panic!("{name}")
-                };
-                assert_eq!(number.to_bits(), other.to_bits(), "{source}: {name}");
-            } else if !matches!(value, Value::Callable(_)) {
-                assert_eq!(Some(value), others.get(name), "{source}: {name}");
-            }
-        }
         fast
     }
-
     #[test]
     fn arithmetic_conversions_bounds_aliasing_and_captures() {
         for source in [
