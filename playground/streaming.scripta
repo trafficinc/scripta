@@ -1,4 +1,3 @@
-<?scripta
 // Usage: scripta run playground/streaming.scripta <events-file|->
 $path = Cli::arg(0);
 if ($path === null) {

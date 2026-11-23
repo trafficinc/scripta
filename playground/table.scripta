@@ -1,4 +1,3 @@
-<?scripta
 $number = 7;
 $i = 1;
 while ($i <= 12) {

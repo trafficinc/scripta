@@ -382,7 +382,7 @@ fn error_playground_recovers_and_uncaught_errors_exit_one_with_source_details() 
     assert!(output.stdout.is_empty());
     let error = String::from_utf8(output.stderr).unwrap();
     assert!(error.contains("error[E0401]: IndexError: list index out of bounds"));
-    assert!(error.contains("errors.scripta:5:"));
+    assert!(error.contains("errors.scripta:4:"));
     assert!(error.contains("at <main>"));
 }
 

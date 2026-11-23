@@ -1,4 +1,3 @@
-<?scripta
 // Usage: scripta run playground/log-analyzer.scripta playground/sample-events.txt
 $path = Cli::arg(0);
 if ($path === null) {
