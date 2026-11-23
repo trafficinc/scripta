@@ -135,6 +135,10 @@ pub struct Runtime {
     #[cfg(test)]
     force_numeric_calls: bool,
     #[cfg(test)]
+    disable_integer_numeric_calls: bool,
+    #[cfg(test)]
+    integer_numeric_calls_executed: usize,
+    #[cfg(test)]
     disable_numeric_annotations: bool,
     #[cfg(test)]
     disable_numeric_parameter_scopes: bool,

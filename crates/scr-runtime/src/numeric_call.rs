@@ -58,6 +58,8 @@ enum Numeric {
 
 pub(super) struct Plan {
     expression: Numeric,
+    integer: bool,
+    parameter_count: u8,
     checkpoint: Span,
     parameters: [Annotation; MAX_PARAMETERS],
     returning: Annotation,
@@ -88,8 +90,11 @@ impl Plan {
         for (slot, parameter) in parameters.iter_mut().zip(&declaration.parameters) {
             *slot = Annotation::compile(&parameter.annotation);
         }
+        let integer = expression.integer_only();
         Some(Box::new(Self {
             expression,
+            integer,
+            parameter_count: declaration.parameters.len() as u8,
             checkpoint: statement.span,
             parameters,
             returning: Annotation::compile(&declaration.return_type),
@@ -145,6 +150,41 @@ impl Plan {
 }
 
 impl Numeric {
+    fn evaluate_integer(
+        &self,
+        arguments: &[Number; MAX_PARAMETERS],
+        runtime: &Runtime,
+    ) -> Result<i64> {
+        match self {
+            Self::Literal(Number::Int(value)) => Ok(*value),
+            Self::Parameter(index) => {
+                let Number::Int(value) = arguments[*index] else {
+                    unreachable!("proven integer arguments");
+                };
+                Ok(value)
+            }
+            Self::Unary(op, inner, span) => {
+                let value = inner.evaluate_integer(arguments, runtime)?;
+                runtime.operation(
+                    match op {
+                        UnaryOp::Positive => Ok(value),
+                        UnaryOp::Negative => value
+                            .checked_neg()
+                            .ok_or(crate::ops::Error::Arithmetic("integer arithmetic overflow")),
+                        _ => unreachable!("verified numeric unary operator"),
+                    },
+                    *span,
+                )
+            }
+            Self::Binary(left, op, right, span) => {
+                let left = left.evaluate_integer(arguments, runtime)?;
+                let right = right.evaluate_integer(arguments, runtime)?;
+                runtime.operation(crate::integer_loop::calculate(*op, left, right), *span)
+            }
+            Self::Literal(Number::Float(_)) => unreachable!("proven integer expression"),
+        }
+    }
+
     fn integer_only(&self) -> bool {
         match self {
             Self::Literal(Number::Int(_)) | Self::Parameter(_) => true,
@@ -171,8 +211,33 @@ impl Numeric {
 }
 
 impl Plan {
+    #[inline(never)]
+    fn evaluate(
+        &self,
+        arguments: &[Number; MAX_PARAMETERS],
+        runtime: &mut Runtime,
+    ) -> Result<Number> {
+        let integer = self.integer
+            && arguments[..usize::from(self.parameter_count)]
+                .iter()
+                .all(|value| matches!(value, Number::Int(_)));
+        #[cfg(test)]
+        let integer = integer && !runtime.disable_integer_numeric_calls;
+        if integer {
+            #[cfg(test)]
+            {
+                runtime.integer_numeric_calls_executed += 1;
+            }
+            self.expression
+                .evaluate_integer(arguments, runtime)
+                .map(Number::Int)
+        } else {
+            self.expression.evaluate(arguments, runtime)
+        }
+    }
+
     pub(super) fn integer_only(&self) -> bool {
-        self.expression.integer_only()
+        self.integer
     }
 }
 
@@ -252,7 +317,7 @@ impl Runtime {
                 self.enter_empty_scope(self.environments.current, declaration.body.span)?;
             let result = (|| {
                 self.checkpoint(plan.checkpoint)?;
-                plan.expression.evaluate(&arguments, self)
+                plan.evaluate(&arguments, self)
             })();
             self.environments.leave_empty(previous);
             let value = result?.into_value();
@@ -270,6 +335,8 @@ impl Runtime {
 
 #[cfg(test)]
 mod annotation_tests;
+#[cfg(test)]
+mod integer_tests;
 #[cfg(test)]
 mod parameter_scope_tests;
 #[cfg(test)]
