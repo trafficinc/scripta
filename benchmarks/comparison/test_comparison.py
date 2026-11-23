@@ -1,5 +1,6 @@
 """Failure handling, complete evidence, and byte-exact README update checks."""
 import copy
+import io
 import json
 from pathlib import Path
 import sys
@@ -34,7 +35,8 @@ class RunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             parser = lambda output, python: type("Args", (), dict(
                 scripta="/not/a/scripta", php="/not/a/php", python=python,
-                output=Path(directory) / output, samples=1, warmups=0, seed=1, timeout=5))()
+                output=Path(directory) / output, print_report=False,
+                samples=1, warmups=0, seed=1, timeout=5))()
             args = parser("partial.json", "/not/a/python")
             self.assertEqual(run.run(args)["status"], "partial")
             args = parser("failed.json", sys.executable)
@@ -42,6 +44,42 @@ class RunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "wrong output"):
                     run.run(args)
             self.assertEqual(json.loads(args.output.read_text())["status"], "failed")
+
+    def test_optional_output_and_print_report(self):
+        for flags in ([], ["--print"], ["--print", "--output", "report.json"]):
+            with self.subTest(flags=flags), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "report.json"
+                arguments = [str(output) if flag == "report.json" else flag for flag in flags]
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with patch.object(sys, "argv", ["run.py", "--scripta", "/not/a/scripta",
+                                               "--php", "/not/a/php", "--samples", "1",
+                                               "--warmups", "0", *arguments]), \
+                        patch.object(run, "WORKLOADS", (run.WORKLOADS[-1],)), \
+                        patch.object(sys, "stdout", stdout), patch.object(sys, "stderr", stderr):
+                    with self.assertRaises(SystemExit) as exit_status:
+                        run.main()
+                self.assertEqual(exit_status.exception.code, 1)  # Missing runtimes remain an error.
+                if "--print" in flags:
+                    report = json.loads(stdout.getvalue())
+                    self.assertEqual(report["status"], "partial")
+                    self.assertEqual(len(report["results"]), 1)
+                    self.assertIn("startup", stderr.getvalue())
+                    if "--output" in flags:
+                        self.assertEqual(json.loads(output.read_text()), report)
+                else:
+                    self.assertIn("startup", stdout.getvalue())
+                self.assertEqual(output.exists(), "--output" in flags)
+
+    def test_print_preserves_failed_report_without_output_file(self):
+        args = type("Args", (), dict(scripta="/not/a/scripta", php="/not/a/php",
+                                    python=sys.executable, output=None, print_report=True,
+                                    samples=1, warmups=0, seed=1, timeout=5))()
+        stdout = io.StringIO()
+        with patch.object(sys, "stdout", stdout), \
+                patch.object(run, "measure", side_effect=RuntimeError("wrong output")):
+            with self.assertRaisesRegex(RuntimeError, "wrong output"):
+                run.run(args)
+        self.assertEqual(json.loads(stdout.getvalue())["status"], "failed")
 
 
 class RenderTests(unittest.TestCase):

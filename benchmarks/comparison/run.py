@@ -129,18 +129,22 @@ def run(args):
                           "observations_ms": values, "median_ms": statistics.median(values),
                           "min_ms": min(values), "max_ms": max(values)}
                 report["results"].append(result)
-                print(f"{name:18} {language:8} {result['median_ms']:10.3f} ms", flush=True)
+                print(f"{name:18} {language:8} {result['median_ms']:10.3f} ms",
+                      file=sys.stderr if args.print_report else sys.stdout, flush=True)
         report["status"] = "partial" if unavailable else "complete"
     except Exception as error:
         report["status"] = "failed"
         report["error"] = str(error)
         raise
     finally:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        # Exclusive creation preserves historical evidence.
-        with args.output.open("x", encoding="utf-8", newline="\n") as output:
-            json.dump(report, output, indent=2)
-            output.write("\n")
+        if args.print_report:
+            print(json.dumps(report, indent=2), flush=True)
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            # Exclusive creation preserves historical evidence.
+            with args.output.open("x", encoding="utf-8", newline="\n") as output:
+                json.dump(report, output, indent=2)
+                output.write("\n")
     return report
 
 
@@ -149,7 +153,9 @@ def main():
     parser.add_argument("--scripta", required=True)
     parser.add_argument("--php", default="php")
     parser.add_argument("--python", default=sys.executable)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path, help="save the JSON report to a new file (optional)")
+    parser.add_argument("--print", dest="print_report", action="store_true",
+                        help="print the full JSON report to stdout; send timing progress to stderr")
     parser.add_argument("--samples", type=int, default=15)
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--seed", type=int, default=1729)
@@ -157,7 +163,7 @@ def main():
     args = parser.parse_args()
     if args.samples < 1 or args.warmups < 0 or not 0 < args.timeout < float("inf"):
         parser.error("samples and timeout must be positive; warmups must be nonnegative")
-    if args.output.exists():
+    if args.output is not None and args.output.exists():
         parser.error("output already exists; choose a new evidence filename")
     report = run(args)
     if report["status"] != "complete":

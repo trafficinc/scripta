@@ -23,6 +23,15 @@ Windows), and omit `MACOSX_DEPLOYMENT_TARGET`. Omit `--offline` if dependencies
 are not cached. PHP and Python must also be native executables on the same host.
 Use `--php PATH` and `--python PATH` to choose them explicitly. Choose a new
 output filename for every run; the driver never replaces existing evidence.
+`--output` is optional: omit it to print timing rows without saving a file.
+Add `--print` to print the full JSON report to stdout, with timing progress on
+stderr. Combine `--print` and `--output PATH` to both display and save the report.
+
+```sh
+python3 benchmarks/comparison/run.py --scripta target/aarch64-apple-darwin/release/scripta
+python3 benchmarks/comparison/run.py --scripta target/aarch64-apple-darwin/release/scripta --print
+```
+
 All JSON files under `benchmarks/` are ignored by Git. Keep raw measurement and
 profiling reports locally; only rendered Markdown summaries belong in the repository.
 
@@ -33,7 +42,8 @@ measurement. `--samples`, `--warmups`, `--seed`, and `--timeout` are configurabl
 the default per-invocation timeout is 60 seconds. The README renderer accepts only
 a complete matrix with consistent medians and finite, positive raw observations.
 Missing runtimes produce a partial report and a nonzero exit; invalid outputs,
-timeouts, and child failures stop measurement and save failed evidence.
+timeouts, and child failures stop measurement. Failed evidence is saved when
+`--output` is supplied and printed when `--print` is supplied.
 
 ## What is measured
 
