@@ -18,6 +18,8 @@ mod modules;
 mod objects;
 pub use invocation::{ExecutionOutcome, InvocationContext, InvocationError, InvocationResult};
 mod native;
+mod numeric_call;
+mod numeric_call_loop;
 mod ops;
 mod output;
 pub use output::{OutputAction, ScriptOutput};
@@ -128,6 +130,18 @@ pub struct Runtime {
     integer_loops_executed: usize,
     #[cfg(test)]
     float_loops_executed: usize,
+    #[cfg(test)]
+    disable_numeric_calls: bool,
+    #[cfg(test)]
+    force_numeric_calls: bool,
+    #[cfg(test)]
+    disable_numeric_annotations: bool,
+    #[cfg(test)]
+    numeric_calls_executed: usize,
+    #[cfg(test)]
+    disable_numeric_call_loops: bool,
+    #[cfg(test)]
+    numeric_call_loops_executed: usize,
     class_resolution_depth: usize,
     error_stream: Option<Box<dyn Write>>,
     input_stream: Option<Box<dyn std::io::BufRead>>,
@@ -619,6 +633,11 @@ impl Runtime {
                     }
                     if let Some(result) =
                         self.float_loop(condition, increment, body, statement.span)
+                    {
+                        return result;
+                    }
+                    if let Some(result) =
+                        self.numeric_call_loop(condition, increment, body, statement.span, output)
                     {
                         return result;
                     }
@@ -1228,6 +1247,11 @@ impl Runtime {
                     .scope_mut(self.environments.current)
                     .function_boundary = true;
                 let result = (|| {
+                    if receiver.is_none() && self.options.max_value_bytes.is_none() {
+                        if let Some(result) = self.numeric_call(declaration, values) {
+                            return result;
+                        }
+                    }
                     if let Some(receiver) = receiver {
                         self.environments
                             .scope_mut(self.environments.current)

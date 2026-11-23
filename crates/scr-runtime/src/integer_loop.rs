@@ -204,7 +204,7 @@ fn arithmetic(op: BinaryOp) -> bool {
     )
 }
 
-fn calculate(op: BinaryOp, a: i64, b: i64) -> ops::Result<i64> {
+pub(super) fn calculate(op: BinaryOp, a: i64, b: i64) -> ops::Result<i64> {
     use BinaryOp as B;
     if matches!(op, B::Divide | B::Remainder) && b == 0 {
         return Err(ops::Error::Arithmetic("division by zero"));

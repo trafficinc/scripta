@@ -10,23 +10,107 @@ enum Kind {
     Float,
 }
 
-fn kind(value: &Value) -> Option<Kind> {
-    match value {
-        Value::Int(_) => Some(Kind::Int),
-        Value::Float(_) => Some(Kind::Float),
-        _ => None,
+// Plans hold only finite numeric scalars. Keep general Values at the lexical
+// boundary, rather than cloning/dropping them for every intermediate result.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Number {
+    Int(i64),
+    Float(f64),
+}
+
+impl Number {
+    pub(super) fn from_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::Int(value) => Some(Self::Int(*value)),
+            Value::Float(value) if value.is_finite() => Some(Self::Float(*value)),
+            _ => None,
+        }
+    }
+
+    pub(super) fn into_value(self) -> Value {
+        match self {
+            Self::Int(value) => Value::Int(value),
+            Self::Float(value) => Value::Float(value),
+        }
+    }
+
+    fn kind(self) -> Kind {
+        match self {
+            Self::Int(_) => Kind::Int,
+            Self::Float(_) => Kind::Float,
+        }
+    }
+
+    fn finite(value: f64) -> ops::Result<Self> {
+        if value.is_finite() {
+            Ok(Self::Float(value))
+        } else {
+            Err(ops::Error::Arithmetic("floating-point arithmetic overflow"))
+        }
+    }
+
+    pub(super) fn unary(self, op: UnaryOp) -> ops::Result<Self> {
+        match (op, self) {
+            (UnaryOp::Positive, value) => Ok(value),
+            (UnaryOp::Negative, Self::Int(value)) => value
+                .checked_neg()
+                .map(Self::Int)
+                .ok_or(ops::Error::Arithmetic("integer arithmetic overflow")),
+            (UnaryOp::Negative, Self::Float(value)) => Self::finite(-value),
+            _ => unreachable!("verified numeric unary operator"),
+        }
+    }
+
+    pub(super) fn binary(self, op: BinaryOp, rhs: Self) -> ops::Result<Self> {
+        match (self, rhs) {
+            (Self::Int(a), Self::Int(b)) => super::integer_loop::calculate(op, a, b).map(Self::Int),
+            (Self::Float(a), Self::Float(b)) => {
+                if matches!(op, BinaryOp::Divide | BinaryOp::Remainder) && b == 0.0 {
+                    return Err(ops::Error::Arithmetic("division by zero"));
+                }
+                Self::finite(match op {
+                    BinaryOp::Add => a + b,
+                    BinaryOp::Subtract => a - b,
+                    BinaryOp::Multiply => a * b,
+                    BinaryOp::Divide => a / b,
+                    BinaryOp::Remainder => a % b,
+                    _ => unreachable!("verified numeric binary operator"),
+                })
+            }
+            _ => Err(ops::Error::Type(
+                "arithmetic requires matching numeric types; use int() or float() explicitly",
+            )),
+        }
+    }
+
+    fn compare(self, op: BinaryOp, rhs: Self) -> bool {
+        let ordering = match (self, rhs) {
+            (Self::Int(a), Self::Int(b)) => a.cmp(&b),
+            (Self::Float(a), Self::Float(b)) => a.partial_cmp(&b).expect("finite numeric slots"),
+            _ => unreachable!("verified matching comparison types"),
+        };
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        match op {
+            BinaryOp::Less => ordering == Less,
+            BinaryOp::LessEqual => ordering != Greater,
+            BinaryOp::Greater => ordering == Greater,
+            BinaryOp::GreaterEqual => ordering != Less,
+            BinaryOp::Equal => ordering == Equal,
+            BinaryOp::NotEqual => ordering != Equal,
+            _ => unreachable!("verified numeric comparison"),
+        }
     }
 }
 
 struct Slot<'a> {
     scope: usize,
     name: &'a str,
-    value: Value,
+    value: Number,
     dirty: bool,
 }
 
 enum Numeric {
-    Literal(Value),
+    Literal(Number),
     Slot(usize),
     Unary(UnaryOp, Box<Numeric>, Span),
     Binary(Box<Numeric>, BinaryOp, Box<Numeric>, Span),
@@ -60,12 +144,13 @@ impl<'a> Builder<'a, '_> {
             return None;
         }
         let (scope, value) = self.runtime.environments.lookup(name, false)?;
-        let ty = kind(value)?;
+        let value = Number::from_value(value)?;
+        let ty = value.kind();
         self.has_float |= ty == Kind::Float;
         self.slots.push(Slot {
             scope,
             name,
-            value: value.clone(),
+            value,
             dirty: false,
         });
         Some(self.slots.len() - 1)
@@ -78,15 +163,15 @@ impl<'a> Builder<'a, '_> {
         }
         Some(match &expr.kind {
             ExprKind::Literal(Literal::Int(value)) => {
-                (Numeric::Literal(Value::Int(*value)), Kind::Int)
+                (Numeric::Literal(Number::Int(*value)), Kind::Int)
             }
-            ExprKind::Literal(Literal::Float(value)) => {
+            ExprKind::Literal(Literal::Float(value)) if value.is_finite() => {
                 self.has_float = true;
-                (Numeric::Literal(Value::Float(*value)), Kind::Float)
+                (Numeric::Literal(Number::Float(*value)), Kind::Float)
             }
             ExprKind::Variable(name) => {
                 let index = self.slot(name)?;
-                (Numeric::Slot(index), kind(&self.slots[index].value)?)
+                (Numeric::Slot(index), self.slots[index].value.kind())
             }
             ExprKind::Grouped(inner) => return self.numeric(inner, depth + 1),
             ExprKind::Unary(op @ (UnaryOp::Positive | UnaryOp::Negative), inner) => {
@@ -150,7 +235,7 @@ impl<'a> Builder<'a, '_> {
         let slot = self.slot(name)?;
         let (rhs, ty) = self.numeric(rhs, 0)?;
         // Changing slot types would invalidate later expressions in the plan.
-        if kind(&self.slots[slot].value)? != ty {
+        if self.slots[slot].value.kind() != ty {
             return None;
         }
         Some(Assignment {
@@ -175,22 +260,22 @@ fn arithmetic(op: BinaryOp) -> bool {
 }
 
 impl Numeric {
-    fn evaluate(&self, slots: &[Slot<'_>], runtime: &mut Runtime) -> Result<Value> {
+    fn evaluate(&self, slots: &[Slot<'_>], runtime: &mut Runtime) -> Result<Number> {
         match self {
-            Self::Literal(value) => Ok(value.clone()),
-            Self::Slot(index) => Ok(slots[*index].value.clone()),
+            Self::Literal(value) => Ok(*value),
+            Self::Slot(index) => Ok(slots[*index].value),
             Self::Unary(op, inner, span) => {
                 let value = inner.evaluate(slots, runtime)?;
-                runtime.operation(ops::unary(*op, value), *span)
+                runtime.operation(value.unary(*op), *span)
             }
             Self::Binary(left, op, right, span) => {
                 let left = left.evaluate(slots, runtime)?;
                 let right = right.evaluate(slots, runtime)?;
-                runtime.operation(ops::binary(*op, left, right), *span)
+                runtime.operation(left.binary(*op, right), *span)
             }
             Self::Convert(callable, inner, span) => {
                 let value = inner.evaluate(slots, runtime)?;
-                let Value::Int(number) = value else {
+                let Number::Int(number) = value else {
                     unreachable!("verified integer conversion")
                 };
                 // Argument evaluation precedes the call-depth check. This
@@ -212,7 +297,7 @@ impl Numeric {
                         .is_some_and(|flag| flag.load(Ordering::Relaxed))
                 };
                 let cancelled = interrupted();
-                let result = Value::Float(number as f64);
+                let result = Number::Float(number as f64);
                 if cancelled || interrupted() {
                     // Match native-call diagnostics without re-reading a flag
                     // already observed set (a host may subsequently reset it).
@@ -239,7 +324,7 @@ impl Numeric {
 
 impl Assignment {
     fn execute(&self, slots: &mut [Slot<'_>], runtime: &mut Runtime) -> Result<()> {
-        let old = slots[self.slot].value.clone();
+        let old = slots[self.slot].value;
         let rhs = self.rhs.evaluate(slots, runtime)?;
         let value = if self.op == AssignmentOp::Assign {
             rhs
@@ -251,7 +336,7 @@ impl Assignment {
                 AssignmentOp::Divide => BinaryOp::Divide,
                 _ => unreachable!("verified assignment"),
             };
-            runtime.operation(ops::binary(op, old, rhs), self.span)?
+            runtime.operation(old.binary(op, rhs), self.span)?
         };
         slots[self.slot].value = value;
         slots[self.slot].dirty = true;
@@ -333,8 +418,7 @@ impl Runtime {
                 self.checkpoint(span)?;
                 let a = left.evaluate(&slots, self)?;
                 let b = right.evaluate(&slots, self)?;
-                let keep_going = self.operation(ops::binary(*op, a, b), condition.span)?;
-                if !self.operation(ops::boolean(keep_going), span)? {
+                if !a.compare(*op, b) {
                     break;
                 }
                 self.checkpoint(body.span)?;
@@ -359,7 +443,7 @@ impl Runtime {
                 .scope_mut(slot.scope)
                 .variables
                 .get_mut(slot.name)
-                .expect("numeric binding remains live") = slot.value;
+                .expect("numeric binding remains live") = slot.value.into_value();
         }
         Some(result)
     }
@@ -369,6 +453,132 @@ impl Runtime {
 mod tests {
     use super::*;
     use crate::{NativeFunction, NativeSignature, NativeType, RuntimeError, RuntimeOptions};
+
+    fn same_numeric_result(actual: ops::Result<Number>, expected: ops::Result<Value>) {
+        match (actual, expected) {
+            (Ok(Number::Int(a)), Ok(Value::Int(b))) => assert_eq!(a, b),
+            (Ok(Number::Float(a)), Ok(Value::Float(b))) => assert_eq!(a.to_bits(), b.to_bits()),
+            (Err(a), Err(b)) => assert_eq!(format!("{a:?}"), format!("{b:?}")),
+            (a, b) => panic!("typed/general mismatch: {a:?}, {b:?}"),
+        }
+    }
+
+    #[test]
+    fn typed_arithmetic_matches_general_operations_at_numeric_boundaries() {
+        let numbers = [
+            Number::Int(i64::MIN),
+            Number::Int(i64::MIN + 1),
+            Number::Int(-97),
+            Number::Int(-1),
+            Number::Int(0),
+            Number::Int(1),
+            Number::Int(97),
+            Number::Int(i64::MAX - 1),
+            Number::Int(i64::MAX),
+            Number::Float(-f64::MAX),
+            Number::Float(-1e308),
+            Number::Float(-97.5),
+            Number::Float(-1.0),
+            Number::Float(-f64::MIN_POSITIVE),
+            Number::Float(-f64::from_bits(1)),
+            Number::Float(-0.0),
+            Number::Float(0.0),
+            Number::Float(f64::from_bits(1)),
+            Number::Float(f64::MIN_POSITIVE),
+            Number::Float(0.5),
+            Number::Float(1.0),
+            Number::Float(97.5),
+            Number::Float(1e308),
+            Number::Float(f64::MAX),
+        ];
+        for a in numbers {
+            for op in [UnaryOp::Positive, UnaryOp::Negative] {
+                same_numeric_result(a.unary(op), ops::unary(op, a.into_value()));
+            }
+            for b in numbers {
+                for op in [
+                    BinaryOp::Add,
+                    BinaryOp::Subtract,
+                    BinaryOp::Multiply,
+                    BinaryOp::Divide,
+                    BinaryOp::Remainder,
+                ] {
+                    same_numeric_result(
+                        a.binary(op, b),
+                        ops::binary(op, a.into_value(), b.into_value()),
+                    );
+                }
+                if a.kind() == b.kind() {
+                    for op in [
+                        BinaryOp::Less,
+                        BinaryOp::LessEqual,
+                        BinaryOp::Greater,
+                        BinaryOp::GreaterEqual,
+                        BinaryOp::Equal,
+                        BinaryOp::NotEqual,
+                    ] {
+                        assert_eq!(
+                            ops::boolean(ops::binary(op, a.into_value(), b.into_value()).unwrap())
+                                .unwrap(),
+                            a.compare(op, b)
+                        );
+                    }
+                }
+            }
+        }
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(Number::from_value(&Value::Float(value)).is_none());
+        }
+    }
+
+    #[test]
+    fn typed_intermediates_preserve_rounding_zero_subnormals_and_failed_writes() {
+        for source in [
+            "$total=0.0;for($i=0;$i<3;$i+=1){$total=1.0/-(-0.0);}",
+            "$total=0.0;for($i=0;$i<3;$i+=1){$total=5e-324*0.5;}",
+            "$total=0.0;for($i=0;$i<3;$i+=1){$total=-5e-324*0.5;}",
+            "$total=0.0;for($i=0;$i<3;$i+=1){$total=9007199254740992.0+1.0-9007199254740992.0;}",
+            "$total=0.0;for($i=0;$i<3;$i+=1){$total=float(9007199254740993);}",
+            "$total=0.0;for($i=0;$i<3;$i+=1){$total=float(-9223372036854775807-1);}",
+            "$total=1.0;for($i=0;$i<3;$i+=1){$total=(1e308*2.0)+(1.0/0.0);}",
+            "$total=1.0;for($i=0;$i<3;$i+=1){$total=float((-9223372036854775807-1)/-1);}",
+            "$total=1.0;for($i=0;$i<3;$i+=1){$total=float((-9223372036854775807-1)%-1);}",
+            "$total=1.0;for($i=0;$i<3;$i+=1){$total=float(-(-9223372036854775807-1));}",
+            "$total=-0.0;for($i=-0.0;$i!==1.0;$i+=1.0){$total=$i;}",
+        ] {
+            assert_eq!(
+                compare(source, RuntimeOptions::default()).float_loops_executed,
+                1,
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn nonfinite_host_ast_literals_use_normal_validation() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let tokens =
+                scr_lexer::lex("$total=0.0;for($i=0.0;$i<1.0;$i+=1.0){$total+=1.0;}").unwrap();
+            let mut program = scr_parser::parse(&tokens).unwrap();
+            let StatementKind::For { condition, .. } = &mut program.statements[1].kind else {
+                unreachable!()
+            };
+            let ExprKind::Binary(_, _, right) = &mut condition[0].kind else {
+                unreachable!()
+            };
+            right.kind = ExprKind::Literal(Literal::Float(value));
+            let mut fast = Runtime::new();
+            let mut slow = Runtime::new();
+            slow.disable_integer_loops = true;
+            assert_eq!(
+                fast.execute(&program, &mut Vec::new()),
+                slow.execute(&program, &mut Vec::new())
+            );
+            assert_eq!(fast.float_loops_executed, 0);
+            assert_eq!(fast.get_global("total"), slow.get_global("total"));
+            assert_eq!(fast.environments.live, slow.environments.live);
+        }
+    }
 
     fn run(
         runtime: &mut Runtime,
@@ -634,7 +844,7 @@ mod tests {
             };
             let plan = Numeric::Convert(
                 callable.clone(),
-                Box::new(Numeric::Literal(Value::Int(7))),
+                Box::new(Numeric::Literal(Number::Int(7))),
                 span,
             );
             let a = plan.evaluate(&[], &mut fast).unwrap_err();

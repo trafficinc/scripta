@@ -1,0 +1,253 @@
+//! Bounded, declaration-owned plans for pure numeric leaf returns.
+use crate::{Result, Runtime, Value, float_loop::Number, value::UserDeclaration};
+use scr_ast::{BinaryOp, Expr, ExprKind, Literal, StatementKind, TypeAnnotation, UnaryOp};
+use scr_diagnostics::Span;
+
+const MAX_PARAMETERS: usize = 8;
+const MAX_NODES: usize = 64;
+const MAX_DEPTH: usize = 16;
+
+#[derive(Clone, Copy)]
+enum Annotation {
+    None,
+    Int,
+    Float,
+    General,
+}
+
+impl Annotation {
+    fn compile(annotation: &Option<TypeAnnotation>) -> Self {
+        match annotation.as_ref().map(|a| a.name.as_str()) {
+            None => Self::None,
+            Some("int") => Self::Int,
+            Some("float") => Self::Float,
+            _ => Self::General,
+        }
+    }
+
+    #[inline]
+    fn check(
+        self,
+        runtime: &Runtime,
+        annotation: &Option<TypeAnnotation>,
+        value: &Value,
+        span: Span,
+        returning: bool,
+    ) -> Result<()> {
+        #[cfg(test)]
+        if runtime.disable_numeric_annotations {
+            return runtime.annotation(annotation, value, span, returning);
+        }
+        // declare_type rejects these exact primitive names, including host-built
+        // AST declarations. They cannot name a shadowing script class. Other
+        // names/qualified types and all mismatches retain normal resolution and
+        // diagnostics; no successful value-type check is omitted.
+        match (self, value) {
+            (Self::None, _) | (Self::Int, Value::Int(_)) | (Self::Float, Value::Float(_)) => Ok(()),
+            _ => runtime.annotation(annotation, value, span, returning),
+        }
+    }
+}
+
+enum Numeric {
+    Literal(Number),
+    Parameter(usize),
+    Unary(UnaryOp, Box<Numeric>, Span),
+    Binary(Box<Numeric>, BinaryOp, Box<Numeric>, Span),
+}
+
+pub(super) struct Plan {
+    expression: Numeric,
+    checkpoint: Span,
+    parameters: [Annotation; MAX_PARAMETERS],
+    returning: Annotation,
+}
+
+impl Plan {
+    pub(super) fn compile(declaration: &UserDeclaration) -> Option<Box<Self>> {
+        if declaration.parameters.len() > MAX_PARAMETERS
+            || declaration.parameters.iter().enumerate().any(|(i, p)| {
+                p.default.is_some()
+                    || p.variadic
+                    || p.binding.name == "this"
+                    || declaration.parameters[..i]
+                        .iter()
+                        .any(|q| q.binding.name == p.binding.name)
+            })
+        {
+            return None;
+        }
+        let [statement] = declaration.body.statements.as_slice() else {
+            return None;
+        };
+        let StatementKind::Return(Some(expression)) = &statement.kind else {
+            return None;
+        };
+        let expression = Self::expression(declaration, expression, &mut 0, 0)?;
+        let mut parameters = [Annotation::None; MAX_PARAMETERS];
+        for (slot, parameter) in parameters.iter_mut().zip(&declaration.parameters) {
+            *slot = Annotation::compile(&parameter.annotation);
+        }
+        Some(Box::new(Self {
+            expression,
+            checkpoint: statement.span,
+            parameters,
+            returning: Annotation::compile(&declaration.return_type),
+        }))
+    }
+
+    fn expression(
+        declaration: &UserDeclaration,
+        expr: &Expr,
+        nodes: &mut usize,
+        depth: usize,
+    ) -> Option<Numeric> {
+        *nodes += 1;
+        if *nodes > MAX_NODES || depth > MAX_DEPTH {
+            return None;
+        }
+        Some(match &expr.kind {
+            ExprKind::Literal(Literal::Int(v)) => Numeric::Literal(Number::Int(*v)),
+            ExprKind::Literal(Literal::Float(v)) if v.is_finite() => {
+                Numeric::Literal(Number::Float(*v))
+            }
+            ExprKind::Variable(name) => Numeric::Parameter(
+                declaration
+                    .parameters
+                    .iter()
+                    .position(|p| p.binding.name == *name)?,
+            ),
+            ExprKind::Grouped(inner) => {
+                return Self::expression(declaration, inner, nodes, depth + 1);
+            }
+            ExprKind::Unary(op @ (UnaryOp::Positive | UnaryOp::Negative), inner) => Numeric::Unary(
+                *op,
+                Box::new(Self::expression(declaration, inner, nodes, depth + 1)?),
+                expr.span,
+            ),
+            ExprKind::Binary(
+                left,
+                op @ (BinaryOp::Add
+                | BinaryOp::Subtract
+                | BinaryOp::Multiply
+                | BinaryOp::Divide
+                | BinaryOp::Remainder),
+                right,
+            ) => Numeric::Binary(
+                Box::new(Self::expression(declaration, left, nodes, depth + 1)?),
+                *op,
+                Box::new(Self::expression(declaration, right, nodes, depth + 1)?),
+                expr.span,
+            ),
+            _ => return None,
+        })
+    }
+}
+
+impl Numeric {
+    fn integer_only(&self) -> bool {
+        match self {
+            Self::Literal(Number::Int(_)) | Self::Parameter(_) => true,
+            Self::Literal(Number::Float(_)) => false,
+            Self::Unary(_, value, _) => value.integer_only(),
+            Self::Binary(left, _, right, _) => left.integer_only() && right.integer_only(),
+        }
+    }
+    fn evaluate(&self, arguments: &[Number; MAX_PARAMETERS], runtime: &Runtime) -> Result<Number> {
+        match self {
+            Self::Literal(v) => Ok(*v),
+            Self::Parameter(index) => Ok(arguments[*index]),
+            Self::Unary(op, inner, span) => {
+                let value = inner.evaluate(arguments, runtime)?;
+                runtime.operation(value.unary(*op), *span)
+            }
+            Self::Binary(left, op, right, span) => {
+                let left = left.evaluate(arguments, runtime)?;
+                let right = right.evaluate(arguments, runtime)?;
+                runtime.operation(left.binary(*op, right), *span)
+            }
+        }
+    }
+}
+
+impl Plan {
+    pub(super) fn integer_only(&self) -> bool {
+        self.expression.integer_only()
+    }
+}
+
+impl Runtime {
+    // Call ownership, arity, frame, source and parameter scope are already set
+    // up by the ordinary call path. Plans never hold runtime Values or scopes.
+    pub(super) fn numeric_call(
+        &mut self,
+        declaration: &UserDeclaration,
+        values: &[Value],
+    ) -> Option<Result<Value>> {
+        #[cfg(test)]
+        if self.disable_numeric_calls {
+            return None;
+        }
+        let cached = match declaration.numeric_call.get() {
+            Some(cached) => cached,
+            None => {
+                // A function called once should pay no compilation cost. Warm
+                // declarations cache both supported plans and rejected shapes.
+                let first = !declaration.numeric_seen.replace(true);
+                #[cfg(not(test))]
+                let force = false;
+                #[cfg(test)]
+                let force = self.force_numeric_calls;
+                if first && !force {
+                    return None;
+                }
+                declaration
+                    .numeric_call
+                    .get_or_init(|| Plan::compile(declaration))
+            }
+        };
+        let plan = cached.as_deref()?;
+        debug_assert_eq!(values.len(), declaration.parameters.len());
+        let mut arguments = [Number::Int(0); MAX_PARAMETERS];
+        for (slot, value) in arguments.iter_mut().zip(values) {
+            *slot = Number::from_value(value)?;
+        }
+        #[cfg(test)]
+        {
+            self.numeric_calls_executed += 1;
+        }
+        Some((|| {
+            // Keep value checks, general resolution and their original order. Only
+            // numeric arguments are eligible, so omitting their lexical copies
+            // cannot change ownership counts or collector edges.
+            for (kind, (parameter, value)) in plan
+                .parameters
+                .iter()
+                .zip(declaration.parameters.iter().zip(values))
+            {
+                kind.check(self, &parameter.annotation, value, parameter.span, false)?;
+            }
+            let previous =
+                self.enter_empty_scope(self.environments.current, declaration.body.span)?;
+            let result = (|| {
+                self.checkpoint(plan.checkpoint)?;
+                plan.expression.evaluate(&arguments, self)
+            })();
+            self.environments.leave_empty(previous);
+            let value = result?.into_value();
+            plan.returning.check(
+                self,
+                &declaration.return_type,
+                &value,
+                declaration.name_span,
+                true,
+            )?;
+            Ok(value)
+        })())
+    }
+}
+
+#[cfg(test)]
+mod annotation_tests;
+#[cfg(test)]
+mod tests;

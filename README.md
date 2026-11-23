@@ -58,16 +58,16 @@ Median whole-process wall time in milliseconds; **lower is better**.
 
 | Benchmark | Work size | PHP (ms) | Python (ms) | Scripta (ms) |
 | --- | --- | ---: | ---: | ---: |
-| Numeric loop | 1,000,000 iterations | 47.777 | 105.235 | 32.919 |
-| Recursive Fibonacci | fib(28), no memoization | 62.013 | 95.803 | 330.620 |
-| List pipeline | 2,000 items × 200 passes | 54.875 | 61.971 | 107.725 |
-| String concatenation | 100,000 × 8-byte appends | 830.190 | 39.197 | 27.424 |
-| Dictionary operations | 256 keys; 40,960 updates; 128 copy-removals | 35.905 | 42.512 | 41.549 |
-| Class dispatch | 200,000 method calls | 40.828 | 75.122 | 152.284 |
-| Regex match | 20,000 matches attempted | 35.262 | 62.658 | 17.222 |
-| JSON roundtrip | 20,000 encode/decode pairs | 49.622 | 147.502 | 68.823 |
-| Function calls | 200,000 calls | 38.956 | 50.278 | 93.428 |
-| Startup | Empty script | 32.979 | 29.492 | 5.893 |
+| Numeric loop | 1,000,000 iterations | 47.542 | 105.495 | 32.521 |
+| Recursive Fibonacci | fib(28), no memoization | 61.828 | 95.810 | 333.181 |
+| List pipeline | 2,000 items × 200 passes | 55.331 | 62.655 | 107.580 |
+| String concatenation | 100,000 × 8-byte appends | 836.302 | 39.395 | 27.407 |
+| Dictionary operations | 256 keys; 40,960 updates; 128 copy-removals | 35.795 | 42.669 | 41.335 |
+| Class dispatch | 200,000 method calls | 40.763 | 75.312 | 152.061 |
+| Regex match | 20,000 matches attempted | 35.003 | 62.777 | 17.132 |
+| JSON roundtrip | 20,000 encode/decode pairs | 49.194 | 147.837 | 68.772 |
+| Function calls | 200,000 calls | 38.806 | 49.783 | 25.582 |
+| Startup | Empty script | 32.888 | 29.877 | 6.119 |
 
 Measured locally,
 with 15 samples after 3 warmups per workload/runtime.

@@ -53,6 +53,8 @@ pub(crate) struct UserDeclaration {
     ast: FunctionDeclaration,
     pub required: usize,
     pub variadic: bool,
+    pub numeric_call: std::cell::OnceCell<Option<Box<crate::numeric_call::Plan>>>,
+    pub numeric_seen: std::cell::Cell<bool>,
 }
 impl UserDeclaration {
     pub fn new(ast: FunctionDeclaration) -> Self {
@@ -63,6 +65,8 @@ impl UserDeclaration {
                 .filter(|p| p.default.is_none() && !p.variadic)
                 .count(),
             variadic: ast.parameters.last().is_some_and(|p| p.variadic),
+            numeric_call: std::cell::OnceCell::new(),
+            numeric_seen: std::cell::Cell::new(false),
             ast,
         }
     }
