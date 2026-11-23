@@ -78,10 +78,12 @@ Small parameter scopes share immutable names with function declarations, falling
 back to ordinary bindings when needed. Successful built-in type checks avoid
 class lookup. Argument reuse retains at most 64 empty buffers of up to 16 slots.
 
-Cleared scope storage is pooled. Up to eight dormant empty block records also
-remain in the arena to reduce repeated scope setup. A block record is reusable
-only when it has no bindings, module state, or captures; its parent is cleared.
-Pooled records retain no values or lexical roots and do not count as live scopes.
+Cleared scope storage and reserved parameter records share a 64-entry pool,
+bounded to 32 retained collection slots per entry. Up to eight empty block
+records remain reserved separately. Captured parameter scopes and those with
+namespace storage or larger bindings follow normal release and tracing. Reserved
+records have their parents and flags reset, retain no values or names, and do not
+count as live scopes.
 
 `RuntimeOptions` controls source size, recursion, instructions, logical value
 bytes, live scopes, output, and cancellation. Calls have a hard ceiling of 64

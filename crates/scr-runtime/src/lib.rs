@@ -1372,7 +1372,7 @@ impl Runtime {
                         .function_boundary = false;
                     self.environments.leave_empty(previous);
                 } else {
-                    self.environments.leave(previous);
+                    self.environments.leave_parameter(previous);
                 }
                 self.source = caller_source;
                 result
@@ -1602,6 +1602,7 @@ impl Runtime {
         }
         Ok(self.environments.enter(parent))
     }
+    #[inline]
     fn enter_empty_scope(&mut self, parent: usize, span: Span) -> Result<usize> {
         if self
             .options

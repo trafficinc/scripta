@@ -10,6 +10,9 @@ use std::{
 };
 
 #[cfg(test)]
+mod parameter_scope_tests;
+
+#[cfg(test)]
 #[derive(Debug, Default, Clone, Copy)]
 struct CollectionWork {
     arena_slots: usize,
@@ -45,6 +48,14 @@ const MAX_SPARE_SCOPES: usize = 64;
 const MAX_SPARE_SCOPE_SLOTS: usize = 32;
 const MAX_EMPTY_SCOPES: usize = 8;
 
+// Keep scope storage inline: boxing the large variant would add allocations
+// to the storage-reuse path. Reserved records store only their arena ID here.
+#[allow(clippy::large_enum_variant)]
+enum SpareScope {
+    Storage(Scope),
+    Reserved(usize),
+}
+
 /// Owned arena: closures refer to scope IDs, so function/environment cycles
 /// cannot form Rc cycles. Transient scopes are released and their slots reused.
 pub(crate) struct Environments {
@@ -53,8 +64,10 @@ pub(crate) struct Environments {
     force_hash: bool,
     #[cfg(test)]
     pub disable_empty_reuse: bool,
+    #[cfg(test)]
+    pub disable_parameter_reuse: bool,
     free: Vec<usize>,
-    spare_scopes: Vec<Scope>,
+    spare_scopes: Vec<SpareScope>,
     // Dormant empty blocks retain their arena storage, not
     // lexical parents or Values. They do not count toward live scope limits.
     empty_scopes: Vec<usize>,
@@ -84,6 +97,8 @@ impl Default for Environments {
             force_hash: false,
             #[cfg(test)]
             disable_empty_reuse: false,
+            #[cfg(test)]
+            disable_parameter_reuse: false,
             free: Vec::new(),
             spare_scopes: Vec::new(),
             empty_scopes: Vec::new(),
@@ -113,7 +128,22 @@ impl Environments {
     }
     pub fn enter(&mut self, parent: usize) -> usize {
         self.live += 1;
-        let mut scope = self.spare_scopes.pop().unwrap_or_default();
+        let mut scope = match self.spare_scopes.pop() {
+            Some(SpareScope::Reserved(id)) => {
+                let scope = self.scope_mut(id);
+                debug_assert!(
+                    scope.parent.is_none() && !scope.captured && !scope.function_boundary
+                );
+                debug_assert!(scope.variables.iter().next().is_none());
+                scope.parent = Some(parent);
+                let previous = self.current;
+                self.current = id;
+                self.active.push(id);
+                return previous;
+            }
+            Some(SpareScope::Storage(scope)) => scope,
+            None => Scope::default(),
+        };
         #[cfg(test)]
         if self.force_hash {
             scope.variables.force_hash();
@@ -143,9 +173,43 @@ impl Environments {
             self.free.push(id);
         }
     }
+
+    pub fn leave_parameter(&mut self, previous: usize) {
+        #[cfg(test)]
+        if self.disable_parameter_reuse {
+            self.leave(previous);
+            return;
+        }
+        let scope = self.scope(self.current);
+        // A populated namespace or even its retained allocation uses ordinary
+        // release. This bounds total retained capacity to the variable store.
+        if scope.captured
+            || scope.variables.capacity() > MAX_SPARE_SCOPE_SLOTS
+            || scope.functions.capacity() != 0
+            || scope.classes.capacity() != 0
+            || scope.aliases.capacity() != 0
+            || scope.loaded_modules.capacity() != 0
+            || self.spare_scopes.len() >= MAX_SPARE_SCOPES
+            || self.spare_scopes.try_reserve(1).is_err()
+        {
+            self.leave(previous);
+            return;
+        }
+        let id = self.current;
+        let active = self.active.pop();
+        debug_assert_eq!(active, Some(id));
+        self.current = previous;
+        self.live -= 1;
+        let scope = self.scope_mut(id);
+        scope.variables.clear();
+        scope.parent = None;
+        scope.function_boundary = false;
+        self.spare_scopes.push(SpareScope::Reserved(id));
+    }
     // General blocks may enter here too, but must use leave_block to check for
     // bindings or captures before retaining the record. Numeric plans prove
     // emptiness ahead of time and can use leave_empty directly.
+    #[inline]
     pub fn enter_empty(&mut self, parent: usize) -> usize {
         #[cfg(test)]
         if self.disable_empty_reuse {
@@ -162,6 +226,7 @@ impl Environments {
         previous
     }
 
+    #[inline]
     pub fn leave_empty(&mut self, previous: usize) {
         #[cfg(test)]
         if self.disable_empty_reuse {
@@ -201,7 +266,7 @@ impl Environments {
             self.leave(previous);
         }
     }
-    fn recycle_scope(spares: &mut Vec<Scope>, mut scope: Scope) {
+    fn recycle_scope(spares: &mut Vec<SpareScope>, mut scope: Scope) {
         let slots = [
             scope.variables.capacity(),
             scope.functions.capacity(),
@@ -227,7 +292,7 @@ impl Environments {
         scope.parent = None;
         scope.captured = false;
         scope.function_boundary = false;
-        spares.push(scope);
+        spares.push(SpareScope::Storage(scope));
     }
 
     pub fn capture(&mut self) {
@@ -303,9 +368,13 @@ impl Environments {
         let mut object_environments = HashMap::new();
         let mut environments = HashMap::new();
         let mut pending = self.active.clone();
-        // Dormant block records are empty and have no parent. Keep their
+        // Dormant records are empty and have no parent. Keep their
         // storage reserved without counting them as live lexical scopes.
         pending.extend(self.empty_scopes.iter().copied());
+        pending.extend(self.spare_scopes.iter().filter_map(|entry| match entry {
+            SpareScope::Reserved(id) => Some(*id),
+            SpareScope::Storage(_) => None,
+        }));
         pending.extend(self.temporary_roots.iter().copied());
         pending.extend(self.module_cache.values().copied());
         for object in &objects {
@@ -919,7 +988,10 @@ mod tests {
         };
         Environments::recycle_scope(&mut spares, scope);
         assert_eq!(spares.len(), 1);
-        assert!(spares[0].variables.capacity() <= super::MAX_SPARE_SCOPE_SLOTS);
+        let super::SpareScope::Storage(scope) = &spares[0] else {
+            panic!()
+        };
+        assert!(scope.variables.capacity() <= super::MAX_SPARE_SCOPE_SLOTS);
     }
 
     #[test]
