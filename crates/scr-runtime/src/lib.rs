@@ -17,6 +17,9 @@ mod field_update_tests;
 mod float_loop;
 mod integer_loop;
 mod invocation;
+mod map_builder;
+#[cfg(test)]
+mod map_builder_tests;
 mod map_index;
 mod method_cache;
 #[cfg(test)]
@@ -134,6 +137,10 @@ pub struct Runtime {
     force_hashed_fields: bool,
     #[cfg(test)]
     disable_method_cache: bool,
+    #[cfg(test)]
+    disable_map_literal_index: bool,
+    #[cfg(test)]
+    fail_map_literal_index_after: Option<usize>,
     identity: Rc<()>,
     options: RuntimeOptions,
     steps: u64,
@@ -1026,27 +1033,7 @@ impl Runtime {
             ExprKind::List(items) => self
                 .expanded_values(items, expr.span, output)
                 .map(Value::List),
-            ExprKind::Map(entries) => {
-                let mut map = Vec::new();
-                for (key, value) in entries {
-                    let key_value = self.evaluate(key, output)?;
-                    let key = self.operation(
-                        MapKey::from_value(key_value)
-                            .map_err(|_| ops::Error::Type("map keys must be int or string")),
-                        key.span,
-                    )?;
-                    let value = self.evaluate(value, output)?;
-                    if let Some((_, old)) = map.iter_mut().find(|(candidate, _)| candidate == &key)
-                    {
-                        *old = value;
-                    } else {
-                        map.push((key, value));
-                    }
-                }
-                let value = Value::Map(map);
-                self.validate_value(&value, 0, expr.span)?;
-                Ok(value)
-            }
+            ExprKind::Map(entries) => self.map_literal(entries, expr.span, output),
         }
     }
 
