@@ -55,7 +55,7 @@ pub(crate) struct Environments {
     pub disable_empty_reuse: bool,
     free: Vec<usize>,
     spare_scopes: Vec<Scope>,
-    // Dormant, proven-empty numeric blocks retain their arena storage, not
+    // Dormant empty blocks retain their arena storage, not
     // lexical parents or Values. They do not count toward live scope limits.
     empty_scopes: Vec<usize>,
     // Includes suspended callers, which need not be lexical parents of current.
@@ -143,8 +143,9 @@ impl Environments {
             self.free.push(id);
         }
     }
-    // Only bounded numeric plans can use these operations: their blocks cannot
-    // declare bindings, capture scopes, or call arbitrary/reentrant code.
+    // General blocks may enter here too, but must use leave_block to check for
+    // bindings or captures before retaining the record. Numeric plans prove
+    // emptiness ahead of time and can use leave_empty directly.
     pub fn enter_empty(&mut self, parent: usize) -> usize {
         #[cfg(test)]
         if self.disable_empty_reuse {
@@ -183,6 +184,22 @@ impl Environments {
         self.current = previous;
         self.live -= 1;
         self.empty_scopes.push(id);
+    }
+
+    pub fn leave_block(&mut self, previous: usize) {
+        let scope = self.scope(self.current);
+        if !scope.captured
+            && !scope.function_boundary
+            && scope.variables.iter().next().is_none()
+            && scope.functions.is_empty()
+            && scope.classes.is_empty()
+            && scope.aliases.is_empty()
+            && scope.loaded_modules.is_empty()
+        {
+            self.leave_empty(previous);
+        } else {
+            self.leave(previous);
+        }
     }
     fn recycle_scope(spares: &mut Vec<Scope>, mut scope: Scope) {
         let slots = [
@@ -286,7 +303,7 @@ impl Environments {
         let mut object_environments = HashMap::new();
         let mut environments = HashMap::new();
         let mut pending = self.active.clone();
-        // Dormant numeric records are empty and have no parent. Keep their
+        // Dormant block records are empty and have no parent. Keep their
         // storage reserved without counting them as live lexical scopes.
         pending.extend(self.empty_scopes.iter().copied());
         pending.extend(self.temporary_roots.iter().copied());
@@ -662,7 +679,12 @@ mod tests {
                 let mut runtime = fixture(size, nested);
                 assert_eq!(runtime.collect_garbage(), 0);
                 let live = runtime.environments.last_collection;
-                assert_eq!(live.scopes_scanned, 1 + 2 * size);
+                // The empty loop body leaves one reserved record, separate
+                // from the globals and the two captured scopes per closure.
+                let dormant = runtime.environments.empty_scopes.len();
+                assert_eq!(dormant, 1);
+                assert_eq!(runtime.environments.live, 1 + 2 * size);
+                assert_eq!(live.scopes_scanned, 1 + 2 * size + dormant);
                 assert_eq!(live.scopes_marked, live.scopes_scanned);
                 assert_eq!(live.registry_entries, 1 + size);
                 // Includes arena high-water slots, nested values, and weak registry
@@ -680,12 +702,16 @@ mod tests {
                 runtime.set_global("kept", crate::Value::Null).unwrap();
                 assert_eq!(runtime.collect_garbage(), 2 * size);
                 let garbage = runtime.environments.last_collection;
-                assert_eq!(garbage.scopes_scanned, 1 + 2 * size);
-                assert_eq!(garbage.scopes_marked, 1);
+                assert_eq!(garbage.scopes_scanned, 1 + 2 * size + dormant);
+                assert_eq!(garbage.scopes_marked, 1 + dormant);
                 assert!(garbage.values_visited < live.values_visited);
                 assert_eq!(runtime.environments.functions.len(), 1);
                 assert_eq!(runtime.collect_garbage(), 0);
-                assert_eq!(runtime.environments.last_collection.scopes_scanned, 1);
+                assert_eq!(
+                    runtime.environments.last_collection.scopes_scanned,
+                    1 + dormant
+                );
+                assert_eq!(runtime.environments.live, 1);
                 assert_eq!(runtime.environments.last_collection.registry_entries, 1);
             }
         }
@@ -703,7 +729,8 @@ mod tests {
             .unwrap();
         assert_eq!(runtime.collect_garbage(), 0);
         let work = runtime.environments.last_collection;
-        assert_eq!(work.scopes_marked, 3);
+        assert_eq!(runtime.environments.empty_scopes.len(), 1);
+        assert_eq!(work.scopes_marked, 4);
         assert_eq!(work.registry_entries, 2);
         assert!(
             work.values_visited < 20100,

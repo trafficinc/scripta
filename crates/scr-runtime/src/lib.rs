@@ -4,6 +4,8 @@
 mod arrays;
 mod bindings;
 #[cfg(test)]
+mod block_scope_tests;
+#[cfg(test)]
 mod call_reuse_tests;
 mod environment;
 mod error;
@@ -546,9 +548,9 @@ impl Runtime {
         Ok(())
     }
     fn block(&mut self, block: &Block, output: &mut dyn ScriptOutput) -> Result<()> {
-        let previous = self.enter_scope(self.environments.current, block.span)?;
+        let previous = self.enter_empty_scope(self.environments.current, block.span)?;
         let result = self.statements(&block.statements, output);
-        self.environments.leave(previous);
+        self.environments.leave_block(previous);
         result
     }
     fn expressions(
