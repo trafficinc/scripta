@@ -230,6 +230,153 @@ fn automatic_collection_reclaims_during_a_single_long_execution() {
     assert_eq!(drops.get(), 2000);
 }
 
+fn type_module(name: &str) -> Value {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/collector")
+        .join(name);
+    Value::String(path.to_string_lossy().into_owned())
+}
+
+#[test]
+fn automatic_collection_covers_type_only_shared_includes() {
+    for module in [
+        "local-class.scripta",
+        "local-interface.scripta",
+        "local-method.scripta",
+    ] {
+        let (mut runtime, counts, drops) = tracked_runtime(RuntimeOptions::default());
+        runtime.set_global("module", type_module(module)).unwrap();
+        run(
+            &mut runtime,
+            "function factory($module) { $r=resource(); require $module; }",
+        )
+        .unwrap();
+        run(
+            &mut runtime,
+            "for ($i=0; $i<2000; $i+=1) { factory($module); } $live=liveResources();",
+        )
+        .unwrap();
+        let Some(Value::Int(live)) = runtime.get_global("live") else {
+            panic!("live resources");
+        };
+        assert!(*live < 300, "unbounded {module} retention: {live}");
+        assert_eq!(counts.created.get(), 2000);
+        assert_eq!(drops.get(), counts.created.get());
+        assert_eq!(runtime.collect_garbage(), 0);
+    }
+}
+
+#[test]
+fn host_held_method_survives_type_churn_and_reused_scope_slots() {
+    let (mut runtime, counts, drops) = tracked_runtime(RuntimeOptions::default());
+    runtime
+        .set_global("module", type_module("local-method.scripta"))
+        .unwrap();
+    run(
+        &mut runtime,
+        "function keep($module) { $r=resource(); require $module; return new Local(); }
+         function discard($module) { $r=resource(); require $module; }
+         $object=keep($module); $method=$object->read; $object=null;",
+    )
+    .unwrap();
+    let method = runtime.get_global("method").unwrap().clone();
+    runtime.set_global("method", Value::Null).unwrap();
+    let resource = match runtime
+        .invoke(method.clone(), &[], &mut std::io::sink())
+        .unwrap()
+    {
+        Value::NativeObject(resource) => Rc::downgrade(&resource),
+        _ => panic!("captured resource"),
+    };
+    for _ in 0..3 {
+        run(
+            &mut runtime,
+            "for ($i=0; $i<1000; $i+=1) { discard($module); }",
+        )
+        .unwrap();
+        runtime.collect_garbage();
+        let value = runtime
+            .invoke(method.clone(), &[], &mut std::io::sink())
+            .unwrap();
+        assert_eq!(value.type_name(), "Resource");
+        let Value::NativeObject(value) = value else {
+            unreachable!();
+        };
+        assert!(Rc::ptr_eq(&value, &resource.upgrade().unwrap()));
+        assert_eq!(counts.created.get() - drops.get(), 1);
+    }
+    drop(method);
+    runtime.collect_garbage();
+    assert_eq!(drops.get(), counts.created.get());
+    assert!(resource.upgrade().is_none());
+}
+
+#[test]
+fn type_capture_churn_preserves_scope_boundaries_and_interruption_cleanup() {
+    for limit in [4, 5] {
+        let (mut runtime, counts, drops) = tracked_runtime(RuntimeOptions {
+            max_scopes: Some(limit),
+            ..Default::default()
+        });
+        runtime
+            .set_global("module", type_module("local-class.scripta"))
+            .unwrap();
+        run(
+            &mut runtime,
+            "function factory($module) { $r=resource(); require $module; }",
+        )
+        .unwrap();
+        let result = run(
+            &mut runtime,
+            "for ($i=0; $i<100; $i+=1) { factory($module); }",
+        );
+        if limit == 4 {
+            assert!(result.unwrap_err().message.contains("scope limit"));
+        } else {
+            result.unwrap();
+            assert_eq!(counts.created.get(), 100);
+        }
+        assert_eq!(counts.created.get(), drops.get());
+        run(&mut runtime, "$recovered=true;").unwrap();
+    }
+    let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (mut runtime, counts, drops) = tracked_runtime(RuntimeOptions {
+        interrupt_flag: Some(flag.clone()),
+        ..Default::default()
+    });
+    runtime
+        .set_global("module", type_module("local-interface.scripta"))
+        .unwrap();
+    let interrupted = flag.clone();
+    runtime
+        .register(
+            "interrupt",
+            NativeFunction::new(
+                NativeSignature::new(vec![], NativeType::Null),
+                move |_, _| {
+                    interrupted.store(true, std::sync::atomic::Ordering::Relaxed);
+                    Ok(Value::Null)
+                },
+            ),
+        )
+        .unwrap();
+    run(
+        &mut runtime,
+        "function factory($module) { $r=resource(); require $module; }",
+    )
+    .unwrap();
+    let error = run(
+        &mut runtime,
+        "for ($i=0; $i<2000; $i+=1) { factory($module); if ($i===300) interrupt(); }",
+    )
+    .unwrap_err();
+    assert!(error.message.contains("interrupted"), "{error:?}");
+    assert_eq!(counts.created.get(), 301);
+    assert_eq!(counts.created.get(), drops.get());
+    flag.store(false, std::sync::atomic::Ordering::Relaxed);
+    run(&mut runtime, "$recovered=true;").unwrap();
+}
+
 #[test]
 fn garbage_is_collected_before_a_scope_limit_rejects_new_work() {
     let (mut runtime, counts, drops) = tracked_runtime(RuntimeOptions {

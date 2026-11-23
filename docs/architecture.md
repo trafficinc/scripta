@@ -60,6 +60,8 @@ include globals, active and suspended calls, cached modules, and externally held
 callables and script objects. Collection runs at execution boundaries, selected
 checkpoints, and before rejecting a scope allocation. Hosts can also call
 `Runtime::collect_garbage()`. Opaque native ownership cycles require host cleanup.
+New local environments captured by class or interface declarations also contribute
+to automatic collection scheduling, including declarations loaded by shared includes.
 
 Script classes and interfaces live in `objects.rs`. Instance fields use arena
 scopes, so object cycles remain collectible. Ordinary instances store initialized

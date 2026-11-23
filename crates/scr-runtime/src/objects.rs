@@ -267,7 +267,7 @@ impl Runtime {
             .scope_mut(self.environments.current)
             .classes
             .insert(declaration.name.name.clone(), class.clone());
-        self.environments.capture();
+        self.environments.capture_type();
         Ok(())
     }
 

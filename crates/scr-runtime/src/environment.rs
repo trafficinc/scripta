@@ -303,6 +303,16 @@ impl Environments {
             id = scope.parent;
         }
     }
+    pub fn capture_type(&mut self) {
+        // Local includes can capture environments through types alone, without
+        // creating a tracked function or object. Charge the new captured scope
+        // once; repeated declarations in an already captured scope add no debt.
+        let newly_captured = self.current != 0 && !self.scope(self.current).captured;
+        self.capture();
+        if newly_captured {
+            self.allocations_since_collection = self.allocations_since_collection.saturating_add(1);
+        }
+    }
     pub fn track_function(&mut self, function: &Rc<Function>) {
         self.functions.push(Rc::downgrade(function));
         self.allocations_since_collection = self.allocations_since_collection.saturating_add(1);
@@ -835,6 +845,64 @@ mod tests {
                 arena.free.capacity() <= 1024,
                 "unbounded free-list capacity"
             );
+            if batch == 0 {
+                high_water = arena.scopes.len();
+            }
+            assert_eq!(arena.scopes.len(), high_water);
+        }
+    }
+
+    #[test]
+    fn type_scheduling_charges_new_environments_not_every_declaration() {
+        let declarations = (0..1024)
+            .map(|i| format!("class Local{i} {{}}"))
+            .collect::<String>();
+        for local in [false, true] {
+            let mut runtime = crate::Runtime::new();
+            // A shared include executes top-level declarations in its caller's
+            // lexical scope. Model that context without timing filesystem work.
+            let previous = local.then(|| runtime.environments.enter(0));
+            let before = runtime.environments.collections;
+            execute(&mut runtime, &declarations);
+            assert_eq!(
+                runtime.environments.collections - before,
+                2,
+                "live declarations must not cause repeated scans"
+            );
+            if let Some(previous) = previous {
+                runtime.environments.leave(previous);
+                assert_eq!(runtime.collect_garbage(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn type_only_include_churn_bounds_arena_storage_and_reuses_slots() {
+        let mut runtime = crate::Runtime::new();
+        let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/collector/local-class.scripta");
+        runtime
+            .set_global(
+                "module",
+                crate::Value::String(module.to_string_lossy().into_owned()),
+            )
+            .unwrap();
+        execute(
+            &mut runtime,
+            "function factory($module) { require $module; }",
+        );
+        let mut high_water = 0;
+        for batch in 0..10 {
+            execute(
+                &mut runtime,
+                "for ($i=0; $i<1000; $i+=1) { factory($module); }",
+            );
+            let arena = &runtime.environments;
+            assert_eq!(arena.live, 1);
+            assert!(arena.scopes.len() < 800, "unbounded captured type scopes");
+            assert!(arena.scopes.capacity() <= 1024);
+            assert_eq!(arena.functions.len(), 1);
+            assert!(arena.objects.is_empty());
             if batch == 0 {
                 high_water = arena.scopes.len();
             }

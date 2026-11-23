@@ -1,0 +1,5 @@
+class Local {
+    function read() {
+        return $r;
+    }
+}
