@@ -9,6 +9,7 @@ fn pair(options: RuntimeOptions) -> (Runtime, Runtime) {
     let fast = Runtime::with_options(options.clone());
     let mut slow = Runtime::with_options(options);
     slow.force_field_snapshot = true;
+    slow.force_hashed_fields = true;
     (fast, slow)
 }
 fn compare(fast: &mut Runtime, slow: &mut Runtime, source: &str) -> bool {
@@ -68,6 +69,77 @@ fn borrowed_updates_preserve_inheritance_types_nested_values_and_failed_writes()
         let (mut fast, mut slow) = pair(RuntimeOptions::default());
         assert!(compare(&mut fast, &mut slow, source), "{source}");
     }
+}
+
+#[test]
+fn field_slots_handle_missing_defaults_out_of_order_writes_and_promotion() {
+    for source in [
+        "class C{$a:int;$b=2;$c:int;$d=4;$e=5;$f=6;$g=7;$h=8;$i=9;$j:int;}$o=new C();$b=$o->b;$o->j=10;$o->a=1;$o->c=3;$seen=[$o->a,$o->b,$o->c,$o->d,$o->j];",
+        "class C{$a:int;$b=2;} $o=new C();try{$o->a;}catch(PropertyError $e){$missing=true;}$o->a=1;try{$o->a='bad';}catch(TypeError $e){}$seen=[$o->a,$o->b];",
+        "class C{$a=1;$b=2;$c=3;$d=4;$e=5;$f=6;$g=7;$h=8;$i=9;$j=10;$k=11;$l=12;}$o=new C();$o->l+=10;$o->a=$o->l;$seen=[$o->a,$o->h,$o->l];",
+        "class Base extends Error{$a:int;$b=2;}class Child extends Base{$c:int;$d=4;}$o=new Child('message');$o->c=3;$o->a=1;$seen=[$o->a,$o->b,$o->c,$o->d,$o->message];",
+        "class C{$a:int;$b=[1];}$o=new C();function rhs($o){$o->a=7;$o->b[0]=9;return [3];}$o->b=rhs($o);$seen=[$o->a,$o->b];",
+    ] {
+        let (mut fast, mut slow) = pair(RuntimeOptions::default());
+        assert!(compare(&mut fast, &mut slow, source), "{source}");
+        assert_eq!(fast.get_global("seen"), slow.get_global("seen"));
+    }
+}
+
+#[test]
+fn ordered_defaults_keep_sparse_field_values_and_prior_failure_effects() {
+    let mut runtime = Runtime::new();
+    runtime.execute_source(
+        "$count=0;class C{$missing:int;$first=($count+=1);$other:int;$last=($count+=1);}$o=new C();$p=new C();$seen=[$o->first,$o->last,$p->first,$p->last];class Bad{$first=($count+=1);$bad:int='wrong';}$failed='kept';try{$failed=new Bad();}catch(TypeError $e){}",
+        &mut Vec::new(),
+    ).unwrap();
+    assert_eq!(
+        runtime.get_global("seen"),
+        Some(&Value::List(
+            [1, 2, 3, 4].into_iter().map(Value::Int).collect()
+        ))
+    );
+    assert_eq!(runtime.get_global("count"), Some(&Value::Int(5)));
+    assert_eq!(
+        runtime.get_global("failed"),
+        Some(&Value::String("kept".into()))
+    );
+}
+
+#[test]
+fn initialized_wide_fields_keep_declaration_order_and_release_instances() {
+    let mut runtime = Runtime::new();
+    runtime
+        .execute_source(
+            "class C{$z=1;$a=2;$m=3;$n=4;$o=5;$p=6;$q=7;$r=8;$s=9;}$o=new C();$o->s=10;",
+            &mut Vec::new(),
+        )
+        .unwrap();
+    let Some(Value::NativeObject(object)) = runtime.get_global("o") else {
+        panic!("object");
+    };
+    let instance = object
+        .as_any()
+        .unwrap()
+        .downcast_ref::<ScriptObject>()
+        .unwrap();
+    let crate::bindings::Bindings::Slots(slots) =
+        &runtime.environments.scope(instance.scope).variables
+    else {
+        panic!("initialized wide objects retain checked slots");
+    };
+    assert_eq!(
+        slots
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["z", "a", "m", "n", "o", "p", "q", "r", "s"]
+    );
+    assert_eq!(slots[8].1, Value::Int(10));
+    let weak = Rc::downgrade(object);
+    runtime.execute_source("$o=null;", &mut Vec::new()).unwrap();
+    runtime.collect_garbage();
+    assert!(weak.upgrade().is_none());
 }
 
 #[test]

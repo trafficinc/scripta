@@ -127,6 +127,8 @@ pub struct Runtime {
     disable_shared_parameter_names: bool,
     #[cfg(test)]
     force_field_snapshot: bool,
+    #[cfg(test)]
+    force_hashed_fields: bool,
     identity: Rc<()>,
     options: RuntimeOptions,
     steps: u64,

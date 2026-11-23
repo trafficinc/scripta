@@ -62,7 +62,9 @@ checkpoints, and before rejecting a scope allocation. Hosts can also call
 `Runtime::collect_garbage()`. Opaque native ownership cycles require host cleanup.
 
 Script classes and interfaces live in `objects.rs`. Instance fields use arena
-scopes, so object cycles remain collectible. Bound methods retain their receiver
+scopes, so object cycles remain collectible. Ordinary instances store initialized
+fields in declaration order. Checked slot hints fall back to name lookup for
+uninitialized fields and exception storage. Bound methods retain their receiver
 and lexical owner; direct method calls avoid a temporary bound callable while
 preserving the same invocation semantics. Interface checks use declared type
 identity and signature compatibility. See [objects and classes](objects.md).

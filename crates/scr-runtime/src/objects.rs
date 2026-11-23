@@ -61,19 +61,26 @@ impl ScriptClass {
                 .is_some_and(|parent| parent.is_exception())
     }
     fn fields(&self) -> impl Iterator<Item = (&Self, &scr_ast::FieldDeclaration)> {
+        // Resolved ordinary declarations already provide an immutable slot
+        // layout. Inherited exception fields keep their linear ancestor walk.
+        let direct = self.parent.get().is_some_and(Option::is_none);
         let mut ancestors = Vec::new();
-        let mut class = Some(self);
+        let mut class = (!direct).then_some(self);
         while let Some(base) = class {
             ancestors.push(base);
             class = base.parent.get().and_then(Option::as_deref);
         }
-        ancestors.into_iter().rev().flat_map(|class| {
-            class
-                .declaration
-                .fields
-                .iter()
-                .map(move |field| (class, field))
-        })
+        direct
+            .then_some(self)
+            .into_iter()
+            .chain(ancestors.into_iter().rev())
+            .flat_map(|class| {
+                class
+                    .declaration
+                    .fields
+                    .iter()
+                    .map(move |field| (class, field))
+            })
     }
     fn method_owner(&self, name: &str) -> Option<&Self> {
         if self
@@ -97,6 +104,9 @@ struct FieldSize {
 }
 enum FieldValues<'a> {
     Pending(&'a HashMap<String, Value>),
+    // Construction appends initialized fields in declaration order. Missing
+    // typed fields have no value, so consume this stream only on a name match.
+    PendingSlots(&'a [(String, Value)]),
     Live(usize),
 }
 
@@ -633,17 +643,21 @@ impl Runtime {
             if let Some(value) = self.exception_property(instance, name) {
                 return Ok(value);
             }
-            if !instance.class.fields().any(|(_, f)| f.binding.name == name) {
+            let Some(slot) = instance
+                .class
+                .fields()
+                .position(|(_, f)| f.binding.name == name)
+            else {
                 return Err(self.native_error(
                     NativeError::new("PropertyError", format!("unknown field {name}")),
                     span,
                 ));
-            }
+            };
             return self
                 .environments
                 .scope(instance.scope)
                 .variables
-                .get(name)
+                .get_slot(slot, name)
                 .cloned()
                 .ok_or_else(|| {
                     self.native_error(
@@ -740,19 +754,29 @@ impl Runtime {
     ) -> Result<FieldSize> {
         let mut bytes = std::mem::size_of::<Value>();
         let mut has_handles = false;
-        for (_, field) in class.fields() {
+        let mut pending = match &values {
+            FieldValues::PendingSlots(values) => Some(values.iter().peekable()),
+            _ => None,
+        };
+        for (slot, (_, field)) in class.fields().enumerate() {
             self.checkpoint(span)?;
+            let original = match &values {
+                FieldValues::Pending(values) => values.get(&field.binding.name),
+                FieldValues::PendingSlots(_) => pending.as_mut().and_then(|values| {
+                    values
+                        .next_if(|(name, _)| name == &field.binding.name)
+                        .map(|(_, value)| value)
+                }),
+                FieldValues::Live(scope) => self
+                    .environments
+                    .scope(*scope)
+                    .variables
+                    .get_slot(slot, &field.binding.name),
+            };
             let value = replacement
                 .filter(|(name, _)| *name == field.binding.name)
                 .map(|(_, v)| v)
-                .or_else(|| match &values {
-                    FieldValues::Pending(values) => values.get(&field.binding.name),
-                    FieldValues::Live(scope) => self
-                        .environments
-                        .scope(*scope)
-                        .variables
-                        .get(&field.binding.name),
-                });
+                .or(original);
             let size = if let Some(value) = value {
                 self.field_measure::<TRACK_HANDLES>(value, 1, span)?
             } else {
@@ -798,9 +822,10 @@ impl Runtime {
                     span,
                 ));
             }
-            let (owner, field) = class
+            let (slot, (owner, field)) = class
                 .fields()
-                .find(|(_, f)| f.binding.name == name)
+                .enumerate()
+                .find(|(_, (_, f))| f.binding.name == name)
                 .ok_or_else(|| {
                     self.native_error(
                         NativeError::new("PropertyError", format!("unknown field {name}")),
@@ -854,10 +879,13 @@ impl Runtime {
                 .unwrap()
                 .downcast_ref::<ScriptObject>()
                 .unwrap();
-            self.environments
-                .scope_mut(scope)
-                .variables
-                .insert(name.into(), value);
+            let variables = &mut self.environments.scope_mut(scope).variables;
+            if let Some(stored) = variables.get_slot_mut(slot, name) {
+                *stored = value;
+            } else {
+                // Typed fields can be absent until their first successful write.
+                variables.insert(name.into(), value);
+            }
             instance.payload.set(payload);
             if measured.has_handles {
                 instance.requires_snapshot.set(true);
@@ -909,9 +937,9 @@ impl Runtime {
             self.environments.current = class.environment;
             self.source = class.source.clone();
             let defaults = (|| {
-                let mut values = HashMap::new();
+                let mut values = Vec::new();
                 let mut measured = self
-                    .object_size::<true>(&class, FieldValues::Pending(&values), None, span)?
+                    .object_size::<true>(&class, FieldValues::PendingSlots(&values), None, span)?
                     .bytes
                     .checked_add(std::mem::size_of::<Value>())
                     .ok_or_else(|| Signal::Error(self.error("object size overflow", span)))?;
@@ -943,7 +971,7 @@ impl Runtime {
                         values.try_reserve(1).map_err(|_| {
                             Signal::Error(self.error("object field allocation failed", span))
                         })?;
-                        values.insert(field.binding.name.clone(), value);
+                        values.push((field.binding.name.clone(), value));
                     }
                 }
                 Ok(values)
@@ -952,7 +980,7 @@ impl Runtime {
             self.source = previous_source;
             let values = defaults?;
             let measured =
-                self.object_size::<true>(&class, FieldValues::Pending(&values), None, span)?;
+                self.object_size::<true>(&class, FieldValues::PendingSlots(&values), None, span)?;
             let payload = measured.bytes;
             let object: Rc<dyn NativeObject> = if class.is_exception() {
                 let Value::NativeObject(object) =
@@ -973,12 +1001,19 @@ impl Runtime {
                 self.validate_value(&Value::NativeObject(object.clone()), 0, span)?;
                 object
             } else {
+                let variables = crate::bindings::Bindings::Slots(values);
+                #[cfg(test)]
+                let variables = if self.force_hashed_fields {
+                    variables.into_map().into()
+                } else {
+                    variables
+                };
                 let previous = self.enter_scope(0, span)?;
                 let scope = self.environments.current;
                 let root = self.environments.scope_mut(scope);
                 root.parent = None;
                 root.captured = true;
-                root.variables = values.into();
+                root.variables = variables;
                 let object: Rc<dyn NativeObject> = Rc::new(ScriptObject {
                     class: class.clone(),
                     scope,
