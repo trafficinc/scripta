@@ -137,6 +137,10 @@ pub struct Runtime {
     #[cfg(test)]
     disable_numeric_annotations: bool,
     #[cfg(test)]
+    disable_numeric_parameter_scopes: bool,
+    #[cfg(test)]
+    numeric_parameter_scopes_reused: usize,
+    #[cfg(test)]
     numeric_calls_executed: usize,
     #[cfg(test)]
     disable_numeric_call_loops: bool,
@@ -1235,7 +1239,15 @@ impl Runtime {
                 }
                 let caller_source = self.source.clone();
                 self.source = source.clone();
-                let previous = match self.enter_scope(*environment, span) {
+                let reuse_parameters = receiver.is_none()
+                    && self.options.max_value_bytes.is_none()
+                    && self.can_reuse_numeric_parameter_scope(declaration, values);
+                let parameter_scope = if reuse_parameters {
+                    self.enter_empty_scope(*environment, span)
+                } else {
+                    self.enter_scope(*environment, span)
+                };
+                let previous = match parameter_scope {
                     Ok(previous) => previous,
                     Err(error) => {
                         self.source = caller_source;
@@ -1247,6 +1259,10 @@ impl Runtime {
                     .scope_mut(self.environments.current)
                     .function_boundary = true;
                 let result = (|| {
+                    #[cfg(test)]
+                    if reuse_parameters {
+                        self.numeric_parameter_scopes_reused += 1;
+                    }
                     if receiver.is_none() && self.options.max_value_bytes.is_none() {
                         if let Some(result) = self.numeric_call(declaration, values) {
                             return result;
@@ -1318,7 +1334,14 @@ impl Runtime {
                     )?;
                     Ok(value)
                 })();
-                self.environments.leave(previous);
+                if reuse_parameters {
+                    self.environments
+                        .scope_mut(self.environments.current)
+                        .function_boundary = false;
+                    self.environments.leave_empty(previous);
+                } else {
+                    self.environments.leave(previous);
+                }
                 self.source = caller_source;
                 result
             }

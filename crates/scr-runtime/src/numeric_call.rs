@@ -177,6 +177,27 @@ impl Plan {
 }
 
 impl Runtime {
+    #[inline]
+    pub(super) fn can_reuse_numeric_parameter_scope(
+        &self,
+        declaration: &UserDeclaration,
+        values: &[Value],
+    ) -> bool {
+        #[cfg(test)]
+        if self.disable_numeric_calls || self.disable_numeric_parameter_scopes {
+            return false;
+        }
+        // Cold calls and negative cache entries stay on the existing path.
+        // Do not admit or compile a declaration before its parameter-scope
+        // limit check. All arguments, including unused ones, must be scalars.
+        matches!(declaration.numeric_call.get(), Some(Some(_)))
+            && values.len() == declaration.parameters.len()
+            && values.iter().all(|value| match value {
+                Value::Int(_) => true,
+                Value::Float(value) => value.is_finite(),
+                _ => false,
+            })
+    }
     // Call ownership, arity, frame, source and parameter scope are already set
     // up by the ordinary call path. Plans never hold runtime Values or scopes.
     pub(super) fn numeric_call(
@@ -249,5 +270,7 @@ impl Runtime {
 
 #[cfg(test)]
 mod annotation_tests;
+#[cfg(test)]
+mod parameter_scope_tests;
 #[cfg(test)]
 mod tests;
