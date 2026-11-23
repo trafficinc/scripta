@@ -74,6 +74,10 @@ reused call storage, small binding slots, verified map-position hints, numeric
 plans, and buffer reuse. General evaluation handles unsupported cases. These
 paths preserve value semantics, diagnostics, checkpoints, and failed assignments.
 
+Small parameter scopes share immutable names with function declarations, falling
+back to ordinary bindings when needed. Successful built-in type checks avoid
+class lookup. Argument reuse retains at most 64 empty buffers of up to 16 slots.
+
 Cleared scope storage is pooled. Up to eight dormant empty block records also
 remain in the arena to reduce repeated scope setup. A block record is reusable
 only when it has no bindings, module state, or captures; its parent is cleared.

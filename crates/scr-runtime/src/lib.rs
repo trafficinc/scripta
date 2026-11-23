@@ -7,6 +7,8 @@ mod bindings;
 mod block_scope_tests;
 #[cfg(test)]
 mod call_reuse_tests;
+#[cfg(test)]
+mod call_setup_tests;
 mod environment;
 mod error;
 mod exceptions;
@@ -108,7 +110,7 @@ enum Signal {
     Exit(u8),
 }
 type Result<T> = std::result::Result<T, Signal>;
-const MAX_ARGUMENT_BUFFERS: usize = 8;
+const MAX_ARGUMENT_BUFFERS: usize = MAX_RECURSION_LIMIT;
 const MAX_ARGUMENT_CAPACITY: usize = 16;
 
 #[derive(Default)]
@@ -121,6 +123,8 @@ pub struct Runtime {
     argument_buffers: Vec<Vec<Value>>,
     #[cfg(test)]
     disable_call_reuse: bool,
+    #[cfg(test)]
+    disable_shared_parameter_names: bool,
     #[cfg(test)]
     force_field_snapshot: bool,
     identity: Rc<()>,
@@ -142,6 +146,8 @@ pub struct Runtime {
     integer_numeric_calls_executed: usize,
     #[cfg(test)]
     disable_numeric_annotations: bool,
+    #[cfg(test)]
+    disable_primitive_annotations: bool,
     #[cfg(test)]
     disable_numeric_parameter_scopes: bool,
     #[cfg(test)]
@@ -1274,14 +1280,24 @@ impl Runtime {
                             return result;
                         }
                     }
+                    #[cfg(not(test))]
+                    let shared = true;
+                    #[cfg(test)]
+                    let shared = !self.disable_shared_parameter_names;
                     if let Some(receiver) = receiver {
-                        self.environments
+                        let variables = &mut self
+                            .environments
                             .scope_mut(self.environments.current)
-                            .variables
-                            .insert("this".into(), receiver.clone());
+                            .variables;
+                        if shared {
+                            variables
+                                .insert_parameter(declaration.receiver_name(), receiver.clone());
+                        } else {
+                            variables.insert("this".into(), receiver.clone());
+                        }
                     }
                     let mut next_argument = 0;
-                    for parameter in &declaration.parameters {
+                    for (index, parameter) in declaration.parameters.iter().enumerate() {
                         let value = if parameter.variadic {
                             let items = if next_argument == values.len() {
                                 Vec::new()
@@ -1319,10 +1335,20 @@ impl Runtime {
                             self.annotation(&parameter.annotation, &value, parameter.span, false)?;
                             value
                         };
-                        self.environments
+                        let variables = &mut self
+                            .environments
                             .scope_mut(self.environments.current)
-                            .variables
-                            .insert(parameter.binding.name.clone(), value);
+                            .variables;
+                        let name = if shared {
+                            declaration.parameter_name(index)
+                        } else {
+                            None
+                        };
+                        if let Some(name) = name {
+                            variables.insert_parameter(name, value);
+                        } else {
+                            variables.insert(parameter.binding.name.clone(), value);
+                        }
                     }
                     let value = match self.block(&declaration.body, output) {
                         Ok(()) => Value::Null,
@@ -1370,6 +1396,28 @@ impl Runtime {
         returning: bool,
     ) -> Result<()> {
         if let Some(annotation) = annotation {
+            #[cfg(not(test))]
+            let fast = true;
+            #[cfg(test)]
+            let fast = !self.disable_primitive_annotations;
+            // These exact names cannot be declared as classes/interfaces.
+            // Native objects, qualified names, and mismatches still use normal
+            // resolution, including its downcasts and diagnostic ordering.
+            if fast
+                && (matches!(
+                    (annotation.name.as_str(), value),
+                    ("int", Value::Int(_))
+                        | ("float", Value::Float(_))
+                        | ("string", Value::String(_))
+                        | ("bytes", Value::Bytes(_))
+                        | ("bool", Value::Bool(_))
+                        | ("list", Value::List(_))
+                        | ("map", Value::Map(_))
+                        | ("callable", Value::Callable(_))
+                ) || (returning && annotation.name == "void" && matches!(value, Value::Null)))
+            {
+                return Ok(());
+            }
             let (namespace, name) = annotation
                 .name
                 .split_once("::")

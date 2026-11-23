@@ -1,12 +1,16 @@
 //! One canonical value store: indexed small scopes, hashing for larger scopes.
 use crate::Value;
-use std::collections::{HashMap, hash_map};
+use std::{
+    collections::{HashMap, hash_map},
+    rc::Rc,
+};
 
-const SMALL_BINDINGS: usize = 8;
+pub(crate) const SMALL_BINDINGS: usize = 8;
 
 #[derive(Clone)]
 pub(crate) enum Bindings {
     Slots(Vec<(String, Value)>),
+    Parameters(Vec<(Rc<String>, Value)>),
     Hashed(HashMap<String, Value>),
 }
 
@@ -26,6 +30,11 @@ impl Bindings {
                 .enumerate()
                 .find(|(_, (key, _))| key == name)
                 .map(|(index, (_, value))| (index, value)),
+            Self::Parameters(slots) => slots
+                .iter()
+                .enumerate()
+                .find(|(_, (key, _))| key.as_str() == name)
+                .map(|(index, (_, value))| (index, value)),
             Self::Hashed(values) => values.get(name).map(|value| (usize::MAX, value)),
         }
     }
@@ -40,6 +49,10 @@ impl Bindings {
                 .iter_mut()
                 .find(|(key, _)| key == name)
                 .map(|(_, value)| value),
+            Self::Parameters(slots) => slots
+                .iter_mut()
+                .find(|(key, _)| key.as_str() == name)
+                .map(|(_, value)| value),
             Self::Hashed(values) => values.get_mut(name),
         }
     }
@@ -48,6 +61,13 @@ impl Bindings {
         if let Self::Slots(slots) = self {
             if let Some((key, value)) = slots.get(index) {
                 if key == name {
+                    return Some(value);
+                }
+            }
+        }
+        if let Self::Parameters(slots) = self {
+            if let Some((key, value)) = slots.get(index) {
+                if key.as_str() == name {
                     return Some(value);
                 }
             }
@@ -65,12 +85,35 @@ impl Bindings {
                     .or_else(|| slots.iter().position(|(key, _)| key == name))?;
                 Some(&mut slots[index].1)
             }
+            Self::Parameters(slots) => {
+                let index = slots
+                    .get(index)
+                    .filter(|(key, _)| key.as_str() == name)
+                    .map(|_| index)
+                    .or_else(|| slots.iter().position(|(key, _)| key.as_str() == name))?;
+                Some(&mut slots[index].1)
+            }
             Self::Hashed(values) => values.get_mut(name),
         }
     }
 
     pub fn insert(&mut self, name: String, value: Value) -> Option<Value> {
         match self {
+            Self::Parameters(slots) => {
+                if let Some((_, previous)) = slots.iter_mut().find(|(key, _)| key.as_str() == name)
+                {
+                    return Some(std::mem::replace(previous, value));
+                }
+                // An unexpected local/default binding returns to the ordinary
+                // store. Keep order so existing verified slot positions work.
+                *self = Self::Slots(
+                    std::mem::take(slots)
+                        .into_iter()
+                        .map(|(key, value)| (key.as_ref().clone(), value))
+                        .collect(),
+                );
+                self.insert(name, value)
+            }
             Self::Slots(slots) => {
                 if let Some((_, previous)) = slots.iter_mut().find(|(key, _)| *key == name) {
                     return Some(std::mem::replace(previous, value));
@@ -90,12 +133,35 @@ impl Bindings {
         }
     }
 
+    pub fn insert_parameter(&mut self, name: &Rc<String>, value: Value) -> Option<Value> {
+        if matches!(self, Self::Slots(slots) if slots.is_empty()) {
+            *self = Self::Parameters(Vec::new());
+        }
+        if let Self::Parameters(slots) = self {
+            if let Some((_, previous)) = slots
+                .iter_mut()
+                .find(|(key, _)| key.as_str() == name.as_str())
+            {
+                return Some(std::mem::replace(previous, value));
+            }
+            if slots.len() < SMALL_BINDINGS {
+                slots.push((name.clone(), value));
+                return None;
+            }
+        }
+        self.insert(name.as_ref().clone(), value)
+    }
+
     #[cfg(test)]
     pub fn remove(&mut self, name: &str) -> Option<Value> {
         match self {
             Self::Slots(slots) => slots
                 .iter()
                 .position(|(key, _)| key == name)
+                .map(|index| slots.swap_remove(index).1),
+            Self::Parameters(slots) => slots
+                .iter()
+                .position(|(key, _)| key.as_str() == name)
                 .map(|index| slots.swap_remove(index).1),
             Self::Hashed(values) => values.remove(name),
         }
@@ -104,6 +170,7 @@ impl Bindings {
     pub fn capacity(&self) -> usize {
         match self {
             Self::Slots(slots) => slots.capacity(),
+            Self::Parameters(slots) => slots.capacity(),
             Self::Hashed(values) => values.capacity(),
         }
     }
@@ -111,6 +178,7 @@ impl Bindings {
     pub fn clear(&mut self) {
         match self {
             Self::Slots(slots) => slots.clear(),
+            Self::Parameters(slots) => slots.clear(),
             Self::Hashed(values) => values.clear(),
         }
     }
@@ -119,6 +187,7 @@ impl Bindings {
     pub fn len(&self) -> usize {
         match self {
             Self::Slots(slots) => slots.len(),
+            Self::Parameters(slots) => slots.len(),
             Self::Hashed(values) => values.len(),
         }
     }
@@ -131,6 +200,7 @@ impl Bindings {
     pub fn iter(&self) -> Iter<'_> {
         match self {
             Self::Slots(slots) => Iter::Slots(slots.iter()),
+            Self::Parameters(slots) => Iter::Parameters(slots.iter()),
             Self::Hashed(values) => Iter::Hashed(values.iter()),
         }
     }
@@ -148,14 +218,18 @@ impl Bindings {
     pub fn into_map(self) -> HashMap<String, Value> {
         match self {
             Self::Slots(slots) => slots.into_iter().collect(),
+            Self::Parameters(slots) => slots
+                .into_iter()
+                .map(|(key, value)| (key.as_ref().clone(), value))
+                .collect(),
             Self::Hashed(values) => values,
         }
     }
 
     #[cfg(test)]
     pub fn force_hash(&mut self) {
-        if let Self::Slots(slots) = self {
-            *self = Self::Hashed(std::mem::take(slots).into_iter().collect());
+        if !matches!(self, Self::Hashed(_)) {
+            *self = Self::Hashed(std::mem::take(self).into_map());
         }
     }
 }
@@ -168,6 +242,7 @@ impl From<HashMap<String, Value>> for Bindings {
 
 pub(crate) enum Iter<'a> {
     Slots(std::slice::Iter<'a, (String, Value)>),
+    Parameters(std::slice::Iter<'a, (Rc<String>, Value)>),
     Hashed(hash_map::Iter<'a, String, Value>),
 }
 impl<'a> Iterator for Iter<'a> {
@@ -175,6 +250,7 @@ impl<'a> Iterator for Iter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Slots(slots) => slots.next().map(|(name, value)| (name, value)),
+            Self::Parameters(slots) => slots.next().map(|(name, value)| (name.as_ref(), value)),
             Self::Hashed(values) => values.next(),
         }
     }
@@ -191,6 +267,44 @@ impl<'a> IntoIterator for &'a Bindings {
 mod tests {
     use super::*;
     use crate::{NativeFunction, NativeSignature, NativeType, Runtime, RuntimeOptions};
+
+    #[test]
+    fn shared_parameter_names_preserve_slots_promotion_and_release_values() {
+        let names: Vec<_> = (0..SMALL_BINDINGS)
+            .map(|i| Rc::new(format!("p{i}")))
+            .collect();
+        let mut bindings = Bindings::default();
+        for (i, name) in names.iter().enumerate() {
+            bindings.insert_parameter(name, Value::Int(i as i64));
+            assert_eq!(Rc::strong_count(name), 2);
+        }
+        let (slot, _) = bindings.resolve("p3").unwrap();
+        assert_eq!(slot, 3);
+        // A regular write to an existing parameter keeps the shared name.
+        bindings.insert("p3".into(), Value::Int(30));
+        assert_eq!(Rc::strong_count(&names[3]), 2);
+        // A new local promotes at the same boundary as ordinary bindings.
+        bindings.insert("local".into(), Value::Int(9));
+        assert!(matches!(bindings, Bindings::Hashed(_)));
+        assert_eq!(bindings.get_slot(slot, "p3"), Some(&Value::Int(30)));
+        assert!(names.iter().all(|name| Rc::strong_count(name) == 1));
+        *bindings.get_slot_mut(slot, "p3").unwrap() = Value::Int(31);
+        assert_eq!(bindings.into_map().get("p3"), Some(&Value::Int(31)));
+
+        let mut bindings = Bindings::default();
+        let payload: Rc<[u8]> = Rc::from(&b"payload"[..]);
+        let weak = Rc::downgrade(&payload);
+        bindings.insert_parameter(&names[0], Value::Bytes(payload));
+        bindings.clear();
+        assert!(weak.upgrade().is_none());
+        assert_eq!(Rc::strong_count(&names[0]), 1);
+        bindings.insert_parameter(&names[1], Value::Int(4));
+        assert!(bindings.get_slot(0, "p0").is_none());
+        assert_eq!(bindings.get_slot(0, "p1"), Some(&Value::Int(4)));
+        bindings.force_hash();
+        assert_eq!(bindings.get("p1"), Some(&Value::Int(4)));
+        assert_eq!(Rc::strong_count(&names[1]), 1);
+    }
 
     fn compare(fast: &mut Runtime, slow: &mut Runtime, source: &str) -> bool {
         let mut a = Vec::new();

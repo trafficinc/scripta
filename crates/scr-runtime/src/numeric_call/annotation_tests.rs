@@ -6,6 +6,7 @@ fn compare(source: &str, options: RuntimeOptions) {
     fast.force_numeric_calls = true;
     old.force_numeric_calls = true;
     old.disable_numeric_annotations = true;
+    old.disable_primitive_annotations = true;
     for text in [source, "$recovered=1;"] {
         let mut a = Vec::new();
         let mut b = Vec::new();
@@ -139,6 +140,7 @@ fn native_objects_with_primitive_type_names_keep_generic_compatibility() {
         let mut runtime = Runtime::new();
         runtime.force_numeric_calls = true;
         runtime.disable_numeric_annotations = disabled;
+        runtime.disable_primitive_annotations = disabled;
         runtime
             .register(
                 "make",

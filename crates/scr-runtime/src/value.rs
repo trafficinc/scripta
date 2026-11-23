@@ -55,6 +55,8 @@ pub(crate) struct UserDeclaration {
     pub variadic: bool,
     pub numeric_call: std::cell::OnceCell<Option<Box<crate::numeric_call::Plan>>>,
     pub numeric_seen: std::cell::Cell<bool>,
+    parameter_names: std::cell::OnceCell<Box<[Rc<String>]>>,
+    receiver_name: std::cell::OnceCell<Rc<String>>,
 }
 impl UserDeclaration {
     pub fn new(ast: FunctionDeclaration) -> Self {
@@ -67,8 +69,28 @@ impl UserDeclaration {
             variadic: ast.parameters.last().is_some_and(|p| p.variadic),
             numeric_call: std::cell::OnceCell::new(),
             numeric_seen: std::cell::Cell::new(false),
+            parameter_names: std::cell::OnceCell::new(),
+            receiver_name: std::cell::OnceCell::new(),
             ast,
         }
+    }
+
+    pub fn parameter_name(&self, index: usize) -> Option<&Rc<String>> {
+        if self.parameters.len() > crate::bindings::SMALL_BINDINGS {
+            return None;
+        }
+        self.parameter_names
+            .get_or_init(|| {
+                self.parameters
+                    .iter()
+                    .map(|p| Rc::new(p.binding.name.clone()))
+                    .collect()
+            })
+            .get(index)
+    }
+
+    pub fn receiver_name(&self) -> &Rc<String> {
+        self.receiver_name.get_or_init(|| Rc::new("this".into()))
     }
 }
 impl std::ops::Deref for UserDeclaration {

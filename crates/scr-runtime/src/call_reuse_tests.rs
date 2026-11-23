@@ -298,8 +298,31 @@ fn buffer_pool_is_bounded_and_discards_oversized_allocations() {
             &mut Vec::new(),
         )
         .unwrap();
-    assert!(!runtime.argument_buffers.is_empty());
-    assert!(runtime.argument_buffers.len() <= MAX_ARGUMENT_BUFFERS);
+    assert_eq!(runtime.argument_buffers.len(), 25);
+    runtime.options.recursion_limit = 25;
+    let error = runtime
+        .execute_source("recurse(25);", &mut Vec::new())
+        .unwrap_err();
+    assert!(error.message.contains("maximum call depth"));
+    assert!(runtime.argument_buffers.iter().all(Vec::is_empty));
+    // Exercise the pool ceiling directly without depending on the host test
+    // thread's stack size for a 64-level general AST recursion.
+    runtime
+        .argument_buffers
+        .resize_with(MAX_ARGUMENT_BUFFERS, || Vec::with_capacity(1));
+    let Value::Callable(function) = runtime.get_callable("recurse").unwrap() else {
+        panic!()
+    };
+    runtime
+        .call_callable(
+            function,
+            vec![Value::Int(0)],
+            Span::default(),
+            &mut Vec::new(),
+        )
+        .ok()
+        .unwrap();
+    assert_eq!(runtime.argument_buffers.len(), MAX_ARGUMENT_BUFFERS);
     runtime
         .register(
             "sink",
