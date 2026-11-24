@@ -104,7 +104,6 @@ fn check_succeeds_without_output_or_runtime_evaluation() {
     for relative in [
         "examples/hello.scripta",
         "tests/fixtures/statements.scripta",
-        "tests/fixtures/invalid-concat.scripta",
         "tests/fixtures/lexer-only.scripta",
     ] {
         let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -119,6 +118,24 @@ fn check_succeeds_without_output_or_runtime_evaluation() {
         assert!(output.stdout.is_empty());
         assert!(output.stderr.is_empty());
     }
+}
+
+#[test]
+fn check_rejects_statically_known_type_errors_without_execution() {
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg("check")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/invalid-concat.scripta"
+        ))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("error[E0310]"));
+    assert!(stderr.contains("invalid-concat.scripta:2:6"));
+    assert!(stderr.contains("incompatible operands for Concat: string and int"));
 }
 
 #[test]

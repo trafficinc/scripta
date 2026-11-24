@@ -362,7 +362,9 @@ By job: {"api":15,"worker":8}
 fn error_playground_recovers_and_uncaught_errors_exit_one_with_source_details() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../playground/errors.scripta");
     let source = fs::read_to_string(&path).unwrap();
-    scr_cli::pipeline::check(&source).unwrap();
+    let errors = scr_cli::pipeline::check(&source).unwrap_err();
+    assert!(errors.iter().any(|error| error.code == "E0310"
+        && &source[error.span.start..error.span.end] == "$number + \"1\""));
     let formatted = scr_cli::formatter::format(&source).unwrap();
     let mut output = Vec::new();
     scr_cli::pipeline::run(&formatted, &mut output).unwrap();

@@ -1,13 +1,22 @@
-//! Central syntax-validation and source-to-execution interfaces.
+//! Source checking and execution interfaces.
 use std::io::Write;
 
 use scr_diagnostics::Diagnostic;
 
-/// Validate lexical structure and all statements without executing the program.
+/// Validate syntax, declarations and statically known types without executing the program.
 pub fn check(source: &str) -> Result<(), Vec<Diagnostic>> {
     let tokens = scr_lexer::lex(source).map_err(|error| vec![error.into()])?;
     let program = scr_parser::parse_with_diagnostics(&tokens)?;
-    let errors = crate::validation::validate(&program);
+    let mut errors = crate::validation::validate(&program);
+    if errors.is_empty() {
+        let mut runtime = scr_runtime::Runtime::new();
+        scr_stdlib::register(&mut runtime)
+            .map_err(|error| vec![Diagnostic::new(error.to_string(), Default::default())])?;
+        #[cfg(feature = "sqlite")]
+        scr_ext_sqlite::register(&mut runtime)
+            .map_err(|error| vec![Diagnostic::new(error.to_string(), Default::default())])?;
+        errors.extend(runtime.check_program(&program));
+    }
     if errors.is_empty() {
         Ok(())
     } else {
@@ -15,7 +24,7 @@ pub fn check(source: &str) -> Result<(), Vec<Diagnostic>> {
     }
 }
 
-/// Check then execute synchronously in a fresh environment with the standard library.
+/// Parse then execute synchronously in a fresh environment with the standard library.
 pub fn run(source: &str, output: &mut impl Write) -> Result<u8, scr_runtime::RuntimeError> {
     run_with_options(source, output, scr_runtime::RuntimeOptions::default())
 }

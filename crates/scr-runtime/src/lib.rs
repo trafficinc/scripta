@@ -38,6 +38,7 @@ mod output;
 mod prepared_call;
 #[cfg(test)]
 mod test_support;
+mod type_check;
 pub use output::{OutputAction, ScriptOutput};
 mod value;
 

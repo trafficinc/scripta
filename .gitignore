@@ -49,7 +49,3 @@ id_ed25519.*
 # Local logs and OS metadata.
 *.log
 .DS_Store
-
-# Local implementation review checklists.
-/docs/temporary-runtime-consolidation-plan.md
-/docs/temporary-type-checking-plan.md
