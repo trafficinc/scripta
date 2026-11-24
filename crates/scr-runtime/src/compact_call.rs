@@ -9,6 +9,9 @@ const STACK: usize = 32;
 const DEPTH: usize = 16;
 const NODES: usize = 256;
 
+#[path = "compact_frames.rs"]
+mod frames;
+
 #[derive(Clone, Copy)]
 enum Scalar {
     Null,
@@ -48,6 +51,7 @@ enum Code {
     Jump,
     False,
     Short(bool),
+    Call,
     Return,
 }
 #[derive(Clone, Copy)]
@@ -59,12 +63,113 @@ pub(crate) struct Plan {
     code: Box<[Instruction]>,
     spans: Box<[Span]>,
     constants: Box<[Scalar]>,
+    calls: Box<[CallSite]>,
+    repeats: bool,
+    frames_disabled: std::cell::Cell<bool>,
+    base_return: Option<Box<BaseReturn>>,
+}
+struct BaseReturn {
+    argument: usize,
+    comparison: BinaryOp,
+    limit: i64,
+}
+impl BaseReturn {
+    fn compile(declaration: &UserDeclaration) -> Option<Box<Self>> {
+        let mut aliases: Vec<(&str, usize)> = declaration
+            .parameters
+            .iter()
+            .enumerate()
+            .map(|(index, p)| (p.binding.name.as_str(), index))
+            .collect();
+        for statement in &declaration.body.statements {
+            if let StatementKind::Expression(Expr {
+                kind: ExprKind::Assignment(target, AssignmentOp::Assign, rhs),
+                ..
+            }) = &statement.kind
+            {
+                let (ExprKind::Variable(target), ExprKind::Variable(source)) =
+                    (&target.kind, &rhs.kind)
+                else {
+                    return None;
+                };
+                let argument = aliases.iter().find(|(name, _)| *name == source)?.1;
+                if let Some((_, slot)) = aliases.iter_mut().find(|(name, _)| *name == target) {
+                    *slot = argument;
+                } else {
+                    aliases.push((target, argument));
+                }
+                continue;
+            }
+            let StatementKind::If { branches, .. } = &statement.kind else {
+                return None;
+            };
+            let (condition, body) = branches.first()?;
+            let body = match &body.kind {
+                StatementKind::Block(block) if block.statements.len() == 1 => &block.statements[0],
+                _ => body,
+            };
+            let StatementKind::Return(value) = &body.kind else {
+                return None;
+            };
+            if value
+                .as_ref()
+                .is_some_and(|e| !matches!(e.kind, ExprKind::Literal(_) | ExprKind::Variable(_)))
+            {
+                return None;
+            }
+            let ExprKind::Binary(left, comparison, right) = &condition.kind else {
+                return None;
+            };
+            if !matches!(
+                comparison,
+                BinaryOp::Equal
+                    | BinaryOp::NotEqual
+                    | BinaryOp::Less
+                    | BinaryOp::LessEqual
+                    | BinaryOp::Greater
+                    | BinaryOp::GreaterEqual
+            ) {
+                return None;
+            }
+            let (ExprKind::Variable(name), ExprKind::Literal(Literal::Int(limit))) =
+                (&left.kind, &right.kind)
+            else {
+                return None;
+            };
+            let argument = aliases.iter().find(|(alias, _)| *alias == name)?.1;
+            return Some(Box::new(Self {
+                argument,
+                comparison: *comparison,
+                limit: *limit,
+            }));
+        }
+        None
+    }
+    fn admits(&self, arguments: &[Value]) -> bool {
+        let Some(Value::Int(value)) = arguments.get(self.argument) else {
+            return false;
+        };
+        match self.comparison {
+            BinaryOp::Equal => *value == self.limit,
+            BinaryOp::NotEqual => *value != self.limit,
+            BinaryOp::Less => *value < self.limit,
+            BinaryOp::LessEqual => *value <= self.limit,
+            BinaryOp::Greater => *value > self.limit,
+            BinaryOp::GreaterEqual => *value >= self.limit,
+            _ => unreachable!("compiled comparison"),
+        }
+    }
+}
+struct CallSite {
+    name: String,
+    arguments: usize,
 }
 struct Compiler<'a> {
     names: Vec<&'a str>,
     code: Vec<Instruction>,
     spans: Vec<Span>,
     constants: Vec<Scalar>,
+    calls: Vec<CallSite>,
     nodes: usize,
 }
 impl<'a> Compiler<'a> {
@@ -94,6 +199,10 @@ impl<'a> Compiler<'a> {
     }
     fn expression(&mut self, e: &'a Expr, depth: usize) -> Option<()> {
         self.node(depth)?;
+        let mut remaining = NODES;
+        if stack_bound(e, 0, &mut remaining)? > STACK {
+            return None;
+        }
         match &e.kind {
             ExprKind::Literal(value) => self.constant(
                 match value {
@@ -148,6 +257,23 @@ impl<'a> Compiler<'a> {
                     self.emit(Code::Binary(op), 0, target.span);
                 }
                 self.emit(Code::Store, slot, target.span);
+            }
+            ExprKind::Call(callee, arguments) => {
+                let ExprKind::Identifier(name) = &callee.kind else {
+                    return None;
+                };
+                if arguments.len() > 8 {
+                    return None;
+                }
+                for argument in arguments {
+                    self.expression(argument, depth + 1)?;
+                }
+                let site = self.calls.len();
+                self.calls.push(CallSite {
+                    name: name.clone(),
+                    arguments: arguments.len(),
+                });
+                self.emit(Code::Call, site, e.span);
             }
             _ => return None,
         }
@@ -240,6 +366,36 @@ impl<'a> Compiler<'a> {
         Some(())
     }
 }
+// Include already evaluated call arguments when bounding the operand stack.
+// Tree depth alone is insufficient for nested multi-argument calls.
+fn stack_bound(expression: &Expr, depth: usize, remaining: &mut usize) -> Option<usize> {
+    *remaining = remaining.checked_sub(1)?;
+    if depth > DEPTH {
+        return None;
+    }
+    Some(match &expression.kind {
+        ExprKind::Grouped(e) | ExprKind::Unary(_, e) => stack_bound(e, depth + 1, remaining)?,
+        ExprKind::Binary(left, op, right) => stack_bound(left, depth + 1, remaining)?.max(
+            usize::from(!matches!(op, BinaryOp::And | BinaryOp::Or))
+                + stack_bound(right, depth + 1, remaining)?,
+        ),
+        ExprKind::Assignment(_, op, rhs) => {
+            usize::from(*op != AssignmentOp::Assign) + stack_bound(rhs, depth + 1, remaining)?
+        }
+        ExprKind::Call(_, arguments) => {
+            if arguments.len() > 8 {
+                return None;
+            }
+            let mut needed = 1;
+            for (index, argument) in arguments.iter().enumerate() {
+                needed = needed.max(index + stack_bound(argument, depth + 1, remaining)?);
+            }
+            needed
+        }
+        _ => 1,
+    })
+}
+
 impl Plan {
     fn compile(declaration: &UserDeclaration) -> Option<Box<Self>> {
         if declaration.parameters.len() > 8
@@ -263,6 +419,7 @@ impl Plan {
             code: Vec::new(),
             spans: Vec::new(),
             constants: Vec::new(),
+            calls: Vec::new(),
             nodes: 0,
         };
         c.emit(Code::Enter, 0, declaration.body.span);
@@ -271,19 +428,31 @@ impl Plan {
         }
         c.constant(Scalar::Null, declaration.body.span);
         c.emit(Code::Return, 0, declaration.body.span);
-        // Expressions are depth-bounded, with at most one extra value per level.
-        // An assignment can add one old value at each level as well.
-        // DEPTH=16 therefore bounds the operand stack at 32 values.
+        // Every expression's operand demand is checked against STACK, including
+        // pending arguments of nested calls. Compilation is also node/depth bounded.
+        let repeats = c.code.iter().enumerate().any(|(index, instruction)| {
+            matches!(instruction.code, Code::Jump) && instruction.operand as usize <= index
+        });
+        let base_return = if c.calls.is_empty() {
+            None
+        } else {
+            BaseReturn::compile(declaration)
+        };
         Some(Box::new(Self {
             code: c.code.into(),
             spans: c.spans.into(),
             constants: c.constants.into(),
+            calls: c.calls.into(),
+            repeats,
+            frames_disabled: std::cell::Cell::new(false),
+            base_return,
         }))
     }
 }
 impl Runtime {
     pub(super) fn compact_call(
         &mut self,
+        function: &crate::value::Function,
         declaration: &UserDeclaration,
         arguments: &[Value],
     ) -> Option<Result<Value>> {
@@ -298,6 +467,22 @@ impl Runtime {
             .compact_call
             .get_or_init(|| Plan::compile(declaration))
             .as_deref()?;
+        if !plan.calls.is_empty() {
+            #[cfg(test)]
+            let force = self.force_compact_frames;
+            #[cfg(not(test))]
+            let force = false;
+            if !force
+                && (plan.frames_disabled.get()
+                    || plan
+                        .base_return
+                        .as_ref()
+                        .is_some_and(|guard| guard.admits(arguments)))
+            {
+                return None;
+            }
+            return self.compact_frames(function, arguments);
+        }
         #[cfg(test)]
         {
             self.compact_calls_executed += 1;
@@ -386,6 +571,7 @@ impl Runtime {
                         }
                     }
                     Code::Return => break Ok(values[top - 1].value()),
+                    Code::Call => unreachable!("call plans use explicit VM frames"),
                 }
             }
         })();

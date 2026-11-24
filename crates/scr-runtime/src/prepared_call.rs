@@ -327,7 +327,7 @@ impl Compiler<'_> {
     }
 }
 impl Plan {
-    fn compile(declaration: &UserDeclaration) -> Option<Box<Self>> {
+    pub(super) fn compile(declaration: &UserDeclaration) -> Option<Box<Self>> {
         if declaration.parameters.len() > MAX_PARAMETERS
             || declaration.parameters.iter().any(|p| {
                 p.default.is_some()

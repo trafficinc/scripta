@@ -14,6 +14,8 @@ mod call_setup_tests;
 mod compact_call;
 #[cfg(test)]
 mod compact_call_tests;
+#[cfg(test)]
+mod compact_frame_tests;
 mod copy_validation;
 #[cfg(test)]
 mod copy_validation_tests;
@@ -138,6 +140,10 @@ pub struct Runtime {
     disable_compact_calls: bool,
     #[cfg(test)]
     compact_calls_executed: usize,
+    #[cfg(test)]
+    compact_frame_calls_executed: usize,
+    #[cfg(test)]
+    force_compact_frames: bool,
     environments: Environments,
     map_indexes: std::cell::RefCell<map_index::MapIndexes>,
     exception_classes:
@@ -1316,7 +1322,7 @@ impl Runtime {
                             return result;
                         }
                         if *environment == 0 {
-                            if let Some(result) = self.compact_call(declaration, values) {
+                            if let Some(result) = self.compact_call(function, declaration, values) {
                                 return result;
                             }
                         }

@@ -43,8 +43,9 @@ externally held values. Opaque native ownership cycles require host cleanup.
 ## Execution hot paths and limits
 
 Bounded numeric plans, compact instruction plans for eligible scalar function
-bodies, checked lookup hints and storage reuse accelerate common cases. Ordinary
-evaluation handles unsupported cases.
+bodies, checked lookup hints and storage reuse accelerate common cases. Eligible
+named scalar call graphs use explicit heap-backed call frames. Ordinary evaluation
+handles unsupported cases.
 
 `RuntimeOptions` controls execution and logical resource budgets; these are not
 an aggregate heap cap. Internal signals preserve exceptions, returns and exits.
