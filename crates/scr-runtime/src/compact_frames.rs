@@ -78,6 +78,20 @@ struct Scope {
     previous: usize,
     parameter: bool,
 }
+
+#[derive(Default)]
+pub(crate) struct Stack {
+    values: Vec<Scalar>,
+    frames: Vec<Frame>,
+    scopes: Vec<Scope>,
+}
+
+#[cfg(test)]
+impl Stack {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.values.is_empty() && self.frames.is_empty() && self.scopes.is_empty()
+    }
+}
 fn unwind(runtime: &mut Runtime, scopes: &mut Vec<Scope>, depth: usize) {
     while scopes.len() > depth {
         let scope = scopes.pop().unwrap();
@@ -207,25 +221,43 @@ impl Runtime {
     fn run_compact_frames(&mut self, nodes: &[Node], arguments: &[Value]) -> Result<Value> {
         let initial_depth = self.stack.len();
         let initial_source = self.source.clone();
-        let mut values = Vec::new();
-        let mut frames = Vec::new();
-        let mut scopes = Vec::new();
+        let mut storage = self.compact_stack.take().unwrap_or_default();
+        let values = &mut storage.values;
+        let frames = &mut storage.frames;
+        let scopes = &mut storage.scopes;
+        // Compiled scalar bodies cannot capture locals or reenter arbitrary
+        // code. Their environments are unobservable unless scopes are budgeted.
+        let lexical_scopes = self.options.max_scopes.is_some();
         let result = (|| {
-            values.try_reserve(LOCALS + STACK).map_err(|_| {
+            let depth = self
+                .options
+                .recursion_limit
+                .min(MAX_RECURSION_LIMIT)
+                .saturating_sub(initial_depth.saturating_sub(1))
+                + 1;
+            values.try_reserve((LOCALS + STACK) * depth).map_err(|_| {
                 Signal::Error(self.error(
                     "compact value stack allocation failed",
                     nodes[0].declaration.name_span,
                 ))
             })?;
-            frames.try_reserve(1).map_err(|_| {
+            frames.try_reserve(depth).map_err(|_| {
                 Signal::Error(self.error(
                     "compact call stack allocation failed",
                     nodes[0].declaration.name_span,
                 ))
             })?;
-            scopes.try_reserve(DEPTH + 3).map_err(|_| {
+            if lexical_scopes {
+                scopes.try_reserve((DEPTH + 3) * depth).map_err(|_| {
+                    Signal::Error(self.error(
+                        "compact scope stack allocation failed",
+                        nodes[0].declaration.name_span,
+                    ))
+                })?;
+            }
+            self.stack.try_reserve(depth - 1).map_err(|_| {
                 Signal::Error(self.error(
-                    "compact scope stack allocation failed",
+                    "compact trace stack allocation failed",
                     nodes[0].declaration.name_span,
                 ))
             })?;
@@ -253,17 +285,18 @@ impl Runtime {
                 let base = frame.base;
                 match code {
                     Code::Tick => self.checkpoint(span)?,
-                    Code::Enter => {
+                    Code::Enter if lexical_scopes => {
                         let previous = self.enter_empty_scope(self.environments.current, span)?;
                         scopes.push(Scope {
                             previous,
                             parameter: false,
                         });
                     }
-                    Code::Leave => {
+                    Code::Leave if lexical_scopes => {
                         let depth = scopes.len() - 1;
-                        unwind(self, &mut scopes, depth);
+                        unwind(self, scopes, depth);
                     }
+                    Code::Enter | Code::Leave => {}
                     Code::Constant => values.push(plan.constants[operand]),
                     Code::Local => values.push(values[base + operand]),
                     Code::Store => values[base + operand] = *values.last().unwrap(),
@@ -326,15 +359,6 @@ impl Runtime {
                         {
                             return self.fail("maximum call depth exceeded", span);
                         }
-                        frames.try_reserve(1).map_err(|_| {
-                            Signal::Error(self.error("compact call stack allocation failed", span))
-                        })?;
-                        values.try_reserve(LOCALS + STACK).map_err(|_| {
-                            Signal::Error(self.error("compact value stack allocation failed", span))
-                        })?;
-                        scopes.try_reserve(DEPTH + 3).map_err(|_| {
-                            Signal::Error(self.error("compact scope stack allocation failed", span))
-                        })?;
                         self.stack.push(ActiveFrame {
                             name: crate::error::FrameName::User(target.declaration.clone()),
                             span,
@@ -352,15 +376,17 @@ impl Runtime {
                             )));
                         }
                         self.source = target.source.clone();
-                        let previous = self.enter_scope(0, span)?;
-                        self.environments
-                            .scope_mut(self.environments.current)
-                            .function_boundary = true;
                         let scope_base = scopes.len();
-                        scopes.push(Scope {
-                            previous,
-                            parameter: true,
-                        });
+                        if lexical_scopes {
+                            let previous = self.enter_scope(0, span)?;
+                            self.environments
+                                .scope_mut(self.environments.current)
+                                .function_boundary = true;
+                            scopes.push(Scope {
+                                previous,
+                                parameter: true,
+                            });
+                        }
                         let argument_base = values.len() - count;
                         for (parameter, value) in target
                             .declaration
@@ -392,14 +418,18 @@ impl Runtime {
                         let value = values.pop().unwrap();
                         let frame = frames.last().unwrap();
                         let nested = frames.len() > 1;
-                        unwind(self, &mut scopes, frame.scopes + usize::from(nested));
+                        if lexical_scopes {
+                            unwind(self, scopes, frame.scopes + usize::from(nested));
+                        }
                         self.annotation(
                             &node.declaration.return_type,
                             &value.value(),
                             node.declaration.name_span,
                             true,
                         )?;
-                        unwind(self, &mut scopes, frame.scopes);
+                        if lexical_scopes {
+                            unwind(self, scopes, frame.scopes);
+                        }
                         values.truncate(frame.base);
                         frames.pop();
                         if let Some(caller) = frames.last() {
@@ -413,9 +443,65 @@ impl Runtime {
                 }
             }
         })();
-        unwind(self, &mut scopes, 0);
+        unwind(self, scopes, 0);
         self.stack.truncate(initial_depth);
         self.source = initial_source;
+        values.clear();
+        frames.clear();
+        self.compact_stack = Some(storage);
         result
+    }
+}
+
+#[cfg(test)]
+mod flat_stack_tests {
+    use super::*;
+
+    #[test]
+    fn mutual_recursion_and_locals_reuse_slots_without_recursive_environments() {
+        let mut runtime = Runtime::new();
+        let source = "function even($n){$copy=$n;if($copy===0){return true;}return odd($copy-1);}function odd($n){$copy=$n;if($copy===0){return false;}return even($copy-1);}even(2);";
+        runtime.execute_source(source, &mut Vec::new()).unwrap();
+        let values = runtime.compact_stack.as_ref().unwrap().values.as_ptr();
+        let capacity = runtime.compact_stack.as_ref().unwrap().values.capacity();
+        let frames = runtime.compact_stack.as_ref().unwrap().frames.capacity();
+        let trace = runtime.stack.capacity();
+        let entries = runtime.environments.scope_entries;
+        runtime
+            .execute_source("$answer=even(60);", &mut Vec::new())
+            .unwrap();
+        assert_eq!(runtime.get_global("answer"), Some(&Value::Bool(true)));
+        assert_eq!(runtime.environments.scope_entries - entries, 1);
+        assert_eq!(
+            runtime.compact_stack.as_ref().unwrap().values.as_ptr(),
+            values
+        );
+        assert_eq!(
+            runtime.compact_stack.as_ref().unwrap().values.capacity(),
+            capacity
+        );
+        assert_eq!(
+            runtime.compact_stack.as_ref().unwrap().frames.capacity(),
+            frames
+        );
+        assert_eq!(runtime.stack.capacity(), trace);
+        assert!(runtime.compact_stack.as_ref().unwrap().is_empty());
+        // A later budgeted entry still uses lexical accounting and unwinds
+        // completely before switching back to unbudgeted flat execution.
+        runtime.options.max_scopes = Some(5);
+        assert!(
+            runtime
+                .execute_source("$answer=even(60);", &mut Vec::new())
+                .is_err()
+        );
+        assert!(runtime.compact_stack.as_ref().unwrap().is_empty());
+        assert_eq!(runtime.environments.live, 1);
+        assert_eq!(runtime.get_global("answer"), Some(&Value::Bool(true)));
+        runtime.options.max_scopes = None;
+        runtime
+            .execute_source("$answer=odd(60);", &mut Vec::new())
+            .unwrap();
+        assert_eq!(runtime.get_global("answer"), Some(&Value::Bool(false)));
+        assert!(runtime.compact_stack.as_ref().unwrap().is_empty());
     }
 }

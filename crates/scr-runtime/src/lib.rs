@@ -150,6 +150,8 @@ pub struct Runtime {
         std::cell::RefCell<std::collections::HashMap<String, Rc<objects::ScriptClass>>>,
     stack: Vec<error::ActiveFrame>,
     argument_buffers: Vec<Vec<Value>>,
+    prepared_stack: Option<Box<prepared_call::Stack>>,
+    compact_stack: Option<Box<compact_call::Stack>>,
     #[cfg(test)]
     disable_call_reuse: bool,
     #[cfg(test)]

@@ -32,6 +32,20 @@ pub(crate) fn compare_execution(
         assert_eq!(runtime.environments.current, 0, "{context}: active scope");
         assert!(runtime.stack.is_empty(), "{context}: active frames");
         assert!(
+            runtime
+                .prepared_stack
+                .as_ref()
+                .is_none_or(|stack| stack.is_empty()),
+            "{context}: prepared operands"
+        );
+        assert!(
+            runtime
+                .compact_stack
+                .as_ref()
+                .is_none_or(|stack| stack.is_empty()),
+            "{context}: compact operands"
+        );
+        assert!(
             runtime.environments.temporary_roots.is_empty(),
             "{context}: temporary roots"
         );

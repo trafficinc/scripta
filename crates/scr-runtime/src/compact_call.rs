@@ -11,6 +11,7 @@ const NODES: usize = 256;
 
 #[path = "compact_frames.rs"]
 mod frames;
+pub(crate) use frames::Stack;
 
 #[derive(Clone, Copy)]
 enum Scalar {

@@ -13,6 +13,52 @@ fn compare(source: &str, options: RuntimeOptions) -> Runtime {
 const FIB: &str = "function f($n:int):int{if($n<2){return $n;}return f($n-1)+f($n-2);}";
 
 #[test]
+fn flat_recursion_reuses_reserved_storage_without_recursive_environments() {
+    let mut runtime = Runtime::new();
+    runtime.force_numeric_calls = true;
+    runtime
+        .execute_source(&format!("{FIB} f(3);"), &mut Vec::new())
+        .unwrap();
+    let values = runtime.prepared_stack.as_ref().unwrap().values.as_ptr();
+    let capacity = runtime.prepared_stack.as_ref().unwrap().values.capacity();
+    let frames = runtime.prepared_stack.as_ref().unwrap().frames.capacity();
+    let trace = runtime.stack.capacity();
+    let entries = runtime.environments.scope_entries;
+    runtime
+        .execute_source("$answer=f(20);", &mut Vec::new())
+        .unwrap();
+    assert_eq!(runtime.get_global("answer"), Some(&Value::Int(6765)));
+    assert_eq!(runtime.environments.scope_entries - entries, 1);
+    assert_eq!(
+        runtime.prepared_stack.as_ref().unwrap().values.as_ptr(),
+        values
+    );
+    assert_eq!(
+        runtime.prepared_stack.as_ref().unwrap().values.capacity(),
+        capacity
+    );
+    assert_eq!(
+        runtime.prepared_stack.as_ref().unwrap().frames.capacity(),
+        frames
+    );
+    assert_eq!(runtime.stack.capacity(), trace);
+    assert!(runtime.prepared_stack.as_ref().unwrap().is_empty());
+    runtime.options.instruction_limit = Some(20);
+    assert!(
+        runtime
+            .execute_source("$answer=f(20);", &mut Vec::new())
+            .is_err()
+    );
+    assert_eq!(runtime.get_global("answer"), Some(&Value::Int(6765)));
+    assert!(runtime.prepared_stack.as_ref().unwrap().is_empty());
+    runtime.options.instruction_limit = None;
+    runtime
+        .execute_source("$answer=f(4);", &mut Vec::new())
+        .unwrap();
+    assert_eq!(runtime.get_global("answer"), Some(&Value::Int(3)));
+}
+
+#[test]
 fn recursive_plans_preserve_results_frames_and_scalar_errors() {
     for source in [
         format!("{FIB} $answer=3+f(12)*7;"),

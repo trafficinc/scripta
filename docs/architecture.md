@@ -44,8 +44,11 @@ externally held values. Opaque native ownership cycles require host cleanup.
 
 Bounded numeric plans, compact instruction plans for eligible scalar function
 bodies, checked lookup hints and storage reuse accelerate common cases. Eligible
-named scalar call graphs use explicit heap-backed call frames. Ordinary evaluation
-handles unsupported cases.
+named scalar call graphs use statically indexed operand slots and explicit call
+frames in reusable vectors, reserved before execution from plan and depth bounds.
+Their inner calls omit lexical environments when scope budgets are unset;
+budgeted calls preserve scope accounting. Ordinary evaluation handles unsupported
+cases, including captures and arbitrary native callbacks.
 
 `RuntimeOptions` controls execution and logical resource budgets; these are not
 an aggregate heap cap. Internal signals preserve exceptions, returns and exits.

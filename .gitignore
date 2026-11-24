@@ -52,3 +52,6 @@ id_ed25519.*
 
 # Local class dispatch experiment plan.
 /docs/temporary-class-dispatch-plan.md
+
+# Temporary runtime experiment journal; append future experiments here.
+/docs/temporary-runtime-experiments.md

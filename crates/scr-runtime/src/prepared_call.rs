@@ -93,8 +93,6 @@ enum Op {
     Jump(usize),
     False(usize, Span),
     Short(bool, usize, Span),
-    Enter(Span),
-    Leave,
     Call(Span),
     Return,
 }
@@ -296,11 +294,9 @@ impl Compiler<'_> {
                 self.emit(Op::Return);
             }
             StatementKind::Block(b) => {
-                self.emit(Op::Enter(b.span));
                 for s in &b.statements {
                     self.statement(s, depth + 1)?;
                 }
-                self.emit(Op::Leave);
             }
             StatementKind::If {
                 branches,
@@ -347,7 +343,6 @@ impl Plan {
             nodes: 0,
             recursive: false,
         };
-        c.emit(Op::Enter(declaration.body.span));
         for s in &declaration.body.statements {
             c.statement(s, 0)?;
         }
@@ -366,25 +361,20 @@ impl Plan {
 struct Frame {
     ip: usize,
     base: usize,
-    scopes: usize,
-    parameter: bool,
 }
-struct Scope {
-    previous: usize,
-    parameter: bool,
+
+// Bodies are pure and noncapturing: recursive calls cannot reenter the host or
+// retain a local binding. Reuse one operand/frame store across outer entries.
+#[derive(Default)]
+pub(crate) struct Stack {
+    values: Vec<Scalar>,
+    frames: Vec<Frame>,
 }
-fn unwind(runtime: &mut Runtime, scopes: &mut Vec<Scope>, depth: usize) {
-    while scopes.len() > depth {
-        let scope = scopes.pop().unwrap();
-        if scope.parameter {
-            runtime
-                .environments
-                .scope_mut(runtime.environments.current)
-                .function_boundary = false;
-            runtime.environments.leave_empty(scope.previous);
-        } else {
-            runtime.environments.leave_block(scope.previous);
-        }
+
+#[cfg(test)]
+impl Stack {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.values.is_empty() && self.frames.is_empty()
     }
 }
 
@@ -458,22 +448,47 @@ impl Runtime {
         arguments: &[Value],
     ) -> Result<Value> {
         let stack_depth = self.stack.len();
-        let mut values: Vec<Scalar> = arguments
-            .iter()
-            .map(|v| match v {
-                Value::Int(v) => Scalar::Int(*v),
-                _ => unreachable!("guarded integer arguments"),
-            })
-            .collect();
-        let mut frames = vec![Frame {
-            ip: 0,
-            base: 0,
-            scopes: 0,
-            parameter: false,
-        }];
-        let mut scopes = Vec::new();
+        let mut storage = self.prepared_stack.take().unwrap_or_default();
+        let values = &mut storage.values;
+        let frames = &mut storage.frames;
         let count = declaration.parameters.len();
         let result = (|| {
+            // The depth limit includes suspended AST/native callers. Each
+            // instruction can add at most one operand, so code length plus
+            // parameters conservatively bounds each frame's stack demand.
+            let depth = self
+                .options
+                .recursion_limit
+                .min(crate::MAX_RECURSION_LIMIT)
+                .saturating_sub(stack_depth.saturating_sub(1))
+                + 1;
+            values
+                .try_reserve((plan.code.len() + count) * depth)
+                .map_err(|_| {
+                    crate::Signal::Error(self.error(
+                        "prepared value stack allocation failed",
+                        declaration.name_span,
+                    ))
+                })?;
+            frames.try_reserve(depth).map_err(|_| {
+                crate::Signal::Error(self.error(
+                    "prepared call stack allocation failed",
+                    declaration.name_span,
+                ))
+            })?;
+            self.stack.try_reserve(depth - 1).map_err(|_| {
+                crate::Signal::Error(self.error(
+                    "prepared trace stack allocation failed",
+                    declaration.name_span,
+                ))
+            })?;
+            for value in arguments {
+                let Value::Int(value) = value else {
+                    unreachable!("guarded integer arguments")
+                };
+                values.push(Scalar::Int(*value));
+            }
+            frames.push(Frame { ip: 0, base: 0 });
             for (parameter, value) in declaration.parameters.iter().zip(arguments) {
                 self.annotation(&parameter.annotation, value, parameter.span, false)?;
             }
@@ -514,17 +529,6 @@ impl Runtime {
                             frames.last_mut().unwrap().ip = *ip;
                         }
                     }
-                    Op::Enter(span) => {
-                        let previous = self.enter_empty_scope(self.environments.current, *span)?;
-                        scopes.push(Scope {
-                            previous,
-                            parameter: false,
-                        });
-                    }
-                    Op::Leave => {
-                        let depth = scopes.len() - 1;
-                        unwind(self, &mut scopes, depth);
-                    }
                     Op::Call(span) => {
                         if self.stack.len().saturating_sub(1)
                             >= self.options.recursion_limit.min(crate::MAX_RECURSION_LIMIT)
@@ -533,15 +537,6 @@ impl Runtime {
                         }
                         self.stack
                             .push(ActiveFrame::call(function, *span, self.source.clone()));
-                        let depth = scopes.len();
-                        let previous = self.enter_empty_scope(0, *span)?;
-                        self.environments
-                            .scope_mut(self.environments.current)
-                            .function_boundary = true;
-                        scopes.push(Scope {
-                            previous,
-                            parameter: true,
-                        });
                         let base = values.len() - count;
                         for (parameter, value) in declaration.parameters.iter().zip(&values[base..])
                         {
@@ -552,26 +547,16 @@ impl Runtime {
                                 false,
                             )?;
                         }
-                        frames.push(Frame {
-                            ip: 0,
-                            base,
-                            scopes: depth,
-                            parameter: true,
-                        });
+                        frames.push(Frame { ip: 0, base });
                     }
                     Op::Return => {
                         let value = values.pop().unwrap();
-                        let frame = frames.last().unwrap();
-                        let depth = frame.scopes;
-                        let parameter = frame.parameter;
-                        unwind(self, &mut scopes, depth + usize::from(parameter));
                         self.annotation(
                             &declaration.return_type,
                             &value.value(),
                             declaration.name_span,
                             true,
                         )?;
-                        unwind(self, &mut scopes, depth);
                         frames.pop();
                         values.truncate(base);
                         if frames.is_empty() {
@@ -583,9 +568,11 @@ impl Runtime {
                 }
             }
         })();
-        // Snapshot diagnostics/signals before dropping internal scopes and frames.
-        unwind(self, &mut scopes, 0);
+        // Error snapshots are taken while the logical trace is still intact.
         self.stack.truncate(stack_depth);
+        values.clear();
+        frames.clear();
+        self.prepared_stack = Some(storage);
         result
     }
 }

@@ -61,6 +61,8 @@ enum SpareScope {
 pub(crate) struct Environments {
     scopes: Vec<Option<Scope>>,
     #[cfg(test)]
+    pub scope_entries: usize,
+    #[cfg(test)]
     force_hash: bool,
     #[cfg(test)]
     pub disable_empty_reuse: bool,
@@ -93,6 +95,8 @@ impl Default for Environments {
     fn default() -> Self {
         Self {
             scopes: vec![Some(Scope::default())],
+            #[cfg(test)]
+            scope_entries: 0,
             #[cfg(test)]
             force_hash: false,
             #[cfg(test)]
@@ -127,6 +131,10 @@ impl Environments {
         self.scopes[id].as_mut().expect("live lexical scope")
     }
     pub fn enter(&mut self, parent: usize) -> usize {
+        #[cfg(test)]
+        {
+            self.scope_entries += 1;
+        }
         self.live += 1;
         let mut scope = match self.spare_scopes.pop() {
             Some(SpareScope::Reserved(id)) => {
@@ -218,6 +226,10 @@ impl Environments {
         let Some(id) = self.empty_scopes.pop() else {
             return self.enter(parent);
         };
+        #[cfg(test)]
+        {
+            self.scope_entries += 1;
+        }
         self.scope_mut(id).parent = Some(parent);
         self.live += 1;
         let previous = self.current;
