@@ -1,0 +1,25 @@
+$directory = Cli::arg(0);
+$reader = Csv::open(Path::join($directory, "input.csv"));
+$rows = [];
+try {
+    while (($row = Csv::readRow($reader)) !== null) {
+        $rows[] = $row;
+    }
+} finally {
+    Csv::close($reader);
+}
+$values = [];
+foreach ($rows as $row) {
+    $values[] = ["id" => int($row[0]), "name" => $row[1], "value" => int($row[2]) * 3];
+}
+$target = Path::join($directory, "output.json");
+File::write($target, Json::encode($values));
+$decoded = Json::decode(File::read($target));
+if ($decoded !== $values) {
+    throw new Error("JSON output mismatch");
+}
+$total = 0;
+foreach ($decoded as $row) {
+    $total += $row["id"] + $row["value"];
+}
+echo str(len($decoded)) . ":" . str($total) . "\n";

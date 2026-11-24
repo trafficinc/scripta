@@ -9,7 +9,7 @@ import statistics
 import subprocess
 import tempfile
 
-from run import REPO, ROOT, WORKLOADS, environment, sha
+from run import REPO, ROOT, CORE_WORKLOADS as WORKLOADS, environment, sha
 
 STAGES = ("lex_ms", "parse_ms", "setup_ms", "execute_ms", "teardown_ms")
 

@@ -1,5 +1,6 @@
 """Failure handling, complete evidence, and byte-exact README update checks."""
 import copy
+import csv
 import io
 import json
 from pathlib import Path
@@ -13,6 +14,60 @@ import run
 
 
 class RunnerTests(unittest.TestCase):
+    def test_input_bytes_and_independent_expected_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            expected = run.prepare_inputs(directory, "files")
+            source = (directory / "input.txt").read_bytes()
+            self.assertEqual(len(source), 260000)
+            self.assertEqual(source.count(b"\n"), 20000)
+            self.assertNotIn(b"\r", source)
+            self.assertEqual(expected, source.upper())
+            expected = run.prepare_inputs(directory, "csv_json")
+            source = (directory / "input.csv").read_bytes()
+            self.assertEqual(source.count(b"\r\n"), 10000)
+            self.assertIn(b'"comma, quote"" and\nline \xc3\xa9"', source)
+            with (directory / "input.csv").open(encoding="utf-8", newline="") as stream:
+                rows = list(csv.reader(stream))
+            self.assertEqual(len(rows), 10000)
+            self.assertTrue(all(row[1] == run.CSV_NAME for row in rows))
+            self.assertEqual(expected[-1], {"id": 9999, "name": run.CSV_NAME, "value": 9})
+
+    def test_new_python_fixtures_execute_with_verified_results(self):
+        for name, _, _, expected in run.WORKLOADS:
+            if name in ("files", "csv_json", "sqlite"):
+                with self.subTest(workload=name):
+                    command = [sys.executable, "-I", str(run.ROOT / "fixtures" / f"{name}.py")]
+                    self.assertGreater(run.measure_workload(command, name, expected, 10), 0)
+
+    def test_file_validation_catches_corruption_despite_matching_stdout_and_cleans_up(self):
+        for workload in ("files", "csv_json"):
+            seen = []
+            def corrupt(command, expected, timeout):
+                directory = Path(command[-1])
+                seen.append(directory)
+                if workload == "files":
+                    data = (directory / "input.txt").read_bytes().upper()
+                    (directory / "output.txt").write_bytes(b"X" + data[1:])
+                else:
+                    data = [{"id": i, "name": run.CSV_NAME, "value": (i % 17) * 3}
+                            for i in range(run.CSV_ROWS)]
+                    data[-1]["name"] = "incorrect name with unchanged numeric checksum"
+                    (directory / "output.json").write_text(json.dumps(data), encoding="utf-8")
+                return 1.0
+            with self.subTest(workload=workload), patch.object(run, "measure", side_effect=corrupt):
+                with self.assertRaisesRegex(RuntimeError, "wrong .* output file"):
+                    run.measure_workload(["fixture"], workload, "checked stdout", 5)
+            self.assertFalse(seen[0].exists())
+
+    def test_php_extension_is_explicit_and_retains_cli_settings(self):
+        with patch.object(run.shutil, "which", return_value="/test/runtime"):
+            commands, missing = run.resolve_commands("scripta", "php", "python", ["sqlite3"])
+        self.assertFalse(missing)
+        self.assertIn("-n", commands["php"])
+        self.assertIn("pcre.jit=0", commands["php"])
+        self.assertEqual(commands["php"][-2:], ["-d", "extension=sqlite3"])
+
     def test_real_child_output_and_nonzero_exit_are_checked(self):
         self.assertGreater(run.measure([sys.executable, "-c", "print(42)"], "42\n", 5), 0)
         self.assertGreater(run.measure([sys.executable, "-c",

@@ -1,0 +1,19 @@
+$directory = Cli::arg(0);
+$source = File::openLines(Path::join($directory, "input.txt"));
+$text = "";
+$count = 0;
+try {
+    while (($line = File::readLine($source)) !== null) {
+        $text .= String::upper($line) . "\n";
+        $count += 1;
+    }
+} finally {
+    File::close($source);
+}
+$target = Path::join($directory, "output.txt");
+File::write($target, $text);
+$actual = File::read($target);
+if ($actual !== $text) {
+    throw new Error("file output mismatch");
+}
+echo str($count) . ":" . str(len($actual)) . "\n";

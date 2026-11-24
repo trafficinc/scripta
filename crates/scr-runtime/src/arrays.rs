@@ -235,13 +235,25 @@ impl Runtime {
         };
         let mut values = Vec::new();
         let mut bytes = std::mem::size_of::<Value>();
+        // Share the immutable binding name, not the per-iteration value or
+        // scope identity. Captured iterations still retain independent scopes.
+        let name = Rc::new(binding.name.clone());
         for item in items {
             self.checkpoint(span)?;
             let previous = self.enter_scope(self.environments.current, span)?;
-            self.environments
+            let variables = &mut self
+                .environments
                 .scope_mut(self.environments.current)
-                .variables
-                .insert(binding.name.clone(), item);
+                .variables;
+            #[cfg(not(test))]
+            let shared = true;
+            #[cfg(test)]
+            let shared = !self.disable_shared_parameter_names;
+            if shared {
+                variables.insert_parameter(&name, item);
+            } else {
+                variables.insert(binding.name.clone(), item);
+            }
             let result = (|| {
                 if let Some(condition) = condition {
                     if !self.condition(condition, output)? {
@@ -251,7 +263,7 @@ impl Runtime {
                 let value = self.evaluate(value, output)?;
                 self.push_array_value(&mut values, value, &mut bytes, span)
             })();
-            self.environments.leave(previous);
+            self.environments.leave_parameter(previous);
             result?;
         }
         let value = Value::List(values);

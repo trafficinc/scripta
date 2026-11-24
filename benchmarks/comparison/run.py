@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Verified, randomized CLI comparison using only the Python standard library."""
 import argparse
+import csv
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -12,13 +14,14 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent.parent
 LANGUAGES = ("php", "python", "scripta")
 # name, table label, fixed work, independent expected stdout
-WORKLOADS = (
+CORE_WORKLOADS = (
     ("numeric_loop", "Numeric loop", "1,000,000 iterations", "143997165\n"),
     ("recursive_fib", "Recursive Fibonacci", "fib(28), no memoization", "317811\n"),
     ("list_pipeline", "List pipeline", "2,000 items × 200 passes", "200000:599400000\n"),
@@ -30,6 +33,47 @@ WORKLOADS = (
     ("function_calls", "Function calls", "200,000 calls", "20000100000\n"),
     ("startup", "Startup", "Empty script", ""),
 )
+FILE_LINES = 20000
+CSV_ROWS = 10000
+SQLITE_ROWS = 10000
+CSV_NAME = 'comma, quote" and\nline é'
+WORKLOADS = CORE_WORKLOADS[:-1] + (
+    ("files", "File processing", "20,000 lines; 260,000 bytes", "20000:260000\n"),
+    ("csv_json", "CSV → JSON", "10,000 quoted UTF-8 records", "10000:50234922\n"),
+    ("sqlite", "SQLite transaction", "10,000 inserts + aggregate query (in-memory)",
+     "10000:49995000:79974:399939974\n"),
+) + CORE_WORKLOADS[-1:]
+
+
+def prepare_inputs(directory, workload):
+    """Create controlled inputs outside the child timer, with explicit byte newlines."""
+    if workload == "files":
+        data = "".join(f"line-{i:05d}:7\n" for i in range(FILE_LINES)).encode("ascii")
+        (directory / "input.txt").write_bytes(data)
+        return data.upper()
+    if workload == "csv_json":
+        data = io.StringIO(newline="")
+        writer = csv.writer(data, lineterminator="\r\n")
+        writer.writerows((i, CSV_NAME, i % 17) for i in range(CSV_ROWS))
+        (directory / "input.csv").write_bytes(data.getvalue().encode("utf-8"))
+        return [{"id": i, "name": CSV_NAME, "value": (i % 17) * 3} for i in range(CSV_ROWS)]
+    raise ValueError(f"unknown input workload: {workload}")
+
+
+def measure_workload(command, workload, expected, timeout):
+    if workload not in ("files", "csv_json"):
+        return measure(command, expected, timeout)
+    # Each invocation receives fresh inputs and a new destination. Setup, full
+    # parent-side output verification, and cleanup are outside the child timer.
+    with tempfile.TemporaryDirectory(prefix="scripta-comparison-") as temporary:
+        directory = Path(temporary)
+        output = prepare_inputs(directory, workload)
+        elapsed = measure(command + [str(directory)], expected, timeout)
+        target = directory / ("output.txt" if workload == "files" else "output.json")
+        actual = target.read_bytes() if workload == "files" else json.loads(target.read_bytes())
+        if actual != output:
+            raise RuntimeError(f"wrong {workload} output file: {command}")
+        return elapsed
 
 
 def sha(path):
@@ -57,7 +101,7 @@ def measure(command, expected, timeout):
     return elapsed
 
 
-def resolve_commands(scripta, php, python):
+def resolve_commands(scripta, php, python, php_extensions=()):
     resolved = {name: shutil.which(str(value)) for name, value in
                 (("scripta", scripta), ("php", php), ("python", python))}
     commands = {}
@@ -67,6 +111,8 @@ def resolve_commands(scripta, php, python):
             unavailable[name] = f"executable not found: {dict(scripta=scripta, php=php, python=python)[name]}"
         elif name == "php":
             commands[name] = [path, "-n", "-d", "opcache.enable_cli=0", "-d", "opcache.jit=0", "-d", "pcre.jit=0"]
+            for extension in php_extensions:
+                commands[name].extend(["-d", f"extension={extension}"])
         elif name == "python":
             commands[name] = [path, "-I"]
         else:
@@ -93,7 +139,8 @@ def cpu_name():
 
 
 def run(args):
-    commands, unavailable = resolve_commands(args.scripta, args.php, args.python)
+    commands, unavailable = resolve_commands(args.scripta, args.php, args.python,
+                                             getattr(args, "php_extension", ()))
     report = {
         "schema": 1, "status": "running", "date_utc": datetime.now(timezone.utc).isoformat(),
         "platform": platform.platform(), "machine": platform.machine(), "cpu": cpu_name(),
@@ -104,6 +151,7 @@ def run(args):
         "timeout_seconds": args.timeout,
         "metric": "whole-process wall time in milliseconds; warm filesystem cache; startup included",
         "configuration": "PHP -n, CLI OPcache/JIT and PCRE JIT disabled; Python -I; SCR_* environment removed",
+        "php_extensions": list(getattr(args, "php_extension", ())),
         "runtimes": {name: metadata(command) for name, command in commands.items()},
         "unavailable": unavailable, "results": [], "round_order": [],
         "fixture_sha256": {p.name: sha(p) for p in sorted((ROOT / "fixtures").iterdir()) if p.is_file()},
@@ -121,7 +169,7 @@ def run(args):
                 report["round_order"].append({"workload": name, "round": index, "languages": order})
                 for language in order:
                     command = commands[language] + [str(ROOT / "fixtures" / f"{name}.{extensions[language]}")]
-                    elapsed = measure(command, expected, args.timeout)
+                    elapsed = measure_workload(command, name, expected, args.timeout)
                     if index >= args.warmups:
                         observations[language].append(elapsed)
             for language, values in observations.items():
@@ -153,6 +201,8 @@ def main():
     parser.add_argument("--scripta", required=True)
     parser.add_argument("--php", default="php")
     parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--php-extension", action="append", default=[],
+                        help="explicit PHP extension to load under -n (repeatable; e.g. sqlite3)")
     parser.add_argument("--output", type=Path, help="save the JSON report to a new file (optional)")
     parser.add_argument("--print", dest="print_report", action="store_true",
                         help="print the full JSON report to stdout; send timing progress to stderr")

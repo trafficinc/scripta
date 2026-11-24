@@ -46,6 +46,37 @@ fn compare(fast: &mut Runtime, slow: &mut Runtime, source: &str) -> bool {
 }
 
 #[test]
+fn fixed_scalar_updates_match_full_measurement_through_type_and_layout_transitions() {
+    for source in [
+        "class C{$x=0;}$c=new C();$c->x=null;$c->x=true;$c->x=1.5;$c->x=-9;$seen=$c->x;",
+        "class C{$x=0;}$c=new C();$c->x='é';$c->x=3;$c->x=[1,2];$c->x=false;$seen=$c->x;",
+        "class C{$x:int;}$c=new C();$c->x=2;try{$c->x='bad';}catch(TypeError $e){}$c->x+=1;$seen=$c->x;",
+        "class C extends Error{$x=0;}class Child extends C{}$c=new Child('message');$c->x=9;$seen=$c->x;",
+        "class C extends Error{$x=0;}$c=new C('message');$c->x=9;$seen=[$c->message,$c->x];",
+    ] {
+        let (mut fast, mut slow) = pair(RuntimeOptions::default());
+        assert!(compare(&mut fast, &mut slow, source), "{source}");
+    }
+    let source = "class C{$x:int=0;function next():int{$this->x+=1;return $this->x;}}\
+                  $c=new C();$a=$c->next();$seen=$c->next();";
+    for limit in 0..50 {
+        let (mut fast, mut slow) = pair(RuntimeOptions {
+            instruction_limit: Some(limit),
+            ..RuntimeOptions::default()
+        });
+        compare(&mut fast, &mut slow, source);
+    }
+    let exact = std::mem::size_of::<Value>() * 2 + 1;
+    for limit in [exact - 1, exact, exact + 1] {
+        let (mut fast, mut slow) = pair(RuntimeOptions {
+            max_value_bytes: Some(limit),
+            ..RuntimeOptions::default()
+        });
+        assert_eq!(compare(&mut fast, &mut slow, source), limit >= exact);
+    }
+}
+
+#[test]
 fn borrowed_updates_preserve_inheritance_types_nested_values_and_failed_writes() {
     for source in [
         "class C{$x=0;function next(){return $this->x+=1;}}$c=new C();$a=$c->next();$b=$c->next();",

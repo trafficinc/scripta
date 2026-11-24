@@ -9,6 +9,113 @@ fn run(runtime: &mut Runtime, source: &str) -> Result<u8, RuntimeError> {
     runtime.execute_source(source, &mut Vec::new())
 }
 
+fn register_suffix(runtime: &mut Runtime) {
+    for name in ["suffix", "Text::suffix"] {
+        runtime
+            .register(
+                name,
+                NativeFunction::new(
+                    NativeSignature::new(vec![NativeType::String], NativeType::String),
+                    |_, args| {
+                        let Value::String(text) = &args[0] else {
+                            unreachable!()
+                        };
+                        Ok(Value::String(text.to_uppercase()))
+                    },
+                ),
+            )
+            .unwrap();
+    }
+}
+
+#[test]
+fn non_reentrant_native_suffixes_reuse_capacity_and_own_self_reads_before_commit() {
+    let mut text = String::with_capacity(4096);
+    text.push('é');
+    let pointer = text.as_ptr();
+    let mut runtime = Runtime::new();
+    runtime.set_global("s", Value::String(text)).unwrap();
+    register_suffix(&mut runtime);
+    run(
+        &mut runtime,
+        "$copy=$s;$s.=Text::suffix('ß').suffix('ab');$s=$s.suffix($s);",
+    )
+    .unwrap();
+    let Some(Value::String(text)) = runtime.get_global("s") else {
+        panic!("string result")
+    };
+    assert_eq!(text, "éSSABÉSSAB");
+    assert_eq!(text.as_ptr(), pointer);
+    assert_eq!(runtime.get_global("copy"), Some(&Value::String("é".into())));
+}
+
+#[test]
+fn native_suffix_errors_and_exact_limits_match_the_snapshot_path() {
+    for source in [
+        "$s='é';$s=$s.Text::suffix('ß');",
+        "$s='é';$s.=suffix('ab');",
+        "$s='é';$s=$s.suffix(1);",
+        "$s='é';$s=$s.suffix($missing);",
+        "$s='é';$s=$s.suffix('a').1;",
+        "$s='é';$s=$s.suffix('a'.1);",
+    ] {
+        let slot = std::mem::size_of::<Value>();
+        for limit in [None, Some(slot + 3), Some(slot + 4), Some(slot + 5)] {
+            let mut outcomes = Vec::new();
+            for general in [false, true] {
+                let mut runtime = Runtime::with_options(RuntimeOptions {
+                    max_value_bytes: limit,
+                    ..Default::default()
+                });
+                register_suffix(&mut runtime);
+                outcomes.push((
+                    variant(&mut runtime, source, general),
+                    runtime.get_global("s").cloned(),
+                ));
+            }
+            assert_eq!(outcomes[0], outcomes[1], "{source}, {limit:?}");
+        }
+    }
+}
+
+#[test]
+fn callbacks_and_effectful_native_arguments_preserve_prefix_snapshots() {
+    let mut runtime = Runtime::new();
+    register_suffix(&mut runtime);
+    runtime
+        .register(
+            "bridge",
+            NativeFunction::reentrant(
+                NativeSignature::new(vec![NativeType::Callable], NativeType::String),
+                |context, args| context.invoke(args[0].clone(), &[]),
+            ),
+        )
+        .unwrap();
+    run(
+        &mut runtime,
+        "function reentered(){$s='a';function change(){$s='b';return 'c';}\
+         $s.=bridge(change);return $s;}\
+         function argument(){$s='a';function change(){$s='b';return 'c';}\
+         $s=$s.suffix(change());return $s;}\
+         function replaced(){$s='a';function suffix(){$s='b';return 'c';}\
+         $s.=suffix();return $s;}\
+         $callback=reentered();$argument=argument();$replaced=replaced();",
+    )
+    .unwrap();
+    assert_eq!(
+        runtime.get_global("callback"),
+        Some(&Value::String("ac".into()))
+    );
+    assert_eq!(
+        runtime.get_global("argument"),
+        Some(&Value::String("aC".into()))
+    );
+    assert_eq!(
+        runtime.get_global("replaced"),
+        Some(&Value::String("ac".into()))
+    );
+}
+
 // A grouped assignment uses the existing value-producing path. Preserve the
 // original source/spans so errors can be compared exactly against buffer reuse.
 fn variant(runtime: &mut Runtime, source: &str, general: bool) -> Result<u8, RuntimeError> {

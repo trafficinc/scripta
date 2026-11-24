@@ -16,6 +16,8 @@ mod compact_call;
 mod compact_call_tests;
 #[cfg(test)]
 mod compact_frame_tests;
+#[cfg(test)]
+mod comprehension_tests;
 mod copy_validation;
 #[cfg(test)]
 mod copy_validation_tests;
@@ -1668,6 +1670,38 @@ impl Runtime {
         }
         Ok(self.environments.enter_empty(parent))
     }
+    // Non-reentrant natives have host services but no access to script bindings
+    // or InvocationContext. They can perform I/O, throw, and cancel; all of that
+    // still happens before the append commits. Never infer this from a name:
+    // script replacements, module aliases, and callbacks keep the snapshot path.
+    fn append_safe(&self, expression: &Expr) -> bool {
+        let native = |name: &str| {
+            matches!(self.function(name, expression.span),
+                Ok(Value::Callable(callable))
+                if matches!(callable.0.as_ref(), Function::Native { function, .. }
+                    if !function.is_reentrant()))
+        };
+        match &expression.kind {
+            ExprKind::Grouped(inner) | ExprKind::Unary(_, inner) => self.append_safe(inner),
+            ExprKind::Binary(left, _, right) => self.append_safe(left) && self.append_safe(right),
+            ExprKind::Call(callee, arguments) => {
+                matches!(&callee.kind, ExprKind::Identifier(name) if native(name))
+                    && arguments.iter().all(|argument| self.append_safe(argument))
+            }
+            ExprKind::StaticCall {
+                namespace,
+                name,
+                arguments,
+            } => {
+                matches!(&namespace.kind, ExprKind::Identifier(namespace)
+                    if self.environments.find_alias(namespace).is_none()
+                        && native(&format!("{namespace}::{name}")))
+                    && arguments.iter().all(|argument| self.append_safe(argument))
+            }
+            _ => pure(expression),
+        }
+    }
+
     fn assignment(
         &mut self,
         target: &Expr,
@@ -1686,23 +1720,23 @@ impl Runtime {
                 target.span,
             );
         }
-        // Only discarded assignments with a pure suffix may reuse a variable's
-        // buffer. Effectful suffixes need the original left-value snapshot.
+        // Only discarded assignments whose suffix cannot write script bindings
+        // may reuse a variable's buffer. Reentrant/user calls need a snapshot.
         if !retain && place.path.is_empty() && !place.append {
             if let Root::Variable { scope, name, slot } = &place.root {
                 let append = match op {
-                    AssignmentOp::Concat if pure(rhs) => Some((rhs, target.span)),
+                    AssignmentOp::Concat => Some((rhs, target.span)),
                     AssignmentOp::Assign => self_concat_suffix(rhs, name),
                     _ => None,
                 };
-                if let Some((suffix, span)) = append.filter(|_| {
+                if let Some((suffix, span)) = append.filter(|(suffix, _)| {
                     matches!(
                         self.environments
                             .scope(*scope)
                             .variables
                             .get_slot(*slot, name),
                         Some(Value::String(_))
-                    )
+                    ) && self.append_safe(suffix)
                 }) {
                     // Own the suffix before mutation, including reads of the
                     // destination itself or of independent string copies.
@@ -1921,7 +1955,7 @@ fn self_concat_suffix<'a>(rhs: &'a Expr, name: &str) -> Option<(&'a Expr, Span)>
     let ExprKind::Binary(left, BinaryOp::Concat, suffix) = &concat.kind else {
         return None;
     };
-    if matches!(&ungroup(left).kind, ExprKind::Variable(prefix) if prefix == name) && pure(suffix) {
+    if matches!(&ungroup(left).kind, ExprKind::Variable(prefix) if prefix == name) {
         Some((suffix, concat.span))
     } else {
         None

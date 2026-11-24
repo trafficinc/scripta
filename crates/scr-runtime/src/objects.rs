@@ -940,7 +940,34 @@ impl Runtime {
             };
             // No stored-value borrow crosses a checkpoint: object_size reborrows
             // after it, and the receiver remains a collector root throughout.
-            let measured = if track_handles {
+            // A single initialized scalar field has a fixed logical footprint.
+            // Preserve the field checkpoint, but do not walk and remeasure an
+            // unchanged layout. Missing fields, handles, inherited layouts,
+            // exceptions, and explicit snapshot validation use the usual path.
+            let scalar = |value: &Value| {
+                matches!(
+                    value,
+                    Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_)
+                )
+            };
+            let fixed_scalar = !snapshot
+                && class.declaration.fields.len() == 1
+                && class.parent.get().is_some_and(Option::is_none)
+                && instance.exception.borrow().is_none()
+                && scalar(&value)
+                && self
+                    .environments
+                    .scope(scope)
+                    .variables
+                    .get_slot(slot, name)
+                    .is_some_and(scalar);
+            let measured = if fixed_scalar {
+                self.checkpoint(span)?;
+                FieldSize {
+                    bytes: instance.payload.get(),
+                    has_handles: false,
+                }
+            } else if track_handles {
                 self.object_size::<true>(&class, fields, Some((name, &value)), span)?
             } else {
                 self.object_size::<false>(

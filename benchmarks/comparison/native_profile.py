@@ -11,7 +11,7 @@ import sys
 import tempfile
 
 from execution import worker_command
-from run import ROOT, WORKLOADS, environment, sha
+from run import ROOT, CORE_WORKLOADS as WORKLOADS, environment, sha
 
 
 def allocation_totals(text):

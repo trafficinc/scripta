@@ -57,6 +57,23 @@ execution limits retain their existing validation.
 Prepared arithmetic and boolean operations use an inline success path; the
 diagnostic converter is kept in a cold error path with the original source span.
 
+Comprehensions share their immutable binding name and recycle bounded,
+uncaptured scope storage. Each iteration still enters its own lexical scope;
+escaped closures retain independent iteration bindings. Existing scope and
+instruction checkpoints remain in place.
+
+Discarded string appends reuse the destination buffer when the suffix cannot
+write script bindings. This includes non-reentrant native calls with similarly
+restricted arguments, identified through the actual resolved callable. User
+calls, reentrant callbacks, module aliases, and effectful arguments keep the
+original prefix snapshot. Suffix evaluation, validation, and resource failures
+precede the append commit.
+
+An initialized scalar in an ordinary single-field instance has a fixed logical
+footprint. Scalar replacements retain that payload size and the field's existing
+checkpoint and annotation checks. Missing fields, inherited layouts, exceptions,
+and values with variable payloads or shared handles use full object measurement.
+
 `RuntimeOptions` controls execution and logical resource budgets; these are not
 an aggregate heap cap. Internal signals preserve exceptions, returns and exits.
 Cancellation and fatal limits bypass script cleanup; Rust ownership handles
