@@ -49,3 +49,6 @@ id_ed25519.*
 # Local logs and OS metadata.
 *.log
 .DS_Store
+
+# Local class dispatch experiment plan.
+/docs/temporary-class-dispatch-plan.md

@@ -14,6 +14,7 @@ pub(crate) struct Hint {
 
 #[derive(Default)]
 pub(crate) struct MethodCache {
+    pub field_reads: crate::field_read::FieldRead,
     entries: RefCell<Vec<Option<Hint>>>,
     misses: Cell<u8>,
     disabled: Cell<bool>,
@@ -22,6 +23,13 @@ pub(crate) struct MethodCache {
 }
 
 impl MethodCache {
+    pub fn with_fields(fields: usize, ordinary: bool) -> Self {
+        Self {
+            field_reads: crate::field_read::FieldRead::new(fields, ordinary),
+            ..Self::default()
+        }
+    }
+
     pub fn enabled(&self, span: Span) -> bool {
         // Host-built trees can deliberately reuse empty/default spans. They
         // retain ordinary lookup instead of repeatedly replacing one entry.

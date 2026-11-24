@@ -1,6 +1,8 @@
 //! Safe, synchronous AST interpretation with lexical scopes and injectable output.
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+mod adaptive_read_tests;
 mod arrays;
 mod bindings;
 #[cfg(test)]
@@ -9,12 +11,16 @@ mod block_scope_tests;
 mod call_reuse_tests;
 #[cfg(test)]
 mod call_setup_tests;
+mod compact_call;
+#[cfg(test)]
+mod compact_call_tests;
 mod copy_validation;
 #[cfg(test)]
 mod copy_validation_tests;
 mod environment;
 mod error;
 mod exceptions;
+mod field_read;
 #[cfg(test)]
 mod field_update_tests;
 mod float_loop;
@@ -128,6 +134,10 @@ const MAX_ARGUMENT_CAPACITY: usize = 16;
 
 #[derive(Default)]
 pub struct Runtime {
+    #[cfg(test)]
+    disable_compact_calls: bool,
+    #[cfg(test)]
+    compact_calls_executed: usize,
     environments: Environments,
     map_indexes: std::cell::RefCell<map_index::MapIndexes>,
     exception_classes:
@@ -144,6 +154,8 @@ pub struct Runtime {
     force_hashed_fields: bool,
     #[cfg(test)]
     disable_method_cache: bool,
+    #[cfg(test)]
+    disable_field_reads: bool,
     #[cfg(test)]
     disable_map_literal_index: bool,
     #[cfg(test)]
@@ -1302,6 +1314,11 @@ impl Runtime {
                         }
                         if let Some(result) = self.prepared_call(function, declaration, values) {
                             return result;
+                        }
+                        if *environment == 0 {
+                            if let Some(result) = self.compact_call(declaration, values) {
+                                return result;
+                            }
                         }
                     }
                     #[cfg(not(test))]

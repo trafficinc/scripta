@@ -45,6 +45,24 @@ pub(crate) struct ScriptClass {
     pub source: Option<Arc<SourceFile>>,
 }
 impl ScriptClass {
+    #[inline(never)]
+    fn cached_field_read(&self, name: &str) -> Option<usize> {
+        if !self.parent.get().is_some_and(Option::is_none) {
+            return None;
+        }
+        let slot = self.method_cache.field_reads.slot()?;
+        self.declaration
+            .fields
+            .get(slot)
+            .filter(|field| field.binding.name == name)?;
+        #[cfg(test)]
+        self.method_cache
+            .field_reads
+            .hits
+            .set(self.method_cache.field_reads.hits.get() + 1);
+        Some(slot)
+    }
+
     fn cached_method(
         &self,
         name: &str,
@@ -258,7 +276,10 @@ impl Runtime {
             parent: OnceCell::new(),
             resolving: Cell::new(false),
             interfaces: OnceCell::new(),
-            method_cache: crate::method_cache::MethodCache::default(),
+            method_cache: crate::method_cache::MethodCache::with_fields(
+                declaration.fields.len(),
+                declaration.parent.is_none() && !is_interface,
+            ),
             environment: self.environments.current,
             owner: self.identity.clone(),
             source: self.source.clone(),
@@ -580,7 +601,14 @@ impl Runtime {
         let (owner, declaration) = if let Some(method) = cached {
             method
         } else {
-            if class.fields().any(|(_, f)| f.binding.name == name) {
+            #[cfg(not(test))]
+            let adaptive = class.method_cache.field_reads.slot().is_some();
+            #[cfg(test)]
+            let adaptive =
+                !self.disable_field_reads && class.method_cache.field_reads.slot().is_some();
+            if adaptive && class.cached_field_read(name).is_some()
+                || class.fields().any(|(_, f)| f.binding.name == name)
+            {
                 return self
                     .object_field(object, name, span)
                     .map(ResolvedProperty::Value);
@@ -694,16 +722,28 @@ impl Runtime {
             if let Some(value) = self.exception_property(instance, name) {
                 return Ok(value);
             }
-            let Some(slot) = instance
-                .class
-                .fields()
-                .position(|(_, f)| f.binding.name == name)
-            else {
+            #[cfg(not(test))]
+            let adaptive = instance.class.method_cache.field_reads.enabled();
+            #[cfg(test)]
+            let adaptive =
+                !self.disable_field_reads && instance.class.method_cache.field_reads.enabled();
+            let cached = (adaptive && instance.class.method_cache.field_reads.slot().is_some())
+                .then(|| instance.class.cached_field_read(name))
+                .flatten();
+            let Some(slot) = cached.or_else(|| {
+                instance
+                    .class
+                    .fields()
+                    .position(|(_, f)| f.binding.name == name)
+            }) else {
                 return Err(self.native_error(
                     NativeError::new("PropertyError", format!("unknown field {name}")),
                     span,
                 ));
             };
+            if adaptive && slot >= 8 {
+                instance.class.method_cache.field_reads.observe(slot);
+            }
             return self
                 .environments
                 .scope(instance.scope)
