@@ -1,0 +1,56 @@
+function platform_binary() {
+    $binary = Env::get("SCRIPTA_PLATFORM_BINARY");
+    Assert::notSame(null, $binary, "Run this suite with the platform launcher.");
+    return $binary;
+}
+function platform_child() {
+    return Path::join(Env::get("SCRIPTA_PLATFORM_FIXTURES"), "child.scripta");
+}
+function test_literal_process_arguments() {
+    $arguments = ["space value", "quote\"value", "trailing\\", "é 世界", "", "*", "a|b", "$(literal)"];
+    $result = Process::run(platform_binary(), List::concat(["run", platform_child(), "args"], $arguments), ["timeoutMs" => 5000]);
+    Assert::isTrue($result->success);
+    Assert::same(0, $result->exitCode);
+    Assert::same("", $result->stderr);
+    Assert::same($arguments, Json::decode($result->stdout));
+}
+function test_child_cwd_and_environment_do_not_change_parent() {
+    $original = Dir::current();
+    $directory = Path::join(Test::tempDir(), "child cwd é");
+    Dir::create($directory);
+    Env::set("SCRIPTA_SMOKE_CHILD_VALUE", "parent");
+    Env::set("SCRIPTA_SMOKE_CHILD_REMOVED", "parent");
+    $result = Process::run(platform_binary(), ["run", platform_child(), "inspect"], ["cwd" => $directory, "env" => ["SCRIPTA_SMOKE_CHILD_VALUE" => "child é", "SCRIPTA_SMOKE_CHILD_REMOVED" => null], "timeoutMs" => 5000]);
+    Assert::isTrue($result->success);
+    $child = Json::decode($result->stdout);
+    Assert::same(Path::canonical($directory), $child["cwd"]);
+    Assert::same("child é", $child["value"]);
+    Assert::isFalse($child["removed"]);
+    Assert::same("parent", Env::get("SCRIPTA_SMOKE_CHILD_VALUE"));
+    Assert::same($original, Dir::current());
+}
+function test_nonzero_exit_stdout_and_stderr() {
+    $result = Process::run(platform_binary(), ["run", platform_child(), "fail"], ["timeoutMs" => 5000]);
+    Assert::isFalse($result->success);
+    Assert::same(17, $result->exitCode);
+    Assert::same("platform-stdout\n", $result->stdout);
+    $log = Json::decode($result->stderr);
+    Assert::same("error", $log["level"]);
+    Assert::same("platform-stderr", $log["message"]);
+}
+function test_timeout_terminates_child_before_late_write() {
+    $marker = Path::join(Test::tempDir(), "late-write.txt");
+    $binary = platform_binary();
+    $child = platform_child();
+    Assert::throws(function () {
+        Process::run($binary, ["run", $child, "sleep", $marker], ["timeoutMs" => 200]);
+    }, "TimeoutError");
+    Date::sleep(800);
+    Assert::isFalse(File::exists($marker));
+}
+function test_missing_executable_is_an_error() {
+    $missing = Path::join(Test::tempDir(), "missing-executable");
+    Assert::throws(function () {
+        Process::run($missing, [], ["timeoutMs" => 5000]);
+    }, "CommandNotFoundError");
+}

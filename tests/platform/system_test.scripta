@@ -1,0 +1,63 @@
+function test_platform_architecture_and_native_directories() {
+    $expected = Env::get("SCRIPTA_PLATFORM_OS");
+    Assert::contains(System::platform(), ["linux", "windows", "macos"]);
+    if ($expected !== null) {
+        Assert::same($expected, System::platform());
+        Assert::same(Env::get("SCRIPTA_PLATFORM_ARCH"), System::architecture());
+    }
+    Assert::isTrue(len(System::hostname()) > 0);
+    Assert::isTrue(Dir::exists(System::homeDirectory()));
+    Assert::isTrue(Dir::exists(System::tempDirectory()));
+    $uptime = System::uptime();
+    Assert::isTrue($uptime > 0);
+    // A denied native boot-time query must not masquerade as uptime since 1970.
+    Assert::isTrue(Date::now() / 1000 - $uptime > Date::parse("2000-01-01T00:00:00Z") / 1000);
+    echo Json::encode(["platform" => System::platform(), "architecture" => System::architecture(), "uptimeSeconds" => $uptime]) . "\n";
+}
+function test_system_memory_accounting() {
+    $memory = System::memoryUsage();
+    Assert::isTrue($memory->totalBytes > 0);
+    Assert::isTrue($memory->availableBytes >= 0);
+    Assert::isTrue($memory->availableBytes <= $memory->totalBytes);
+    Assert::same($memory->totalBytes - $memory->availableBytes, $memory->usedBytes);
+    Assert::isTrue($memory->percentUsed >= 0.0 && $memory->percentUsed <= 100.0);
+    Assert::throws(function () {
+        $memory->totalBytes = 0;
+    }, "PropertyError");
+    echo Json::encode(["systemRamTotalBytes" => $memory->totalBytes, "systemRamAvailableBytes" => $memory->availableBytes]) . "\n";
+}
+function test_disk_capacity_and_missing_path() {
+    $directory = Test::tempDir();
+    $disk = System::diskUsage($directory);
+    Assert::isTrue($disk->totalBytes > 0);
+    Assert::isTrue($disk->usedBytes >= 0 && $disk->usedBytes <= $disk->totalBytes);
+    Assert::isTrue($disk->availableBytes >= 0 && $disk->availableBytes <= $disk->totalBytes);
+    Assert::isTrue($disk->usedBytes + $disk->availableBytes <= $disk->totalBytes);
+    Assert::isTrue($disk->percentUsed >= 0.0 && $disk->percentUsed <= 100.0);
+    Assert::throws(function () {
+        System::diskUsage(Path::join($directory, "missing"));
+    }, "IoError");
+}
+function test_cpu_usage_and_monotonic_clock() {
+    $before = Clock::monotonicMs();
+    $cpu = System::cpuUsage();
+    $after = Clock::monotonicMs();
+    Assert::isTrue($cpu >= 0.0 && $cpu <= 100.0);
+    Assert::isTrue($after >= $before);
+    Date::sleep(20);
+    Assert::isTrue(Clock::monotonicMs() >= $after);
+    Assert::same(0, Date::parse("1970-01-01T00:00:00Z"));
+    Assert::isTrue(Date::now() > 0);
+}
+function test_runtime_environment_and_native_case_rules() {
+    $name = "SCRIPTA_SMOKE_CASE_VALUE";
+    Env::set($name, "value with spaces é");
+    Assert::same("value with spaces é", Env::get($name));
+    if (System::platform() === "windows") {
+        Assert::same("value with spaces é", Env::get("scripta_smoke_case_value"));
+    } else {
+        Assert::isFalse(Env::has("scripta_smoke_case_value"));
+    }
+    Env::remove($name);
+    Assert::isFalse(Env::has($name));
+}

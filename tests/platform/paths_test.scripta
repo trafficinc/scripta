@@ -1,0 +1,53 @@
+function test_native_join_normalize_and_extensions() {
+    $joined = Path::join("folder", ".", "child", "..", "report.txt");
+    Assert::same(Path::join("folder", "report.txt"), Path::normalize($joined));
+    Assert::same("report.txt", Path::filename($joined));
+    Assert::same("txt", Path::extension($joined));
+    Assert::same("gz", Path::extension("archive.tar.gz"));
+    Assert::same("", Path::extension(".hidden"));
+    Assert::same(".", Path::normalize(""));
+}
+function test_relative_paths_and_unicode_working_directory() {
+    $original = Dir::current();
+    $directory = Path::join(Test::tempDir(), "folder with spaces é Ω");
+    Dir::create($directory);
+    try {
+        Dir::change($directory);
+        Assert::same(Path::canonical($directory), Dir::current());
+        File::write("report 世界.txt", "relative path works");
+        Assert::same("relative path works", File::read(Path::join($directory, "report 世界.txt")));
+        Assert::same(Path::join(Dir::current(), "future.txt"), Path::absolute("child/../future.txt"));
+        Assert::same(Dir::current(), Path::canonical("."));
+    } finally {
+        Dir::change($original);
+    }
+    Assert::same($original, Dir::current());
+}
+function test_missing_and_invalid_paths_are_errors() {
+    $missing = Path::join(Test::tempDir(), "missing.txt");
+    Assert::isFalse(File::exists($missing));
+    Assert::isFalse(Dir::exists($missing));
+    Assert::throws(function () {
+        Path::canonical($missing);
+    }, "FileNotFoundError");
+    Assert::throws(function () {
+        Path::absolute("");
+    }, "PathError");
+}
+function test_platform_specific_path_rules() {
+    if (System::platform() === "windows") {
+        Assert::same("C:\\folder\\file.txt", Path::join("C:\\", "folder", "file.txt"));
+        Assert::throws(function () {
+            Path::absolute("C:relative.txt");
+        }, "PathError");
+        Assert::throws(function () {
+            Path::absolute("\\rooted-without-drive.txt");
+        }, "PathError");
+    } else {
+        Assert::same("/file", Path::normalize("/../../file"));
+        $path = Path::join(Test::tempDir(), "literal\\backslash.txt");
+        File::write($path, "backslash is a filename character");
+        Assert::same("literal\\backslash.txt", Path::filename($path));
+        Assert::same("backslash is a filename character", File::read($path));
+    }
+}

@@ -16,6 +16,9 @@ benchmarks/fixtures/* -text
 
 # Keep release inputs stable across checkout platforms.
 *.py text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=lf
+*.cmd text eol=crlf
 Cargo.lock text eol=lf
 *.rs text eol=lf
 *.toml text eol=lf

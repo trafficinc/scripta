@@ -1,0 +1,27 @@
+$report = Json::decode(File::read(Cli::arg(0)));
+if ($report["version"] !== 1 || Map::has($report, "error")) {
+    echo "Platform test runner error: " . Json::encode($report) . "\n";
+    exit(2);
+}
+$counts = ["passed" => 0, "failed" => 0, "skipped" => 0];
+foreach ($report["tests"] as $case) {
+    $status = $case["status"];
+    if (!Map::has($counts, $status)) {
+        throw new Error("Unknown test status");
+    }
+    $counts[$status] += 1;
+    echo String::upper($status) . " " . $case["file"] . "::" . $case["name"] . "\n";
+    if ($case["diagnostic"] !== null) {
+        echo $case["diagnostic"] . "\n";
+    }
+    if ($case["output"] !== "") {
+        echo $case["output"];
+    }
+}
+if ($counts !== $report["summary"]) {
+    throw new Error("Test summary differs from case results");
+}
+echo Json::encode($counts) . "\n";
+if ($report["interrupted"] || $counts["passed"] === 0 || $counts["failed"] > 0 || $counts["skipped"] > 0) {
+    exit(1);
+}

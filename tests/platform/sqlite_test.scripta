@@ -1,0 +1,21 @@
+function test_sqlite_file_reopen_and_rollback() {
+    $path = Path::join(Test::tempDir(), "database with spaces é.sqlite");
+    $db = Sqlite::open($path);
+    try {
+        Sqlite::execute($db, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");
+        Sqlite::execute($db, "INSERT INTO items VALUES (?, ?)", [1, "é 世界"]);
+        Sqlite::execute($db, "BEGIN");
+        Sqlite::execute($db, "INSERT INTO items VALUES (?, ?)", [2, "rolled back"]);
+        Sqlite::execute($db, "ROLLBACK");
+    } finally {
+        Sqlite::close($db);
+    }
+    $db = Sqlite::open($path);
+    try {
+        Assert::same([["id" => 1, "name" => "é 世界"]], Sqlite::query($db, "SELECT id, name FROM items ORDER BY id"));
+    } finally {
+        Sqlite::close($db);
+    }
+    File::delete($path);
+    Assert::isFalse(File::exists($path));
+}

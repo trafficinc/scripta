@@ -5,6 +5,41 @@ Python, test framework package, or Rust compiler is required by package authors.
 The interpreter's Rust tests and repository release/benchmark tooling remain
 separate development checks.
 
+## Native platform smoke tests
+
+From a repository checkout, run the matching launcher. It uses an existing native
+release/dist/debug executable or `scripta` on PATH; add `--build` (PowerShell
+`-Build`) to build the pinned release toolchain first. SQLite is required.
+
+```sh
+bash scripts/test-platform-linux.sh
+bash scripts/test-platform-macos.sh
+```
+
+```powershell
+.\scripts\test-platform-windows.cmd
+```
+
+To test an extracted release, pass `--scripta /path/to/scripta` or PowerShell
+`-Scripta C:\path\scripta.exe`. `--output NEW_DIRECTORY` / `-OutputDirectory`
+selects a fresh report directory; defaults are under `target/platform-tests/`.
+Each run saves JSON case results, executable version/hash, and host details.
+The Windows wrapper starts PowerShell with a process-local execution policy;
+it does not change machine policy. Failures, interrupted runs, and skipped cases
+return nonzero. Existing `SCR_*` restrictions remain in effect; native system
+inspection needs normal OS access.
+
+The shared [Scripta suite](../tests/platform/) covers paths, Unicode filenames,
+text/binary files, LF/CRLF streams, overwrite protection, directories, environment,
+system RAM/disk/CPU/uptime, clocks, processes, and SQLite file reopening. Files
+created by cases live in runner-owned temporary directories. It needs no Python
+or Rust when using an existing executable. Supported launchers target Linux x86-64/ARM64, Windows
+x86-64, and Apple Silicon macOS; native runs on each are still required. These
+smoke tests complement Cargo tests and release/package validation.
+
+Maintainers can check launcher failure handling with
+`python3 -B -m unittest discover -s scripts -p 'test_platform_launchers.py'`.
+
 ## Write and run tests
 
 Create `tests/greeting_test.scripta`:

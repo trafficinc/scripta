@@ -1,0 +1,95 @@
+function test_utf8_text_append_and_byte_metadata() {
+    $path = Path::join(Test::tempDir(), "résumé 世界.txt");
+    File::write($path, "Hello é\r\n");
+    File::append($path, "世界\n");
+    $expected = "Hello é\r\n世界\n";
+    Assert::same($expected, File::read($path));
+    Assert::same(len(Bytes::encodeUtf8($expected)), File::size($path));
+    Assert::isTrue(File::modified($path) > 0);
+    Assert::isTrue(File::exists($path));
+    Assert::isFalse(Dir::exists($path));
+}
+function test_binary_nul_and_invalid_utf8_roundtrip() {
+    $path = Path::join(Test::tempDir(), "binary.dat");
+    $data = Bytes::slice(Bytes::encodeUtf8(Json::decode("\"\\u0000\"") . "é"), 0, 2);
+    File::writeBytes($path, $data);
+    Assert::same($data, File::readBytes($path));
+    Assert::throws(function () {
+        File::read($path);
+    }, "EncodingError");
+    File::appendBytes($path, Bytes::encodeUtf8("\r\n"));
+    $actual = File::readBytes($path);
+    Assert::same(4, len($actual));
+    Assert::same($data, Bytes::slice($actual, 0, 2));
+    Assert::same(Bytes::encodeUtf8("\r\n"), Bytes::slice($actual, 2));
+}
+function test_lf_crlf_empty_and_unterminated_lines() {
+    $path = Path::join(Test::tempDir(), "lines.txt");
+    File::write($path, "first\r\n\r\né\nlast");
+    $stream = File::openLines($path, 64);
+    try {
+        foreach (["first", "", "é", "last", null, null] as $expected) {
+            Assert::same($expected, File::readLine($stream));
+        }
+    } finally {
+        File::close($stream);
+    }
+    File::close($stream);
+    Assert::throws(function () {
+        File::readLine($stream);
+    }, "StreamError");
+}
+function test_copy_move_and_overwrite_protection() {
+    $directory = Test::tempDir();
+    $source = Path::join($directory, "source.txt");
+    $target = Path::join($directory, "target.txt");
+    $moved = Path::join($directory, "moved.txt");
+    File::write($source, "source");
+    File::write($target, "keep this");
+    Assert::throws(function () {
+        File::copy($source, $target);
+    }, "AlreadyExistsError");
+    Assert::throws(function () {
+        File::move($source, $target);
+    }, "AlreadyExistsError");
+    Assert::same("keep this", File::read($target));
+    Assert::same("source", File::read($source));
+    File::copy($source, $moved);
+    Assert::same("source", File::read($moved));
+    File::delete($moved);
+    File::move($source, $moved);
+    Assert::isFalse(File::exists($source));
+    Assert::same("source", File::read($moved));
+}
+function test_atomic_replace_and_directory_listing() {
+    $directory = Path::join(Test::tempDir(), "nested", "directory");
+    Dir::createAll($directory);
+    $path = Path::join($directory, "report.txt");
+    File::writeAtomic($path, "old");
+    File::writeAtomic($path, "new é\r\n");
+    Assert::same("new é\r\n", File::read($path));
+    $entries = Dir::entries($directory);
+    Assert::same(1, len($entries));
+    Assert::same("report.txt", $entries[0]["name"]);
+    Assert::isTrue($entries[0]["isFile"]);
+    Assert::isFalse($entries[0]["isSymlink"]);
+    $files = Dir::files($directory);
+    Assert::same("report.txt", $files[0]->name);
+    Assert::same(File::size($path), $files[0]->size);
+    File::delete($path);
+    Dir::remove($directory);
+    Assert::isFalse(Dir::exists($directory));
+}
+function test_missing_files_and_wrong_kinds_fail() {
+    $directory = Test::tempDir();
+    $missing = Path::join($directory, "missing");
+    Assert::throws(function () {
+        File::read($missing);
+    }, "FileNotFoundError");
+    Assert::throws(function () {
+        File::delete($missing);
+    }, "FileNotFoundError");
+    Assert::throws(function () {
+        File::read($directory);
+    }, "FilesystemError");
+}

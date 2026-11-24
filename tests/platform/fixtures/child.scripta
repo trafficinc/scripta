@@ -1,0 +1,18 @@
+$mode = Cli::arg(0);
+if ($mode === "args") {
+    echo Json::encode(List::slice(Cli::args(), 1)) . "\n";
+} else
+    if ($mode === "inspect") {
+        echo Json::encode(["cwd" => Dir::current(), "value" => Env::get("SCRIPTA_SMOKE_CHILD_VALUE"), "removed" => Env::has("SCRIPTA_SMOKE_CHILD_REMOVED")]) . "\n";
+    } else
+        if ($mode === "fail") {
+            echo "platform-stdout\n";
+            Log::error("platform-stderr");
+            exit(17);
+        } else
+            if ($mode === "sleep") {
+                Date::sleep(600);
+                File::write(Cli::arg(1), "child should have been terminated");
+            } else {
+                exit(2);
+            }
