@@ -657,13 +657,14 @@ syntax, and runtime failures return 1, and command-line usage errors return 2.
 Runtime failures retain the failing source span and a structured stack trace.
 The CLI prints the diagnostic and call-site frames to stderr, innermost first.
 Output delivered to the host writer before a runtime failure remains written.
-The standard library's `ob_*` helpers can retain output in nested per-execution
-application buffers; uncaught failures discard those pending bytes. Successful
-completion drains remaining buffers from inner to outer. `flush()` requests a
-host-writer flush without draining application buffers. These are native APIs,
-not syntax; see [output buffers](standard-library.md#output-buffers-and-flushing).
- Lexing and parsing must
-succeed for the whole program before any execution occurs. `RuntimeOptions`, passed
+`echo` writes directly to that writer. Returning a string or bytes value produces
+no output; functions can return content for callers to combine and emit explicitly.
+There is no application output-buffer stack. The native `flush()` function
+requests a host-writer flush, independent of `echo` and return values. HTTP hosts
+buffer responses separately; see
+[output and flushing](standard-library.md#output-and-flushing).
+
+Lexing and parsing must succeed for the whole program before any execution occurs. `RuntimeOptions`, passed
 to `Runtime::with_options`, configures `recursion_limit` (default 64 active
 script/native invocations, excluding main). The recursive evaluator caps it at
 `MAX_RECURSION_LIMIT` (64) for stack safety; zero disables calls. Exceeding the

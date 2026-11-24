@@ -1,5 +1,5 @@
-//! Generic application output buffers. Transport implementations remain host-owned.
-use crate::{NativeError, NativeResult, RuntimeOptions, Value};
+//! Output accounting and cancellation. Buffering and transport remain host-owned.
+use crate::{NativeError, NativeResult, RuntimeOptions};
 use std::{
     io::{self, Write},
     sync::{
@@ -8,20 +8,7 @@ use std::{
     },
 };
 
-#[derive(Clone, Copy)]
-pub enum OutputAction {
-    Start,
-    Flush,
-    EndFlush,
-    Clean,
-    EndClean,
-    Contents,
-    GetClean,
-    GetFlush,
-    Length,
-    Level,
-}
-/// Native output exposes buffer control without downcasting a host's writer.
+/// Native output exposes byte accounting without downcasting a host writer.
 pub trait ScriptOutput: Write {
     fn generated_bytes(&self) -> Option<usize> {
         None
@@ -29,46 +16,24 @@ pub trait ScriptOutput: Write {
     fn remaining_bytes(&self) -> Option<usize> {
         None
     }
-    fn control(&mut self, _action: OutputAction) -> NativeResult<Value> {
-        Err(NativeError::new(
-            "OutputError",
-            "output buffers require a runtime execution context",
-        ))
-    }
 }
 impl ScriptOutput for Vec<u8> {}
-pub(crate) struct BufferedOutput<'a, W> {
+pub(crate) struct ExecutionOutput<'a, W> {
     target: &'a mut W,
-    buffers: Vec<Vec<u8>>,
-    pending: usize,
     generated: usize,
     limit: Option<usize>,
-    buffer_limit: usize,
-    depth: usize,
-    value_limit: Option<usize>,
     cancellation: Option<Arc<AtomicBool>>,
     failed: bool,
 }
-impl<'a, W: Write> BufferedOutput<'a, W> {
-    pub fn new(target: &'a mut W, options: &RuntimeOptions) -> NativeResult<Self> {
-        if options.max_output_buffers > 128 || options.max_output_buffer_bytes > 64 * 1024 * 1024 {
-            return Err(NativeError::new(
-                "OutputError",
-                "invalid output buffer limits",
-            ));
-        }
-        Ok(Self {
+impl<'a, W: Write> ExecutionOutput<'a, W> {
+    pub fn new(target: &'a mut W, options: &RuntimeOptions) -> Self {
+        Self {
             target,
-            buffers: vec![],
-            pending: 0,
             generated: 0,
             limit: options.max_output_bytes,
-            buffer_limit: options.max_output_buffer_bytes,
-            depth: options.max_output_buffers,
-            value_limit: options.max_value_bytes,
             cancellation: options.interrupt_flag.clone(),
             failed: false,
-        })
+        }
     }
     fn check(&self) -> NativeResult<()> {
         if self
@@ -83,61 +48,11 @@ impl<'a, W: Write> BufferedOutput<'a, W> {
         }
         Ok(())
     }
-    fn value(&self, bytes: usize) -> NativeResult<()> {
-        if self
-            .value_limit
-            .is_some_and(|limit| bytes.saturating_add(size_of::<Value>()) > limit)
-        {
-            return Err(NativeError::new(
-                "ResourceLimitError",
-                "output result exceeds value byte limit",
-            ));
-        }
-        Ok(())
-    }
-    fn drain(&mut self, end: bool) -> NativeResult<()> {
-        if self.buffers.is_empty() {
-            return Err(NativeError::new("OutputError", "no active output buffer"));
-        }
-        let bytes = self.buffers.pop().unwrap();
-        self.pending -= bytes.len();
-        let result = self.append(&bytes);
-        if !end {
-            self.buffers.push(vec![])
-        }
-        result.map_err(Into::into)
-    }
-    fn append(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if let Some(buffer) = self.buffers.last_mut() {
-            if bytes.len() > self.buffer_limit.saturating_sub(self.pending) {
-                self.failed = true;
-                return Err(io::Error::other("output buffer byte limit exceeded"));
-            }
-            if buffer.try_reserve(bytes.len()).is_err() {
-                self.failed = true;
-                return Err(io::Error::other("cannot allocate output buffer"));
-            }
-            buffer.extend_from_slice(bytes);
-            self.pending += bytes.len();
-            Ok(())
-        } else {
-            if let Err(error) = self.target.write_all(bytes) {
-                self.failed = true;
-                return Err(error);
-            }
-            Ok(())
-        }
-    }
-    pub fn finish(&mut self) -> NativeResult<()> {
-        self.check()?;
-        while !self.buffers.is_empty() {
-            self.check()?;
-            self.drain(true)?;
-        }
-        Ok(())
+    pub fn finish(&self) -> NativeResult<()> {
+        self.check()
     }
 }
-impl<W: Write> Write for BufferedOutput<'_, W> {
+impl<W: Write> Write for ExecutionOutput<'_, W> {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         self.check().map_err(io::Error::other)?;
         let total = self
@@ -148,11 +63,14 @@ impl<W: Write> Write for BufferedOutput<'_, W> {
             self.failed = true;
             return Err(io::Error::other("cumulative output byte limit exceeded"));
         };
-        self.append(bytes)?;
+        if let Err(error) = self.target.write_all(bytes) {
+            self.failed = true;
+            return Err(error);
+        }
         self.generated = total;
         Ok(bytes.len())
     }
-    // Transport flush deliberately leaves every application buffer untouched.
+    // Flushing is a host/transport operation, separate from script evaluation.
     fn flush(&mut self) -> io::Result<()> {
         self.check().map_err(io::Error::other)?;
         if let Err(error) = self.target.flush() {
@@ -162,70 +80,12 @@ impl<W: Write> Write for BufferedOutput<'_, W> {
         Ok(())
     }
 }
-impl<W: Write> ScriptOutput for BufferedOutput<'_, W> {
+impl<W: Write> ScriptOutput for ExecutionOutput<'_, W> {
     fn generated_bytes(&self) -> Option<usize> {
         Some(self.generated)
     }
     fn remaining_bytes(&self) -> Option<usize> {
         self.limit.map(|n| n.saturating_sub(self.generated))
-    }
-    fn control(&mut self, action: OutputAction) -> NativeResult<Value> {
-        self.check()?;
-        self.value(0)?;
-        use OutputAction::*;
-        match action {
-            Start => {
-                if self.buffers.len() >= self.depth {
-                    return Err(NativeError::new(
-                        "OutputError",
-                        "output buffer nesting limit exceeded",
-                    ));
-                }
-                self.buffers.push(vec![]);
-                Ok(Value::Null)
-            }
-            Level => Ok(Value::Int(self.buffers.len() as i64)),
-            Length => Ok(self
-                .buffers
-                .last()
-                .map_or(Value::Null, |b| Value::Int(b.len() as i64))),
-            Contents | GetClean | GetFlush => {
-                let Some(buffer) = self.buffers.last() else {
-                    if matches!(action, Contents) {
-                        return Ok(Value::Null);
-                    }
-                    return Err(NativeError::new("OutputError", "no active output buffer"));
-                };
-                self.value(buffer.len())?;
-                let mut result = Vec::new();
-                result.try_reserve_exact(buffer.len()).map_err(|_| {
-                    NativeError::new("ResourceLimitError", "cannot allocate output result")
-                })?;
-                result.extend_from_slice(buffer);
-                if matches!(action, GetClean) {
-                    self.pending -= self.buffers.pop().unwrap().len();
-                }
-                if matches!(action, GetFlush) {
-                    self.drain(true)?;
-                }
-                Ok(Value::Bytes(result.into()))
-            }
-            Flush | EndFlush => {
-                self.drain(matches!(action, EndFlush))?;
-                Ok(Value::Null)
-            }
-            Clean | EndClean => {
-                let Some(buffer) = self.buffers.last_mut() else {
-                    return Err(NativeError::new("OutputError", "no active output buffer"));
-                };
-                self.pending -= buffer.len();
-                *buffer = Vec::new();
-                if matches!(action, EndClean) {
-                    self.buffers.pop();
-                }
-                Ok(Value::Null)
-            }
-        }
     }
 }
 
@@ -233,35 +93,25 @@ impl<W: Write> ScriptOutput for BufferedOutput<'_, W> {
 mod tests {
     use super::*;
     #[test]
-    fn failed_retrieval_does_not_consume_buffer_and_cancellation_discards_pending_work() {
+    fn accounting_includes_native_writes_and_cancellation_stops_output_and_flush() {
         let flag = Arc::new(AtomicBool::new(false));
-        let mut target = vec![];
-        let mut options = RuntimeOptions {
-            max_output_buffer_bytes: 4,
-            max_value_bytes: Some(size_of::<Value>() + 3),
+        let options = RuntimeOptions {
+            max_output_bytes: Some(4),
             interrupt_flag: Some(flag.clone()),
             ..Default::default()
         };
-        let mut output = BufferedOutput::new(&mut target, &options).unwrap();
-        output.control(OutputAction::Start).unwrap();
+        let mut target = vec![];
+        let mut output = ExecutionOutput::new(&mut target, &options);
+        assert_eq!(output.generated_bytes(), Some(0));
+        assert_eq!(output.remaining_bytes(), Some(4));
         output.write_all(b"1234").unwrap();
-        assert_eq!(
-            output.control(OutputAction::GetClean).unwrap_err().kind,
-            "ResourceLimitError"
-        );
-        assert_eq!(output.control(OutputAction::Length).unwrap(), Value::Int(4));
+        assert_eq!(output.generated_bytes(), Some(4));
+        assert_eq!(output.remaining_bytes(), Some(0));
         flag.store(true, Ordering::Release);
+        assert!(output.write_all(b"x").is_err());
+        assert!(output.flush().is_err());
         assert_eq!(output.finish().unwrap_err().kind, "Interrupted");
         drop(output);
-        assert!(target.is_empty());
-        options.interrupt_flag = None;
-        options.max_value_bytes = Some(size_of::<Value>() + 4);
-        let mut output = BufferedOutput::new(&mut target, &options).unwrap();
-        output.control(OutputAction::Start).unwrap();
-        output.write_all(b"1234").unwrap();
-        assert_eq!(
-            output.control(OutputAction::GetClean).unwrap(),
-            Value::Bytes(b"1234".to_vec().into())
-        );
+        assert_eq!(target, b"1234");
     }
 }

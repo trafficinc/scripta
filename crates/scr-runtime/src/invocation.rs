@@ -70,7 +70,7 @@ impl std::fmt::Display for InvocationError {
 impl std::error::Error for InvocationError {}
 
 /// Scoped access supplied to a reentrant native function. Invocation uses the
-/// current output buffers, stack, limits, cancellation flag, and lexical owners.
+/// current output writer, stack, limits, cancellation flag, and lexical owners.
 pub struct InvocationContext<'a> {
     pub(crate) runtime: &'a mut Runtime,
     pub(crate) output: &'a mut dyn ScriptOutput,
@@ -138,11 +138,7 @@ impl Runtime {
             },
             _ => Span::default(),
         };
-        let mut output = output::BufferedOutput::new(output, &self.options).map_err(|error| {
-            InvocationError {
-                signal: self.native_error(error, span),
-            }
-        })?;
+        let mut output = output::ExecutionOutput::new(output, &self.options);
         let host_frame = self.stack.is_empty();
         if host_frame {
             self.stack.push(

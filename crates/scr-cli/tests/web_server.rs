@@ -1071,13 +1071,13 @@ impl StreamingResponse {
     }
 }
 #[test]
-fn flush_delivers_before_execution_finishes_and_ob_flush_only_drains_a_buffer() {
+fn echo_and_flush_deliver_before_execution_finishes() {
     let server = Server::start(
         r#"<?scripta
 Web::header("Content-Type","application/octet-stream");
-ob_start();echo "first";ob_flush();flush();
+echo "first";flush();
 while (!File::exists("continue")) {Date::sleep(5);}
-echo "second";ob_end_flush();flush();"#,
+echo "second";flush();"#,
         &[],
     );
     let mut response = StreamingResponse::start(&server, "/");
@@ -1095,11 +1095,11 @@ echo "second";ob_end_flush();flush();"#,
     assert!(response.chunk().is_empty());
 }
 #[test]
-fn transport_flush_commits_empty_headers_and_keeps_nested_application_output_pending() {
+fn transport_flush_commits_empty_headers_before_body_output() {
     let server = Server::start(
-        r#"<?scripta ob_start();echo "outer";ob_start();echo "inner";flush();
+        r#"<?scripta function content() {return "outerinner";} $content=content();flush();
 while (!File::exists("continue")) {Date::sleep(5);}
-ob_end_flush();ob_end_flush();"#,
+echo $content;"#,
         &[],
     );
     let mut response = StreamingResponse::start(&server, "/");
@@ -1162,16 +1162,13 @@ fn streaming_errors_and_deadlines_end_the_body_without_replacing_the_status() {
         assert!(!tail.windows(3).any(|w| w == b"500"));
         assert!(!tail.ends_with(b"0\r\n\r\n"));
     }
-    let server = Server::start(
-        "<?scripta ob_start();echo \"private\";throw \"failed\";",
-        &[],
-    );
+    let server = Server::start("<?scripta echo \"private\";throw \"failed\";", &[]);
     let failure = server.request("GET", "/", b"", "text/plain");
     assert_eq!(failure.0, 500);
     assert_eq!(failure.2, b"Internal Server Error\n");
 }
 #[test]
-fn cumulative_stream_output_limit_cannot_be_reset_by_flushing_or_cleaning() {
+fn cumulative_output_limit_applies_with_and_without_flushing() {
     let server = Server::start(
         "<?scripta echo \"1234\";flush();echo \"x\";",
         &["--max-response-bytes", "4"],
@@ -1182,7 +1179,7 @@ fn cumulative_stream_output_limit_cannot_be_reset_by_flushing_or_cleaning() {
     let _ = response.reader.read_to_end(&mut tail);
     assert!(!tail.ends_with(b"0\r\n\r\n"));
     let server = Server::start(
-        "<?scripta ob_start();echo \"1234\";ob_clean();echo \"x\";",
+        "<?scripta echo \"1234\";echo \"x\";",
         &["--max-response-bytes", "4"],
     );
     assert_eq!(server.request("GET", "/", b"", "text/plain").0, 500);
@@ -1265,7 +1262,7 @@ fn shipped_streaming_example_delivers_every_progress_chunk() {
 #[test]
 fn streaming_binary_head_and_bodyless_statuses_preserve_http_semantics() {
     let server = Server::start(
-        r#"<?scripta $r=Web::request();if ($r->path === "/empty") {Web::status(204);}Web::header("Content-Type","application/octet-stream");ob_start();Web::write(Bytes::slice(Bytes::encodeUtf8("é"),1));ob_end_flush();flush();File::writeAtomic("finished","yes");"#,
+        r#"<?scripta $r=Web::request();if ($r->path === "/empty") {Web::status(204);}Web::header("Content-Type","application/octet-stream");Web::write(Bytes::slice(Bytes::encodeUtf8("é"),1));flush();File::writeAtomic("finished","yes");"#,
         &[],
     );
     let mut response = StreamingResponse::start(&server, "/");

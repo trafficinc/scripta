@@ -565,7 +565,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             "create has get keys values remove merge replace combine flip search reverse diff intersect diffKeys intersectKeys column",
         ),
     ];
-    let output_functions = "flush ob_start ob_flush ob_end_flush ob_clean ob_end_clean ob_get_contents ob_get_clean ob_get_flush ob_get_length ob_get_level";
+    let output_functions = "flush";
     for name in output_functions.split_whitespace() {
         assert!(reference.contains(&format!("`{name}(")), "missing {name}");
     }
@@ -579,7 +579,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 207);
+    assert_eq!(count, 197);
     for name in [
         "start",
         "id",

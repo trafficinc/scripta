@@ -76,7 +76,7 @@ Web examples require `scripta serve`; ordinary CLI execution has no request cont
 | HTML, JSON, redirects, and SQLite | [web-app.scripta](web-app.scripta); [local application](../docs/web-servers.md#run-a-local-application) |
 | Cookies and shared sessions | [web-sessions.scripta](web-sessions.scripta); [sessions](../docs/web-servers.md#sessions-and-cookies) |
 | Multipart forms and uploads | [web-uploads.scripta](web-uploads.scripta); [multipart handling](../docs/web-servers.md#multipart-forms-and-uploads) |
-| Incremental responses and buffers | [web-streaming.scripta](web-streaming.scripta); [response streaming](../docs/web-servers.md#incremental-responses-and-output-buffers) |
+| Incremental responses and flushing | [web-streaming.scripta](web-streaming.scripta); [response streaming](../docs/web-servers.md#incremental-responses-and-flushing) |
 | Raw uploads and attachment downloads | [web-transfers.scripta](web-transfers.scripta); [file transfers](../docs/web-servers.md#raw-uploads-and-file-downloads) |
 | Proxy trust and host allowlists | [web-proxy.scripta](web-proxy.scripta), [proxy-serve.toml](proxy-serve.toml), and [Caddyfile.proxy](Caddyfile.proxy) |
 | JSON host logs and private health probes | [observe-serve.toml](observe-serve.toml); [observability](../docs/web-servers.md#logs-and-health-checks) |

@@ -157,7 +157,6 @@ pub fn run_worker(
     }
     session_config.prepare()?;
     options.max_output_bytes = Some(max_output);
-    options.max_output_buffer_bytes = options.max_output_buffer_bytes.min(max_output);
     let mut input = io::stdin().lock();
     let protocol = Rc::new(RefCell::new(io::stdout()));
     let source =

@@ -57,7 +57,7 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | String | `String::trim`, `String::split`, `String::join`, `String::contains`, `String::startsWith`, `String::endsWith`, `String::replace`, `String::substring`, `String::lower`, `String::upper`, `String::format`, `String::graphemeLength`, `String::graphemeSubstring` | [Strings](#strings) |
 | Socket | `Socket::connect`, `Socket::listen`, `Socket::accept`, `Socket::bindDatagram`, `Socket::read`, `Socket::write`, `Socket::receive`, `Socket::sendTo`, `Socket::shutdown`, `Socket::close`, `Socket::setBlocking`, `Socket::setTimeout`, `Socket::poll`, `Socket::localAddress`, `Socket::peerAddress`, `Socket::setOption`, `Socket::getOption` | [Sockets](#low-level-sockets) |
 | Stream | `Stream::open`, `Stream::request`, `Stream::read`, `Stream::write`, `Stream::flush`, `Stream::close`, `Stream::seek`, `Stream::tell`, `Stream::eof`, `Stream::copy`, `Stream::send`, `Stream::receive` | [General streams](#general-streams) |
-| Output | `flush`, `ob_start`, `ob_flush`, `ob_end_flush`, `ob_clean`, `ob_end_clean`, `ob_get_contents`, `ob_get_clean`, `ob_get_flush`, `ob_get_length`, `ob_get_level` | [Output buffers](#output-buffers-and-flushing) |
+| Output | `flush` | [Output and flushing](#output-and-flushing) |
 | Password | `Password::hash`, `Password::verify`, `Password::needsRehash` | [Passwords](#passwords) |
 | Html | `Html::escape` | [HTML escaping](#html-escaping) |
 | Math | `Math::abs`, `Math::min`, `Math::max`, `Math::floor`, `Math::ceil`, `Math::round` | [Math](#math) |
@@ -1491,7 +1491,7 @@ worker lifecycle, resource ceilings, and reverse-proxy configuration.
 | `Web::redirect(location: string, status: int = 302): null` | Replaces `Location` and sets 301, 302, 303, 307, or 308. Does not stop execution; follow with `exit 0`. |
 | `Web::cookie(name: string, value: string, options = []): null` | Appends a validated Set-Cookie header; UTF-8 values are percent-encoded. |
 | `Web::deleteCookie(name: string, options = []): null` | Appends a deletion cookie for the chosen path/domain. |
-| `Web::download(source: ByteStream, filename: string): int` | Streams a readable file from its current position as an attachment. Returns bytes written (zero for HEAD). Requires no prior body output or active application buffers. See [file transfers](#upload-and-download-contract). |
+| `Web::download(source: ByteStream, filename: string): int` | Streams a readable file from its current position as an attachment. Returns bytes written (zero for HEAD). Requires no prior body output. See [file transfers](#upload-and-download-contract). |
 | `Web::write(value: string or bytes): null` | Appends UTF-8 or arbitrary bytes to the bounded response body. `echo` also writes the body, with its usual strict types. |
 
 `WebRequest` exposes `method`, `path`, and `queryString` string properties, plus
@@ -1601,8 +1601,8 @@ Applications must still validate user-controlled destinations to prevent unwante
 external redirects. Prefer 303 for redirecting a successful POST to a GET page.
 
 Web output is buffered until execution finishes unless `flush()` explicitly
-requests transmission. Application buffers are independent: `ob_flush()` drains
-the top application buffer into its parent, without committing HTTP headers.
+requests transmission. This buffering belongs to the HTTP host; `echo` and native
+output still write directly to the runtime's host writer.
 Before the first transport flush, headers may change after `echo`; uncaught
 errors, nonzero exits, and output overflow discard pending output and return a
 generic 500. The first `flush()` saves/closes the session and commits response
@@ -1611,13 +1611,12 @@ raise `WebError`; later session operations raise `SessionError`. Once committed,
 failures terminate the body and are logged; the response cannot become a 500.
 Clients may receive a truncated chunked response. Saved session changes remain.
 
-All generated body bytes share a cumulative limit, including output later
-cleaned from an application buffer. Normal responses default to
+All generated body bytes share a cumulative limit. Normal responses default to
 `text/html; charset=utf-8`; set an explicit Content-Type for JSON, text, or bytes.
 HEAD and no-body statuses are enforced by the host. These response-local APIs
 grant no filesystem, process, or outgoing-network permissions. Native work checks
 cancellation; returned values obey runtime value limits. See
-[output buffering](#output-buffers-and-flushing) and [host behavior](web-servers.md).
+[output and flushing](#output-and-flushing) and [host behavior](web-servers.md).
 
 ```scr
 $request = Web::request();
@@ -1918,65 +1917,40 @@ ContextOptions.redacted_values adds host-provided values. Script catch values an
 explicit echo output retain their ordinary semantics. No implicit network logging
 or background daemon is installed by library registration.
 
-## Output buffers and flushing
+## Output and flushing
 
-These eleven native functions are available in CLI scripts and web requests.
-They do not add syntax. Output buffers are binary: retrieval returns `bytes`,
-with `Bytes::decodeUtf8` available for explicit strict text decoding.
+`echo` writes a string directly to the host output writer. Native output uses
+the same destination and cumulative byte accounting. To compose content without
+emitting it, return strings or bytes from functions and explicitly combine them.
+There is no application output-buffer stack or `ob_*` API.
 
 | Function | Behavior |
 | --- | --- |
-| `ob_start(): null` | Push an empty application buffer. |
-| `ob_flush(): null` | Drain the top buffer into its parent (or host writer), leaving it active and empty. |
-| `ob_end_flush(): null` | Drain and remove the top buffer. |
-| `ob_clean(): null` | Discard the top buffer's bytes, keeping it active. |
-| `ob_end_clean(): null` | Discard and remove the top buffer. |
-| `ob_get_contents(): bytes or null` | Copy the top buffer; null when no buffer exists. |
-| `ob_get_clean(): bytes` | Copy then discard/remove the top buffer. |
-| `ob_get_flush(): bytes` | Copy then drain/remove the top buffer. |
-| `ob_get_length(): int or null` | Top buffer's byte length, or null without a buffer. |
-| `ob_get_level(): int` | Number of active application buffers. |
-| `flush(): null` | Request a flush of the underlying host writer. Does not drain application buffers. |
+| `flush(): null` | Request a flush of the underlying host output writer. Takes no arguments; does not flush diagnostics or unrelated file/socket handles. |
 
-Drain/clean operations requiring a buffer raise `OutputError` when none is
-active. Signatures take no arguments; callbacks, transformations, implicit
-flushing, and threshold/chunk-size options are not supported. Retrieval checks
-its complete result budget before copying or removing/draining a buffer; failed
-result-budget or result-allocation checks preserve the buffer and assignment
-destination. A writer failure during drain can already have emitted partial data
-and prevents successful finalization. Embedded hosts set
-`RuntimeOptions.max_output_buffer_bytes` (default 8 MiB, hard ceiling 64 MiB)
-and `max_output_buffers` (default 32, hard ceiling 128). Pending bytes are counted
-across all levels. Cleaning releases storage; draining does not count the same
-bytes as new output. `max_output_bytes` optionally caps cumulative generated
-bytes, including bytes subsequently discarded. The CLI leaves that cumulative
-limit unset; `scripta serve` sets it to `--max-response-bytes` and caps pending
-application buffers at the smaller of that limit and 8 MiB.
+`RuntimeOptions.max_output_bytes` optionally caps cumulative emitted output.
+The CLI leaves it unset; `scripta serve` sets it to `--max-response-bytes`.
+Flushing never resets the limit. Cancellation checks stop further output and
+flushing. Writer failures and output-limit failures remain sticky even if native
+errors are caught, preventing successful finalization. Output already delivered
+to the host writer cannot be rolled back. Completion does not implicitly request
+a host flush; the host controls its own buffering and finalization.
 
-Buffers are local to one execution, shared by functions and required modules.
-On normal completion (including `exit`), remaining buffers drain from inner to
-outer without requesting a transport flush. Uncaught exceptions, cancellation,
-and fatal execution limits discard remaining application buffers. Output already
-sent to a host writer cannot be rolled back. Writer failures and pending/total
-output-limit failures remain sticky even if native errors are caught; they prevent
-successful finalization. Nesting/no-active-buffer errors can be caught normally.
-Output flushing uses the caller's writer and does not flush the diagnostic stream.
+For web requests, the host buffers the response until successful completion or
+an explicit `flush()`. Before the first flush, errors can replace the pending
+response with a generic 500. The first flush saves/closes sessions and commits
+headers; later failures terminate the body rather than replacing the response.
 
-For web responses, `ob_flush()` alone does not send the HTTP response. Use:
-
-```scr
+```scripta
 Web::header("Content-Type", "text/plain; charset=utf-8");
-ob_start();
 echo "Starting\n";
-ob_flush();
 flush();
 // Headers and sessions are now closed to further changes.
 echo "Finished\n";
-ob_end_flush();
 ```
 
 Web transport uses bounded body chunks with backpressure and the request deadline.
-A successful `flush()` means the host accepted the pending chunks; proxy,
+A successful `flush()` means the host accepted pending chunks; proxy,
 compression, TCP, and browser buffering may delay visible output. It does not
 acknowledge that a remote client consumed the bytes. See
 [the streaming example](../examples/web-streaming.scripta).
@@ -1996,7 +1970,7 @@ map). Mode properties describe the configured mode even after close.
 | `Stream::request(method: string, url: string, source: ByteStream, options = []): ByteStream` | Sends an incrementally consumed **readable file or request-input stream** as an HTTP request body, returning a readable HTTP response stream. Source is not closed on success. |
 | `Stream::read(stream: ByteStream, length: int): bytes or null` | Reads up to the requested count; short reads are valid. Positive reads return null only at EOF. Zero length returns empty bytes without consuming input or changing EOF. |
 | `Stream::write(stream: ByteStream, data: bytes): int` | Writes up to one bounded chunk; returns the actual count, possibly short. Call again for unwritten bytes. Strings require `Bytes::encodeUtf8`. |
-| `Stream::flush(stream): null` | Flushes a writable file/TCP handle; UDP is a no-op. Read-only HTTP/input handles reject it. Does not flush script output buffers or guarantee durable disk storage. |
+| `Stream::flush(stream): null` | Flushes a writable file/TCP handle; UDP is a no-op. Read-only HTTP/input handles reject it. Does not flush script output or guarantee durable disk storage. |
 | `Stream::close(stream): null` | Closes shared handle state. Idempotent for an owned handle; aliases also become closed. Requires ownership, but no I/O capability for cleanup. |
 | `Stream::seek(stream: ByteStream, offset: int, origin: string = "start"): int` | File-only seek; `start` uses nonnegative offsets, `current`/`end` accept signed offsets. Returns the new position and clears EOF. |
 | `Stream::tell(stream: ByteStream): int` | File-only current position; does not change EOF. |
@@ -2150,7 +2124,7 @@ Rust hosts retain a stream value. Expired or foreign request streams reject I/O.
 
 `Web::download` requires an actual readable file stream, a basename of 1–255
 UTF-8 bytes without path separators/control characters, and an unused response
-body with no active output buffer. It preflights the known remaining file size
+body. It preflights the known remaining file size
 against source-transfer and output budgets before committing headers. It supplies
 `application/octet-stream`, `Content-Disposition: attachment` with a quoted ASCII
 fallback and encoded UTF-8 `filename*`, `X-Content-Type-Options: nosniff`, and

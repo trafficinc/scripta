@@ -47,7 +47,7 @@ mod prepared_call;
 #[cfg(test)]
 mod test_support;
 mod type_check;
-pub use output::{OutputAction, ScriptOutput};
+pub use output::ScriptOutput;
 mod value;
 
 use environment::Environments;
@@ -93,12 +93,8 @@ pub struct RuntimeOptions {
     /// Live lexical scopes, including retained closure environments and globals.
     pub max_scopes: Option<usize>,
     pub max_source_bytes: usize,
-    /// Cumulative generated output, including bytes later cleaned from buffers.
+    /// Cumulative bytes emitted to the host output writer.
     pub max_output_bytes: Option<usize>,
-    /// Total pending application-buffer payload (default 8 MiB, hard ceiling 64 MiB).
-    pub max_output_buffer_bytes: usize,
-    /// Maximum nested application buffers (default 32, hard ceiling 128).
-    pub max_output_buffers: usize,
 }
 
 impl Default for RuntimeOptions {
@@ -112,8 +108,6 @@ impl Default for RuntimeOptions {
             max_scopes: None,
             max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
             max_output_bytes: None,
-            max_output_buffer_bytes: 8 * 1024 * 1024,
-            max_output_buffers: 32,
         }
     }
 }
@@ -440,8 +434,7 @@ impl Runtime {
         program: &Program,
         output: &mut impl Write,
     ) -> std::result::Result<ExecutionOutcome, RuntimeError> {
-        let mut output = output::BufferedOutput::new(output, &self.options)
-            .map_err(|e| *self.error(e.to_string(), Span::default()))?;
+        let mut output = output::ExecutionOutput::new(output, &self.options);
         let result = self.execute_inner(program, &mut output);
         if result.is_ok() {
             output

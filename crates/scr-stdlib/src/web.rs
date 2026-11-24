@@ -399,7 +399,7 @@ fn register_inner(
         context.check_cancelled()?;crate::bytes::budget(context,size_of::<Value>())?;
         let Value::String(filename)=&args[1] else {unreachable!()};
         if filename.is_empty() || filename.len()>255 || filename.chars().any(|c|c.is_control() || matches!(c,'/'|'\\')) {return Err(error("download filename must be a basename without controls, at most 255 UTF-8 bytes"))}
-        if context.output.generated_bytes()!=Some(0) || context.output.control(scr_runtime::OutputAction::Level)?!=Value::Int(0) {return Err(error("download must precede body output and requires no active application buffers"))}
+        if context.output.generated_bytes()!=Some(0) {return Err(error("download must precede body output"))}
         let size=crate::streams::download_size(context,&args[0])?;
         if !head && context.output.remaining_bytes().is_some_and(|n|size>n as u64) {return Err(crate::bytes::resource("download exceeds remaining response output budget"))}
         let encoded=crate::url::invoke("Url::encodeComponent",context,&[Value::String(filename.clone())])?;

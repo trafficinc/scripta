@@ -517,7 +517,7 @@ requests; `Http` remains the outgoing HTTP client.
 | Manage worker lifetime | [Runtime and limits](docs/web-servers.md#runtime-and-limits), automatic recovery, and optional `--worker-max-requests` recycling. Recycling retains cached source. |
 | Observe requests and capacity | [Structured logs and private health endpoints](docs/web-servers.md#logs-and-health-checks): `/livez`, `/readyz`, and `/metrics`. |
 | Deploy and stop an instance | [Service management and bounded shutdown](docs/web-servers.md#deployment-and-service-management), with [deployment templates](examples/deploy/). |
-| Stream output or transfer files | [Incremental responses and output buffers](docs/web-servers.md#incremental-responses-and-output-buffers), [multipart uploads](docs/web-servers.md#multipart-forms-and-uploads), and [raw uploads/downloads](docs/web-servers.md#raw-uploads-and-file-downloads). |
+| Stream output or transfer files | [Incremental responses and flushing](docs/web-servers.md#incremental-responses-and-flushing), [multipart uploads](docs/web-servers.md#multipart-forms-and-uploads), and [raw uploads/downloads](docs/web-servers.md#raw-uploads-and-file-downloads). |
 
 See the [web hosting guide](docs/web-servers.md) for proxy trust, sessions, request
 limits, and runnable examples. Keep development watch mode opt-in; use immutable
@@ -608,7 +608,7 @@ functions, return values, native objects, limits, and errors.
 | `Clock` | Monotonic elapsed-time measurement with fractional milliseconds, independent of calendar time. |
 | `Socket` | TCP listeners/clients, UDP endpoints, half-close, options, and OS readiness polling. |
 | `Stream` | Bounded binary file and HTTP streams, connected TCP, and UDP datagrams. |
-| Output functions | Nested application buffers with `ob_*`, plus explicit transport flushing with `flush`. |
+| Output functions | Direct `echo` output and explicit host/transport flushing with `flush`; HTTP buffering is host-owned. |
 | `Web`, `Session` (request context) | Incoming requests, responses, redirects, multipart forms/uploads, cookies, and bounded server-side sessions shared across workers. |
 | `Json`, `Http` | JSON conversion, binary HTTP/HTTPS requests, and downloads directly to disk. |
 | `Sqlite` | Bundled local databases, parameterized SQL, transactions, and bounded query results. |

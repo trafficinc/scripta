@@ -2,16 +2,12 @@
 // View: curl --no-buffer http://127.0.0.1:8080/
 Web::header("Content-Type", "text/plain; charset=utf-8");
 Web::header("Cache-Control", "no-store");
-ob_start();
 echo "Starting\n";
-ob_flush();
 flush();
 // Headers, cookies, and sessions must be finalized before the first flush.
 for ($step = 1; $step <= 3; $step += 1) {
     Date::sleep(100);
     echo "Step " . str($step) . "\n";
-    ob_flush();
     flush();
 }
 echo "Finished\n";
-ob_end_flush();

@@ -799,14 +799,15 @@ Metadata IPC has a separate 4 MiB ceiling. Part headers are read in bounded chun
 using Multer 3.1; text is decoded explicitly rather than using lossy parser helpers.
 Keep spool directories private and separate from served static directories.
 
-## Incremental responses and output buffers
+## Incremental responses and flushing
 
 Run `scripta serve examples/web-streaming.scripta`, then open it in a browser or
 use `curl --no-buffer http://127.0.0.1:8080/`. Complete buffering remains the default.
-`ob_start()` creates a binary application buffer; `ob_flush()` drains it into the
-parent buffer/host writer. Only `flush()` requests HTTP transmission. Open
-application buffers are not drained by `flush()`. At successful execution end,
-remaining buffers drain automatically, then any final pending body is sent.
+`echo` and `Web::write` write directly to the host response writer. The host
+buffers these bytes until successful execution completion or an explicit `flush()`.
+There is no script-managed application buffer stack. Build content using returned
+strings or bytes when output should be deferred until the application chooses to
+emit it.
 
 The first transport flush commits response status/headers, even when no body is
 pending. It first saves/closes an active session and prevents starting a session
@@ -827,12 +828,9 @@ clients cancel their worker request, and request-owned upload storage is cleaned
 after the worker is stopped. No-body statuses/HEAD suppress streamed body data
 while the worker still completes or reaches its deadline.
 
-`--max-response-bytes` caps cumulative script-generated output, including bytes
-cleaned from application buffers. Flushing never resets it. Application buffers
-have a separate aggregate pending ceiling of 8 MiB (or the response ceiling when
-smaller), with at most 32 levels by default. See the
-[API reference](standard-library.md#output-buffers-and-flushing) for binary buffer
-retrieval, cleanup, and embedding configuration.
+`--max-response-bytes` caps cumulative script-generated body output. Flushing
+never resets it. See the [API reference](standard-library.md#output-and-flushing)
+for host output accounting and flushing semantics.
 
 Reverse proxies, compression, and browsers can buffer independently. For routes
 that need low-latency output, disable response buffering in the proxy's route

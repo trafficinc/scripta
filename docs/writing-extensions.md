@@ -350,16 +350,15 @@ Check each extension's platform support, native library/linking requirements,
 licenses, and release packaging inputs. Static inclusion in `scripta` does not
 necessarily mean every external system library is statically linked.
 
-`RuntimeContext.output` is a `ScriptOutput` (`Write` plus generic buffer control).
-Ordinary writes still use `write_all`; native extensions that emit bytes share the
-same application buffers as `echo`. Calling its `flush()` flushes the host writer
-without draining application buffers and can commit an HTTP response. Avoid
-incidental flushes when an API does not promise them. Hosts continue supplying an
-ordinary `Write` to runtime execution. Direct test contexts can use `Vec<u8>`;
-other direct context writers may implement `ScriptOutput` with default buffer
-control (which reports no runtime execution context). Buffer controllers live in
-the runtime, with pending/nesting/cumulative limits in `RuntimeOptions`.
-
+`RuntimeContext.output` is a `ScriptOutput` (`Write` plus generated/remaining byte
+accounting). Native extensions use `write_all`, sharing the host writer and
+cumulative output limit with `echo`. There is no application buffer control API.
+Calling `flush()` flushes the host writer and can commit an HTTP response. Avoid
+incidental flushes when an API does not promise them. Hosts continue supplying
+an ordinary `Write` to execution and control transport buffering/finalization.
+Direct test contexts can use `Vec<u8>`; other direct context writers can implement
+`ScriptOutput` with default accounting methods. `RuntimeOptions.max_output_bytes`
+limits emitted bytes independently of logical value budgets.
 
 `StdlibOptions.streams` configures live stream handles, chunk sizes, cumulative
 transfer bytes, and network timeouts. New stream handles check the runtime's
@@ -402,7 +401,7 @@ validated arguments. Call `context.invoke(value, arguments)` and return its
 Use `context.error(NativeError::new(kind, message))` for a new catchable exception
 and `context.require_permission(capability)` before effects. `context.checkpoint()`
 checks cancellation and instruction limits during iterative work. Reentrant
-functions share output buffers, lexical ownership, call depth, and the execution
+functions share the output writer, lexical ownership, call depth, and the execution
 budget; callback invocation does not reset limits. Functions in the test runner
 use this public interface, rather than adding test names to the evaluator.
 

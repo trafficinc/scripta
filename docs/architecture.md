@@ -70,7 +70,9 @@ shares script scopes, budgets and error signals without terminating the host.
 
 OS, network and database backends belong in standard-library or extension crates.
 They enforce capabilities, resource ownership and operation-specific limits.
-Output buffering is shared across script and native calls. See
+Script and native output share a host writer and cumulative byte accounting.
+The runtime has no application buffer stack; HTTP hosts own response buffering
+and transport flushing. See
 [writing extensions](writing-extensions.md) and the [standard library](standard-library.md).
 
 ## Source loading and developer tools
