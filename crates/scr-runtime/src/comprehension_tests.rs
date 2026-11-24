@@ -4,6 +4,7 @@ fn compare(source: &str, options: RuntimeOptions) -> Runtime {
     let (mut fast, mut reference) = crate::test_support::runtimes(options);
     reference.environments.disable_parameter_reuse = true;
     reference.disable_shared_parameter_names = true;
+    reference.disable_comprehension_plans = true;
     let _ = crate::test_support::compare_with_recovery(
         &mut fast,
         &mut reference,
@@ -46,6 +47,96 @@ fn comprehension_scopes_preserve_captures_shadowing_snapshots_and_nested_names()
             [1, 2, 3].into_iter().map(Value::Int).collect()
         ))
     );
+    assert!(runtime.comprehension_plans_executed > 0);
+}
+
+#[test]
+fn scalar_plans_preserve_short_circuiting_errors_and_unsupported_inputs() {
+    for source in [
+        "$seen=[($x*3+1)/2 for $x in [1,2,3] if $x%2===0];",
+        "$seen=[$x for $x in [null,true,1] if $x!==null];",
+        "$seen=[$x for $x in [1,2,3] if true || (1/0===0)];",
+        "$seen=[$x for $x in [1,2,3] if false && (1/0===0)];",
+        "$seen='kept';$seen=[$x*9223372036854775807 for $x in [1,2]];",
+        "$seen='kept';$seen=[-$x for $x in [-9223372036854775807-1]];",
+        "$seen='kept';$seen=[$x for $x in [1] if $x];",
+        "$seen=[$x*2.0 for $x in [1.0,2.0]];",
+        "$seen=[$x for $x in ['é',1,[]]];",
+        "$outside=3;$seen=[$x+$outside for $x in [1,2]];",
+        "$seen=[($x+=1) for $x in [1,2]];",
+    ] {
+        compare(source, RuntimeOptions::default());
+    }
+    let source = "$seen='kept';$seen=[$x*3 for $x in [1,2,3] if $x%2===0];";
+    for limit in 0..18 {
+        compare(
+            source,
+            RuntimeOptions {
+                instruction_limit: Some(limit),
+                ..RuntimeOptions::default()
+            },
+        );
+    }
+    for limit in 0..5 {
+        compare(
+            source,
+            RuntimeOptions {
+                max_scopes: Some(limit),
+                ..RuntimeOptions::default()
+            },
+        );
+    }
+}
+
+#[test]
+fn scalar_plan_bounds_fall_back_and_cancellation_before_iteration_preserves_scopes() {
+    for depth in [4, 24] {
+        let source = format!(
+            "$seen=[{}$x{} for $x in [1,2]];",
+            "(".repeat(depth),
+            ")".repeat(depth)
+        );
+        let runtime = compare(&source, RuntimeOptions::default());
+        assert_eq!(
+            runtime.comprehension_plans_executed,
+            usize::from(depth == 4)
+        );
+    }
+    // Enter expression evaluation directly so cancellation occurs after the
+    // outer statement checkpoint, during the new bounded scalar admission scan.
+    let source = "$seen=[$x*3 for $x in $items];";
+    let program = scr_parser::parse(&scr_lexer::lex(source).unwrap()).unwrap();
+    let StatementKind::Expression(Expr {
+        kind: ExprKind::Assignment(_, _, expression),
+        ..
+    }) = &program.statements[0].kind
+    else {
+        panic!("assignment")
+    };
+    let flag = Arc::new(AtomicBool::new(true));
+    let (mut fast, mut reference) = crate::test_support::runtimes(RuntimeOptions {
+        interrupt_flag: Some(flag),
+        ..RuntimeOptions::default()
+    });
+    reference.disable_comprehension_plans = true;
+    for runtime in [&mut fast, &mut reference] {
+        runtime
+            .set_global(
+                "items",
+                Value::List([1, 2, 3].into_iter().map(Value::Int).collect()),
+            )
+            .unwrap();
+    }
+    let result = crate::test_support::compare_execution(
+        &mut fast,
+        &mut reference,
+        source,
+        |runtime, output| match runtime.evaluate(expression, output) {
+            Err(Signal::Interrupted(error)) => Err(*error),
+            _ => panic!("cancellation must interrupt the comprehension"),
+        },
+    );
+    assert!(result.unwrap_err().message.contains("interrupted"));
 }
 
 #[test]

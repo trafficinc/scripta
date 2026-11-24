@@ -1,6 +1,25 @@
 use super::*;
 
 impl Runtime {
+    fn scalar_comprehension_items(&self, items: &[Value], span: Span) -> Result<bool> {
+        for chunk in items.chunks(4096) {
+            if self
+                .options
+                .interrupt_flag
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                return Err(Signal::Interrupted(
+                    self.error("execution interrupted", span),
+                ));
+            }
+            if !chunk.iter().all(crate::compact_call::Expression::scalar) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     fn push_array_value(
         &mut self,
         values: &mut Vec<Value>,
@@ -233,6 +252,54 @@ impl Runtime {
                 ));
             }
         };
+        #[cfg(not(test))]
+        let planned = true;
+        #[cfg(test)]
+        let planned = !self.disable_comprehension_plans;
+        if planned
+            && self.options.max_value_bytes.is_none()
+            && !items.is_empty()
+            && self.scalar_comprehension_items(&items, span)?
+        {
+            let plans = (|| {
+                let value_plan = crate::compact_call::Expression::compile(value, &binding.name)?;
+                let condition_plan = match condition {
+                    Some(condition) => Some(crate::compact_call::Expression::compile(
+                        condition,
+                        &binding.name,
+                    )?),
+                    None => None,
+                };
+                Some((value_plan, condition_plan))
+            })();
+            if let Some((value, condition_plan)) = plans {
+                #[cfg(test)]
+                {
+                    self.comprehension_plans_executed += 1;
+                }
+                let mut values = Vec::new();
+                let mut bytes = std::mem::size_of::<Value>();
+                for item in items {
+                    self.checkpoint(span)?;
+                    let previous = self.enter_empty_scope(self.environments.current, span)?;
+                    let result = (|| {
+                        if let Some(plan) = &condition_plan {
+                            let allowed = plan.evaluate(self, &item)?;
+                            if !self.operation(ops::boolean(allowed), condition.unwrap().span)? {
+                                return Ok(());
+                            }
+                        }
+                        let value = value.evaluate(self, &item)?;
+                        self.push_array_value(&mut values, value, &mut bytes, span)
+                    })();
+                    self.environments.leave_empty(previous);
+                    result?;
+                }
+                let result = Value::List(values);
+                self.validate_value(&result, 0, span)?;
+                return Ok(result);
+            }
+        }
         let mut values = Vec::new();
         let mut bytes = std::mem::size_of::<Value>();
         // Share the immutable binding name, not the per-iteration value or

@@ -57,6 +57,7 @@ pub(crate) struct UserDeclaration {
     pub numeric_seen: std::cell::Cell<bool>,
     pub prepared_call: std::cell::OnceCell<Option<Box<crate::prepared_call::Plan>>>,
     pub compact_call: std::cell::OnceCell<Option<Box<crate::compact_call::Plan>>>,
+    pub method_call: std::cell::OnceCell<Option<Box<crate::method_plan::Plan>>>,
     parameter_names: std::cell::OnceCell<Box<[Rc<String>]>>,
     receiver_name: std::cell::OnceCell<Rc<String>>,
 }
@@ -73,6 +74,7 @@ impl UserDeclaration {
             numeric_seen: std::cell::Cell::new(false),
             prepared_call: std::cell::OnceCell::new(),
             compact_call: std::cell::OnceCell::new(),
+            method_call: std::cell::OnceCell::new(),
             parameter_names: std::cell::OnceCell::new(),
             receiver_name: std::cell::OnceCell::new(),
             ast,

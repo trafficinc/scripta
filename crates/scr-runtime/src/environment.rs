@@ -335,6 +335,17 @@ impl Environments {
         self.allocations_since_collection = self.allocations_since_collection.saturating_add(1);
     }
 
+    // Only runtime-created ScriptObjects enter this registry. Establish actual
+    // allocation identity before trusting a host-supplied as_any result. Keep
+    // lookup bounded; older receivers outside this window use normal methods.
+    pub fn recent_script_object(&self, object: &Rc<dyn NativeObject>) -> bool {
+        self.objects
+            .iter()
+            .rev()
+            .take(16)
+            .any(|entry| std::ptr::eq(entry.as_ptr(), Rc::as_ptr(object)))
+    }
+
     pub fn collect_if_needed(&mut self) {
         if self.allocations_since_collection >= self.collection_threshold {
             self.collect();

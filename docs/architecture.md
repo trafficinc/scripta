@@ -57,10 +57,10 @@ execution limits retain their existing validation.
 Prepared arithmetic and boolean operations use an inline success path; the
 diagnostic converter is kept in a cold error path with the original source span.
 
-Comprehensions share their immutable binding name and recycle bounded,
-uncaptured scope storage. Each iteration still enters its own lexical scope;
-escaped closures retain independent iteration bindings. Existing scope and
-instruction checkpoints remain in place.
+Comprehensions share immutable binding names and recycle bounded uncaptured
+scope storage. Read-only int/bool/null expressions can use compact plans and
+direct input slots. Iterations retain scope accounting and instruction checks;
+escaped closures retain independent bindings through ordinary evaluation.
 
 Discarded string appends reuse the destination buffer when the suffix cannot
 write script bindings. This includes non-reentrant native calls with similarly
@@ -73,6 +73,9 @@ An initialized scalar in an ordinary single-field instance has a fixed logical
 footprint. Scalar replacements retain that payload size and the field's existing
 checkpoint and annotation checks. Missing fields, inherited layouts, exceptions,
 and values with variable payloads or shared handles use full object measurement.
+Bounded straight-line scalar method plans use parameter/field slots for verified
+recent runtime-created receivers, retaining ordinary field setters, annotations,
+body scopes, and checkpoints. Unsupported states and explicit byte budgets fall back.
 
 `RuntimeOptions` controls execution and logical resource budgets; these are not
 an aggregate heap cap. Internal signals preserve exceptions, returns and exits.

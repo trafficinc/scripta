@@ -37,6 +37,7 @@ mod map_index;
 mod method_cache;
 #[cfg(test)]
 mod method_cache_tests;
+mod method_plan;
 mod modules;
 mod objects;
 pub use invocation::{ExecutionOutcome, InvocationContext, InvocationError, InvocationResult};
@@ -132,6 +133,14 @@ const MAX_ARGUMENT_CAPACITY: usize = 16;
 
 #[derive(Default)]
 pub struct Runtime {
+    #[cfg(test)]
+    disable_method_plans: bool,
+    #[cfg(test)]
+    method_plans_executed: usize,
+    #[cfg(test)]
+    disable_comprehension_plans: bool,
+    #[cfg(test)]
+    comprehension_plans_executed: usize,
     #[cfg(test)]
     disable_compact_calls: bool,
     #[cfg(test)]
@@ -1314,6 +1323,11 @@ impl Runtime {
                     #[cfg(test)]
                     if reuse_parameters {
                         self.numeric_parameter_scopes_reused += 1;
+                    }
+                    if let Some(receiver) = receiver {
+                        if let Some(result) = self.method_call(declaration, receiver, values) {
+                            return result;
+                        }
                     }
                     if receiver.is_none() && self.options.max_value_bytes.is_none() {
                         if let Some(result) = self.numeric_call(declaration, values) {

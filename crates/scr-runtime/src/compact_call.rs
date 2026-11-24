@@ -12,6 +12,9 @@ const NODES: usize = 256;
 #[path = "compact_frames.rs"]
 mod frames;
 pub(crate) use frames::Stack;
+#[path = "scalar_expression.rs"]
+mod expression;
+pub(super) use expression::Expression;
 
 #[derive(Clone, Copy)]
 enum Scalar {
@@ -167,6 +170,7 @@ struct CallSite {
 }
 struct Compiler<'a> {
     names: Vec<&'a str>,
+    fields: Vec<&'a str>,
     code: Vec<Instruction>,
     spans: Vec<Span>,
     constants: Vec<Scalar>,
@@ -216,6 +220,11 @@ impl<'a> Compiler<'a> {
             ),
             ExprKind::Variable(name) => {
                 self.emit(Code::Local, self.local(name)?, e.span);
+            }
+            ExprKind::PropertyAccess(base, name) if matches!(&base.kind, ExprKind::Variable(name) if name == "this") =>
+            {
+                let field = self.fields.iter().position(|field| *field == name)?;
+                self.emit(Code::Local, self.names.len() + field, e.span);
             }
             ExprKind::Grouped(inner) => self.expression(inner, depth + 1)?,
             ExprKind::Unary(op, inner) => {
@@ -417,6 +426,7 @@ impl Plan {
                 .iter()
                 .map(|p| p.binding.name.as_str())
                 .collect(),
+            fields: Vec::new(),
             code: Vec::new(),
             spans: Vec::new(),
             constants: Vec::new(),
