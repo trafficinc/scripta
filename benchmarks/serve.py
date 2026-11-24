@@ -345,6 +345,7 @@ def run(args):
               "parameters": {"seconds": args.seconds, "soak_seconds": args.soak_seconds,
                              "request_ceiling": args.max_requests, "workers": 2, "queue": 8,
                              "normal_clients": 4, "overload_clients": 16, "recycle_requests": 200,
+                             "json_scaling_clients": [1, 8, 32] if args.scaling else [],
                              "request_timeout_ms": 750, "binary_bytes": len(PAYLOAD),
                              "runtime_overrides": {name: ("unset" if os.getenv(name) is None else
                                  int(os.environ[name]) if os.environ[name].isdigit() else "invalid")
@@ -374,6 +375,13 @@ def run(args):
                                paced=name == "paced_reader")
                 report["workloads"].append(result)
                 print(name, result["responses"], "responses", flush=True)
+            if args.scaling:
+                for clients in (1, 8, 32):
+                    name = f"json_clients_{clients}"
+                    result = phase(server, sampler, name, "/json", args.seconds,
+                                   clients, args.max_requests, soak=True)
+                    report["workloads"].append(result)
+                    print(name, result["responses"], "responses", flush=True)
             stop = threading.Event()
             faults = collections.Counter()
             errors = []
@@ -428,6 +436,8 @@ def main():
     parser.add_argument("--seconds", type=bounded(1, 30), default=3)
     parser.add_argument("--soak-seconds", type=bounded(10, 300), default=60)
     parser.add_argument("--max-requests", type=bounded(1000, 100000), default=100000)
+    parser.add_argument("--scaling", action="store_true",
+                        help="also measure JSON at 1, 8, and 32 clients; record 503/504 separately")
     args = parser.parse_args()
     # Reserve output before expensive work; never overwrite an earlier receipt.
     with args.output.open("x", encoding="utf-8") as output:

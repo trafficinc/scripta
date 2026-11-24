@@ -2,6 +2,8 @@
 """Check that measurement validation rejects corrupt or unexpected successes."""
 import io
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import serve
 
@@ -40,6 +42,21 @@ class MeasurementTests(unittest.TestCase):
         self.assertEqual(serve.exchange(Connection(504, b"timeout"), "/json", soak=True)[0], 504)
         with self.assertRaises(RuntimeError):
             serve.exchange(Connection(502, b"bad gateway"), "/json", soak=True)
+
+    def test_saturated_phase_separates_successes_from_fast_rejections(self):
+        server = Mock(address="127.0.0.1:1")
+        sampler = SimpleNamespace(phase=None)
+        replies = [(200, 12.0, 10.0, 20), (503, 0.1, 0.1, 0)] * 4
+        with patch.object(serve.http.client, "HTTPConnection"), patch.object(
+                serve, "exchange", side_effect=[(200, 1.0, 1.0, 20)] * 2 + replies):
+            result = serve.phase(server, sampler, "scaling", "/json", 1, 4, 8, soak=True)
+        self.assertTrue(result["request_ceiling_reached"])
+        self.assertEqual(result["statuses"], {"200": 4, "503": 4})
+        self.assertEqual(result["success_latency_ms"]["count"], 4)
+        self.assertEqual(result["success_latency_ms"]["min"], 12.0)
+        self.assertEqual(result["successful_responses_per_second"],
+                         result["responses_per_second"] / 2)
+        self.assertEqual(server.recovered.call_count, 2)
 
 
 if __name__ == "__main__":

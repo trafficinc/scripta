@@ -50,6 +50,13 @@ Their inner calls omit lexical environments when scope budgets are unset;
 budgeted calls preserve scope accounting. Ordinary evaluation handles unsupported
 cases, including captures and arbitrary native callbacks.
 
+Eligible self-recursion plans can prove integer arguments and returns and omit
+redundant inner annotation checks. Outer arguments, checked arithmetic, and
+execution limits retain their existing validation.
+
+Prepared arithmetic and boolean operations use an inline success path; the
+diagnostic converter is kept in a cold error path with the original source span.
+
 `RuntimeOptions` controls execution and logical resource budgets; these are not
 an aggregate heap cap. Internal signals preserve exceptions, returns and exits.
 Cancellation and fatal limits bypass script cleanup; Rust ownership handles

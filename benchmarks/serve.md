@@ -20,6 +20,13 @@ required; preserve earlier receipts. `--seconds` defaults to 3 per workload
 ended it. A short `--seconds 1 --soak-seconds 10` run is a functional exercise,
 not the default sustained-load observation.
 
+Add `--scaling` to measure the same checked JSON endpoint with 1, 8, and 32
+concurrent clients, alongside the normal four-client phase. Worker count and
+queue settings remain fixed. These extra phases permit and count 503/504
+responses separately, report successful throughput and latency, and require
+full recovery after each phase. Increasing client count can expose saturation;
+this shared-host Python driver does not establish maximum server capacity.
+
 Server settings: two worker processes, queue eight, at most 64 connections,
 750 ms request deadline, 120 s connection lifetime, 1500 ms shutdown drain,
 request-count recycling at 200 completed exchanges, JSON stderr logs, private

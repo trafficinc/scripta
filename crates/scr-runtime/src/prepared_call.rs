@@ -12,6 +12,18 @@ const MAX_PARAMETERS: usize = 8;
 const MAX_NODES: usize = 128;
 const MAX_DEPTH: usize = 16;
 
+mod integer_proof;
+
+fn returned(statement: &Statement) -> Option<&Expr> {
+    match &statement.kind {
+        StatementKind::Return(Some(expression)) => Some(expression),
+        StatementKind::Block(block) if block.statements.len() == 1 => {
+            returned(&block.statements[0])
+        }
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Scalar {
     Int(i64),
@@ -101,6 +113,8 @@ struct EntryGuard {
     comparison: BinaryOp,
     limit: i64,
     recursive_when: bool,
+    // Cached declaration proof fits the guard's existing alignment padding.
+    integer_calls: bool,
 }
 impl EntryGuard {
     fn admits(&self, arguments: &[Value]) -> bool {
@@ -132,13 +146,6 @@ impl EntryGuard {
         let [(condition, branch)] = branches.as_slice() else {
             return None;
         };
-        fn returned(s: &Statement) -> Option<&Expr> {
-            match &s.kind {
-                StatementKind::Return(Some(e)) => Some(e),
-                StatementKind::Block(b) if b.statements.len() == 1 => returned(&b.statements[0]),
-                _ => None,
-            }
-        }
         fn calls(e: &Expr) -> bool {
             if matches!(e.kind, ExprKind::Call(_, _)) {
                 return true;
@@ -197,6 +204,7 @@ impl EntryGuard {
             comparison: *comparison,
             limit,
             recursive_when: branch_calls,
+            integer_calls: integer_proof::proves(declaration),
         })
     }
 }
@@ -379,6 +387,21 @@ impl Stack {
 }
 
 impl Runtime {
+    // A successful operation needs no diagnostic conversion or span read.
+    #[inline(always)]
+    fn prepared_operation<T>(&self, result: crate::ops::Result<T>, span: &Span) -> Result<T> {
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => self.prepared_operation_failed(error, *span),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn prepared_operation_failed<T>(&self, error: crate::ops::Error, span: Span) -> Result<T> {
+        self.operation(Err(error), span)
+    }
+
     pub(super) fn prepared_call(
         &mut self,
         function: &Function,
@@ -452,6 +475,13 @@ impl Runtime {
         let values = &mut storage.values;
         let frames = &mut storage.frames;
         let count = declaration.parameters.len();
+        let integer_calls = plan.entry.integer_calls;
+        #[cfg(test)]
+        let integer_calls = integer_calls && !self.disable_prepared_integer_proof;
+        #[cfg(test)]
+        if integer_calls {
+            self.prepared_integer_calls_executed += 1;
+        }
         let result = (|| {
             // The depth limit includes suspended AST/native callers. Each
             // instruction can add at most one operand, so code length plus
@@ -503,27 +533,29 @@ impl Runtime {
                     Op::Parameter(index) => values.push(values[base + index]),
                     Op::Unary(op, span) => {
                         let value = values.pop().unwrap();
-                        values.push(self.operation(value.unary(*op), *span)?);
+                        values.push(self.prepared_operation(value.unary(*op), span)?);
                     }
                     Op::Binary(op, span) => {
                         let b = values.pop().unwrap();
                         let a = values.pop().unwrap();
-                        values.push(self.operation(a.binary(*op, b), *span)?);
+                        values.push(self.prepared_operation(a.binary(*op, b), span)?);
                     }
                     Op::Boolean(span) => {
                         let value = values.pop().unwrap();
-                        values.push(Scalar::Bool(self.operation(value.boolean(), *span)?));
+                        values.push(Scalar::Bool(
+                            self.prepared_operation(value.boolean(), span)?,
+                        ));
                     }
                     Op::Jump(ip) => frames.last_mut().unwrap().ip = *ip,
                     Op::False(ip, span) => {
                         let value = values.pop().unwrap();
-                        if !self.operation(value.boolean(), *span)? {
+                        if !self.prepared_operation(value.boolean(), span)? {
                             frames.last_mut().unwrap().ip = *ip;
                         }
                     }
                     Op::Short(stop, ip, span) => {
                         let value = values.pop().unwrap();
-                        let b = self.operation(value.boolean(), *span)?;
+                        let b = self.prepared_operation(value.boolean(), span)?;
                         if b == *stop {
                             values.push(Scalar::Bool(b));
                             frames.last_mut().unwrap().ip = *ip;
@@ -538,25 +570,30 @@ impl Runtime {
                         self.stack
                             .push(ActiveFrame::call(function, *span, self.source.clone()));
                         let base = values.len() - count;
-                        for (parameter, value) in declaration.parameters.iter().zip(&values[base..])
-                        {
-                            self.annotation(
-                                &parameter.annotation,
-                                &value.value(),
-                                parameter.span,
-                                false,
-                            )?;
+                        if !integer_calls {
+                            for (parameter, value) in
+                                declaration.parameters.iter().zip(&values[base..])
+                            {
+                                self.annotation(
+                                    &parameter.annotation,
+                                    &value.value(),
+                                    parameter.span,
+                                    false,
+                                )?;
+                            }
                         }
                         frames.push(Frame { ip: 0, base });
                     }
                     Op::Return => {
                         let value = values.pop().unwrap();
-                        self.annotation(
-                            &declaration.return_type,
-                            &value.value(),
-                            declaration.name_span,
-                            true,
-                        )?;
+                        if !integer_calls {
+                            self.annotation(
+                                &declaration.return_type,
+                                &value.value(),
+                                declaration.name_span,
+                                true,
+                            )?;
+                        }
                         frames.pop();
                         values.truncate(base);
                         if frames.is_empty() {

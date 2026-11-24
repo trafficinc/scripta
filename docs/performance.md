@@ -3,16 +3,16 @@
 <!-- BEGIN LANGUAGE BENCHMARKS -->
 | Benchmark | Work size | PHP (ms) | Python (ms) | Scripta (ms) |
 | --- | --- | ---: | ---: | ---: |
-| Numeric loop | 1,000,000 iterations | 49.094 | 107.718 | 32.491 |
-| Recursive Fibonacci | fib(28), no memoization | 61.717 | 95.242 | 96.133 |
-| List pipeline | 2,000 items × 200 passes | 56.144 | 63.306 | 107.050 |
-| String concatenation | 100,000 × 8-byte appends | 837.630 | 39.103 | 24.563 |
-| Dictionary operations | 256 keys; 40,960 updates; 128 copy-removals | 36.075 | 42.633 | 42.236 |
-| Class dispatch | 200,000 method calls | 42.069 | 76.949 | 95.334 |
-| Regex match | 20,000 matches attempted | 36.034 | 65.336 | 16.892 |
-| JSON roundtrip | 20,000 encode/decode pairs | 51.582 | 152.852 | 70.414 |
-| Function calls | 200,000 calls | 41.912 | 54.448 | 20.423 |
-| Startup | Empty script | 35.875 | 32.887 | 7.075 |
+| Numeric loop | 1,000,000 iterations | 48.056 | 103.874 | 32.632 |
+| Recursive Fibonacci | fib(28), no memoization | 61.669 | 95.158 | 57.830 |
+| List pipeline | 2,000 items × 200 passes | 55.355 | 62.521 | 106.354 |
+| String concatenation | 100,000 × 8-byte appends | 825.300 | 38.773 | 24.599 |
+| Dictionary operations | 256 keys; 40,960 updates; 128 copy-removals | 35.922 | 42.579 | 42.463 |
+| Class dispatch | 200,000 method calls | 40.889 | 74.647 | 94.170 |
+| Regex match | 20,000 matches attempted | 35.513 | 63.060 | 16.543 |
+| JSON roundtrip | 20,000 encode/decode pairs | 49.388 | 147.250 | 69.457 |
+| Function calls | 200,000 calls | 39.022 | 50.522 | 19.525 |
+| Startup | Empty script | 33.047 | 30.136 | 6.231 |
 <!-- END LANGUAGE BENCHMARKS -->
 
 The table uses one complete local run with 15 samples after 3 warmups per

@@ -200,6 +200,10 @@ pub struct Runtime {
     #[cfg(test)]
     prepared_calls_executed: usize,
     #[cfg(test)]
+    disable_prepared_integer_proof: bool,
+    #[cfg(test)]
+    prepared_integer_calls_executed: usize,
+    #[cfg(test)]
     disable_numeric_call_loops: bool,
     #[cfg(test)]
     numeric_call_loops_executed: usize,

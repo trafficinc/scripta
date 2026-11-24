@@ -13,6 +13,124 @@ fn compare(source: &str, options: RuntimeOptions) -> Runtime {
 const FIB: &str = "function f($n:int):int{if($n<2){return $n;}return f($n-1)+f($n-2);}";
 
 #[test]
+fn deferred_operations_preserve_large_source_offsets_and_failure_sites() {
+    let prefix = format!("//{}\n", "λ".repeat(40_000));
+    for (body, depth) in [
+        (
+            "function f($n){if($n===0)return 1/0;return f($n-1);}$answer=9;$answer=f(6);",
+            64,
+        ),
+        (
+            "function f($n){if($n===0)return true;return +f($n-1);}$answer=9;$answer=f(6);",
+            64,
+        ),
+        (
+            "function f($n){if($n===0)return 1;return f($n-1)&&true;}$answer=9;$answer=f(6);",
+            64,
+        ),
+        (
+            "function f($n){if($n===0)return 1;return f($n-1)+(true&&f($n-1));}$answer=9;$answer=f(6);",
+            64,
+        ),
+        (
+            "function f($n){if($n<1)return 0;return f($n<0);}$answer=9;$answer=f(6);",
+            64,
+        ),
+        (
+            "function f($n){if($n===0)return 1;return f($n-1);}$answer=9;$answer=f(6);",
+            3,
+        ),
+    ] {
+        let source = format!("{prefix}{body}");
+        let (mut fast, mut reference) = crate::test_support::runtimes(RuntimeOptions {
+            recursion_limit: depth,
+            ..Default::default()
+        });
+        fast.force_numeric_calls = true;
+        reference.force_numeric_calls = true;
+        reference.disable_prepared_calls = true;
+        let error = crate::test_support::compare_with_recovery(
+            &mut fast,
+            &mut reference,
+            &source,
+            "$recovered=7;",
+        )
+        .unwrap_err();
+        assert!(error.span.start > usize::from(u16::MAX));
+        assert_eq!(fast.get_global("answer"), Some(&Value::Int(9)));
+        assert!(fast.prepared_calls_executed > 0, "{body}");
+    }
+}
+
+#[test]
+fn deferred_operations_keep_full_integer_range() {
+    for (literal, expected) in [
+        ("9223372036854775807", i64::MAX),
+        ("-9223372036854775807-1", i64::MIN),
+    ] {
+        let source = format!(
+            "function f($n):int{{if($n===0)return {literal};return f($n-1);}}$answer=f(4);"
+        );
+        let runtime = compare(&source, RuntimeOptions::default());
+        assert_eq!(runtime.get_global("answer"), Some(&Value::Int(expected)));
+        assert!(runtime.prepared_calls_executed > 0);
+    }
+}
+
+#[test]
+fn proven_integer_calls_match_checked_plans_including_failures_and_recovery() {
+    for (source, proved) in [
+        (format!("{FIB}$answer=f(12);"), true),
+        ("function f($n:int,$v:int):int{if($n===0)return $v;return f($n-1,$v)+1;}$answer=f(8,9223372036854775700);".into(), true),
+        ("function f($n){if($n===0)return 7;return +f($n-1)/2%3;}$answer=f(4);".into(), true),
+        ("function f($n:int):int{if($n===0)return 9223372036854775807;return f($n-1)+1;}$answer=9;$answer=f(4);".into(), true),
+        ("function f($n:int):int{if($n===0)return 1/0;return f($n-1);}$answer=9;try{$answer=f(4);}catch(ArithmeticError $e){$caught=true;}".into(), true),
+        ("function f($n:int):int{if($n===0)return -9223372036854775807-1;return -f($n-1);}$answer=9;$answer=f(4);".into(), true),
+        ("function f($n:int):int{if($n===0)return 1;return f($n<0);}$answer=9;$answer=f(4);".into(), false),
+        ("function f($n):int{if($n===0)return true;return f($n-1);}$answer=9;$answer=f(4);".into(), false),
+        ("function f($n){if($n===0)return null;return f($n-1);}$answer=f(4);".into(), false),
+        ("function f($n){if($n===0)return 1;return f($n-1)+true;}$answer=9;$answer=f(4);".into(), false),
+        ("function f($n){if($n===0)return true;return f($n-1)&&true;}$answer=f(4);".into(), false),
+    ] {
+        let (mut fast, mut checked) = crate::test_support::runtimes(RuntimeOptions::default());
+        fast.force_numeric_calls = true;
+        checked.force_numeric_calls = true;
+        checked.disable_prepared_integer_proof = true;
+        let _ = crate::test_support::compare_with_recovery(&mut fast, &mut checked, &source, "$recovered=7;");
+        assert!(fast.prepared_calls_executed > 0, "{source}");
+        assert!(checked.prepared_calls_executed > 0, "{source}");
+        assert_eq!(fast.prepared_integer_calls_executed > 0, proved, "{source}");
+        assert_eq!(checked.prepared_integer_calls_executed, 0);
+    }
+}
+
+#[test]
+fn integer_proof_keeps_outer_argument_checks_and_rejects_fallthrough_shapes() {
+    let mut runtime = Runtime::new();
+    runtime.force_numeric_calls = true;
+    runtime
+        .execute_source(&format!("{FIB}f(4);"), &mut Vec::new())
+        .unwrap();
+    let f = runtime.get_callable("f").unwrap();
+    let before = runtime.prepared_integer_calls_executed;
+    let error = runtime
+        .invoke(f, &[Value::Bool(true)], &mut Vec::new())
+        .unwrap_err();
+    assert_eq!(error.exception_kind(), Some("TypeError"));
+    assert_eq!(runtime.prepared_integer_calls_executed, before);
+    assert!(runtime.prepared_stack.as_ref().unwrap().is_empty());
+    for source in [
+        "function f($n:int):int{if($n===0)return 1;if($n>0)return f($n-1);}$answer=9;$answer=f(4);",
+        "function f($n:int):int{if($n===0)return 1;return;}$answer=9;$answer=f(4);",
+    ] {
+        assert_eq!(
+            compare(source, RuntimeOptions::default()).prepared_integer_calls_executed,
+            0
+        );
+    }
+}
+
+#[test]
 fn flat_recursion_reuses_reserved_storage_without_recursive_environments() {
     let mut runtime = Runtime::new();
     runtime.force_numeric_calls = true;
