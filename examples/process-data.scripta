@@ -1,0 +1,16 @@
+// Supply argv explicitly; optional hex input supports arbitrary binary payloads.
+$program = Cli::arg(0);
+if ($program === null) {
+    echo "Usage: scripta process-data.scripta PROGRAM [JSON_ARGUMENT_ARRAY] [INPUT_HEX]\n";
+    exit(2);
+}
+$arguments = Cli::arg(1);
+if ($arguments === null) {
+    $arguments = "[]";
+}
+$input = Cli::arg(2);
+if ($input === null) {
+    $input = "68656c6c6f2070726f636573730a"; // hello process followed by LF
+}
+$result = Process::run($program, Json::decode($arguments), ["input" => Hex::decode($input), "outputType" => "bytes", "maxInputBytes" => 1048576, "maxOutputBytes" => 1048576, "timeoutMs" => 10000]);
+echo Json::encode(["exitCode" => $result->exitCode, "stdoutHex" => Hex::encode($result->stdout), "stderrHex" => Hex::encode($result->stderr)]) . "\n";

@@ -101,6 +101,10 @@ shares script scopes, budgets and error signals without terminating the host.
 
 OS, network and database backends belong in standard-library or extension crates.
 They enforce capabilities, resource ownership and operation-specific limits.
+Process stdin payloads are staged in bounded temporary regular files; stdout and
+stderr capture use independent temporary files. The monitor retains child/group
+cleanup, deadlines and cancellation without bidirectional pipe dependencies, and
+charges captured payloads to logical value budgets before result allocation.
 Script and native output share a host writer and cumulative byte accounting.
 The runtime has no application buffer stack; HTTP hosts own response buffering
 and transport flushing. See

@@ -91,6 +91,7 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
         "binary-encoding.scripta",
         "hashing.scripta",
         "secure-random.scripta",
+        "process-data.scripta",
         "csv-reader.scripta",
         "download.scripta",
     ];
@@ -231,6 +232,42 @@ fn backup_copies_nested_binary_data_without_overwriting_or_recursing_into_destin
         Some(1)
     );
     assert!(!source.join("inside").exists());
+}
+#[test]
+fn process_data_example_supplies_stdin_and_encodes_binary_captures() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/process-stdin.scripta");
+    let escaped = fixture
+        .to_str()
+        .unwrap()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let arguments = format!("[\"{escaped}\"]");
+    for (input, stdout_hex) in [
+        ("68656c6c6f2070726f636573730a", "68656c6c6f2070726f63657373"),
+        ("c3a90a", "c3a9"),
+        ("", ""),
+    ] {
+        let report = success(run(
+            "process-data.scripta",
+            &[
+                env!("CARGO_BIN_EXE_scripta").as_ref(),
+                arguments.as_ref(),
+                input.as_ref(),
+            ],
+        ));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+            serde_json::json!({"exitCode":0,"stdoutHex":stdout_hex,"stderrHex":""})
+        );
+    }
+    let missing = run("process-data.scripta", &[]);
+    assert_eq!(missing.status.code(), Some(2));
+    assert!(
+        String::from_utf8(missing.stdout)
+            .unwrap()
+            .contains("Usage:")
+    );
 }
 #[test]
 fn command_runner_preserves_literal_arguments_and_http_example_uses_loopback() {

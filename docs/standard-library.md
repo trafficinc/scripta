@@ -1144,13 +1144,14 @@ A normal process exit returns a read-only `ProcessResult` object:
 | Property | Value |
 | --- | --- |
 | `exitCode` | Native exit code, or null when Unix signal termination supplies no code. Windows follows Rust's signed exit-code representation. |
-| `stdout` | Captured UTF-8 text, or empty string for inherited/null output. |
-| `stderr` | Captured UTF-8 text, or empty string for inherited/null output. |
+| `stdout` | Captured string in default text mode, or raw `bytes` with `outputType: "bytes"`. Inherited/null output yields an empty value of the selected type. |
+| `stderr` | Same type and empty-value rules as stdout, independently captured. |
 | `success` | Whether the native status is successful (normally exit code zero). |
-| `durationMs` | Nonnegative elapsed milliseconds from launch through cleanup/capture. |
+| `durationMs` | Nonnegative elapsed milliseconds from input staging/launch through cleanup/capture. |
 
 A nonzero exit code is a result, not an exception. Spawn failures, timeout,
-cancellation, output-limit violations, and invalid UTF-8 output are errors.
+cancellation, input/output-limit violations, and invalid UTF-8 output in text mode
+are errors. Binary capture does not decode or replace any bytes.
 
 ### Child options and output
 
@@ -1171,17 +1172,31 @@ $result = Process::run("git", ["status"], [
 | --- | --- |
 | `cwd` | Runtime working directory. Relative overrides resolve against that base. Does not change parent/runtime cwd. |
 | `env` | Overrides the runtime environment snapshot. String values replace/add; null removes a key for this child. An empty list is accepted as an empty override map. |
-| `timeoutMs` | 60000 ms by default; nonnegative int, or null to disable the deadline. Zero is an immediate deadline. |
+| `timeoutMs` | 60000 ms by default; nonnegative int, or null to disable the deadline. Covers supplied-input staging, launch, monitoring, cleanup, and collection. Zero is an immediate deadline. |
+| `input` | Optional string or `bytes` stdin payload. Strings supply their exact UTF-8 bytes, including NUL; bytes are copied verbatim. Empty payloads provide immediate EOF. Cannot be combined with an explicit `stdin` option. |
+| `maxInputBytes` | 8388608 bytes (8 MiB) by default; a per-call ceiling on the payload's raw byte length. May lower but cannot exceed the host ceiling. Zero permits only empty/absent input. |
 | `maxOutputBytes` | 8388608 bytes (8 MiB) combined across captured stdout/stderr. Per-call limits may lower but cannot exceed the host ceiling. Zero permits no captured bytes. |
+| `outputType` | `"text"` by default (strict UTF-8); `"bytes"` returns raw bytes for both captured fields. Does not change inherited/null OS stream behavior. |
 | `stdout`, `stderr` | Each accepts `capture`, `inherit`, or `null`. Capture is the default. |
 | `stdin` | `null` (immediate EOF) by default; `inherit` uses OS stdin. |
 
 Unknown options and invalid values raise `TypeError` before a child is launched.
+Oversized supplied input raises `InputLimitError` before launch, independent of
+the output ceiling. Both string and byte inputs use byte lengths, not Unicode
+scalar counts. There is no implicit conversion of other input types.
 Inheritance uses the process's actual OS standard handles, not injected runtime
 writers/readers. Corresponding parent writers are flushed before launch to keep
 earlier output ordered. Spawned children can interleave output with later script
 output. Captured streams retain their individual byte order; there is no combined
 stdout/stderr ordering guarantee.
+
+Supplied stdin is staged in a bounded anonymous temporary regular file, rewound
+before launch. It is seekable, contains the complete payload, and reaches EOF
+after its contents. Children can read stdin and write both captured outputs
+independently without pipe backpressure or a stdin-writer thread. Early stdin
+closure or child exit discards unread input and returns the ordinary exit status;
+there is no pipe `BrokenPipe` delivery error. Spawn stages input before returning
+its handle. These are one-shot payload APIs; interactive pipes are not exposed.
 
 Capture uses separate temporary files, with no stdout/stderr pipe dependency or
 reader thread waiting for EOF. A monitor polls status, deadline, cancellation, and
@@ -1190,7 +1205,26 @@ limit between polls; returned capture memory is bounded by the configured limit.
 Large/continuous writers are stopped with `OutputLimitError`. Temporary files are
 released after capture/cleanup. Disk errors propagate. Capture does not wait for
 EOF from descendants that inherited a stream. Invalid UTF-8 raises `EncodingError`
-after child cleanup; binary output has no implicit lossy conversion.
+after child cleanup in text mode; binary output has no implicit lossy conversion.
+
+Input staging and capture collection check cancellation/deadlines between chunks
+of at most 16 KiB; an in-progress OS operation is cooperative and can delay those
+checks. The monitor cleans up the child/group/job on timeout, cancellation, and
+limit errors. Captured stdout/stderr payloads are charged together to the logical
+value byte budget, plus one native value slot, before allocating the result.
+Growing capture that exceeds this budget raises `ResourceLimitError` after child
+cleanup. Results and completed handles retain and charge the captured payload,
+including when nested in collections. Logical budgets are not a process heap or
+aggregate temporary-disk cap. Failed calls preserve assignment destinations.
+
+For a runnable byte-input/binary-capture example, use
+[process-data.scripta](../examples/process-data.scripta). It prints captures as hex
+and accepts an explicit program/JSON argv plus optional hex stdin. A controlled
+text-reader invocation from a checkout is:
+
+```sh
+scripta examples/process-data.scripta scripta '["tests/fixtures/process-stdin.scripta"]'
+```
 
 Hosts configure registration defaults and capture ceilings through:
 
@@ -1201,6 +1235,7 @@ let options = StdlibOptions {
     process: ProcessConfig {
         default_timeout: Some(Duration::from_secs(120)),
         max_output_bytes: 4 * 1024 * 1024,
+        max_input_bytes: 4 * 1024 * 1024,
     },
     ..Default::default()
 };
@@ -1209,7 +1244,7 @@ scr_stdlib::register_with_options(&mut runtime, options)?;
 
 Use this instead of another standard-library registration. The default timeout
 is a default, not a maximum: a call can choose a longer timeout or null. The output
-ceiling is enforced per child. Allocation limits for arbitrary script values and
+and input ceilings are enforced per child. Allocation limits for arbitrary script values and
 aggregate limits across many simultaneous children remain separate concerns.
 
 ### Spawn, handles, and cleanup
@@ -1270,7 +1305,8 @@ root policy. Remove it when a host must not permit external programs.
 `process.inspect` controls Process::exists. CurrentId needs no capability.
 
 Errors include `CommandNotFoundError`, `ProcessError`, `PermissionError`,
-`TimeoutError`, `OutputLimitError`, `EncodingError`, and `TypeError`. Errors retain
+`TimeoutError`, `InputLimitError`, `OutputLimitError`, `ResourceLimitError`,
+`EncodingError`, and `TypeError`. Errors retain
 the native call span and script stack. Timeout/limit errors discard partial output
 after cleanup instead of returning a successful result with truncated text.
 

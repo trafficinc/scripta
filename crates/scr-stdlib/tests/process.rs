@@ -1,7 +1,7 @@
 use scr_runtime::{NativeObject, Runtime, RuntimeError, RuntimeOptions, Value};
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::Path,
     sync::{
         Arc,
@@ -18,8 +18,21 @@ fn run(runtime: &mut Runtime, source: &str) -> Result<u8, RuntimeError> {
     )
 }
 fn runtime() -> Runtime {
-    let mut runtime = Runtime::new();
-    scr_stdlib::register(&mut runtime).unwrap();
+    configured_runtime(Default::default(), Default::default())
+}
+fn configured_runtime(
+    config: scr_stdlib::process::ProcessConfig,
+    options: RuntimeOptions,
+) -> Runtime {
+    let mut runtime = Runtime::with_options(options);
+    scr_stdlib::register_with_options(
+        &mut runtime,
+        scr_stdlib::StdlibOptions {
+            process: config,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     runtime
         .set_global(
             "program",
@@ -119,6 +132,38 @@ fn child_fixture() {
         },
         "invalid" => {
             std::io::stdout().write_all(&[0xff]).unwrap();
+        }
+        "stdin-echo" => {
+            let mut input = Vec::new();
+            std::io::stdin().read_to_end(&mut input).unwrap();
+            std::io::stderr().write_all(&input).unwrap();
+            std::process::exit(0);
+        }
+        "write-before-input" => {
+            // A parent that writes a stdin pipe before draining stdout/stderr
+            // would deadlock here once all three pipe buffers fill.
+            std::io::stdout()
+                .write_all(&vec![b'o'; 512 * 1024])
+                .unwrap();
+            std::io::stderr()
+                .write_all(&vec![b'e'; 512 * 1024])
+                .unwrap();
+            let mut input = Vec::new();
+            std::io::stdin().read_to_end(&mut input).unwrap();
+            std::io::stderr().write_all(&input).unwrap();
+            std::process::exit(0);
+        }
+        "early-input-exit" => {
+            let mut first = [0];
+            std::io::stdin().read_exact(&mut first).unwrap();
+            std::io::stderr().write_all(&first).unwrap();
+            std::process::exit(17);
+        }
+        "skip-input" => std::process::exit(0),
+        "exact-output" => {
+            let count: usize = std::env::var("SCR_PROCESS_BYTES").unwrap().parse().unwrap();
+            std::io::stderr().write_all(&vec![b'x'; count]).unwrap();
+            std::process::exit(0);
         }
         "sleep" => {
             if let Ok(path) = std::env::var("SCR_CHILD_PID_FILE") {
@@ -375,10 +420,24 @@ fn descendants_do_not_keep_capture_open_after_leader_exits() {
     runtime
         .set_global("marker", Value::String(marker.to_str().unwrap().into()))
         .unwrap();
-    run(&mut runtime, r#"Env::set("SCR_PROCESS_FIXTURE", "descendant"); Env::set("SCR_LATE_MARKER", $marker); $result = Process::run($program, $arguments, ["timeoutMs" => 2000]);"#).unwrap();
-    assert_eq!(property(&runtime, "result", "success"), Value::Bool(true));
-    std::thread::sleep(Duration::from_millis(900));
-    assert!(!marker.exists());
+    run(
+        &mut runtime,
+        r#"Env::set("SCR_PROCESS_FIXTURE", "descendant"); Env::set("SCR_LATE_MARKER", $marker);"#,
+    )
+    .unwrap();
+    for options in [
+        "['timeoutMs'=>2000]",
+        "['timeoutMs'=>2000,'input'=>Bytes::encodeUtf8('unread descendant input'),'outputType'=>'bytes']",
+    ] {
+        run(
+            &mut runtime,
+            &format!("$result=Process::run($program,$arguments,{options});"),
+        )
+        .unwrap();
+        assert_eq!(property(&runtime, "result", "success"), Value::Bool(true));
+        std::thread::sleep(Duration::from_millis(900));
+        assert!(!marker.exists());
+    }
 }
 
 #[test]
@@ -502,6 +561,332 @@ fn null_streams_and_host_output_ceiling_are_configurable() {
         r#"Process::run("ignored", [], ["maxOutputBytes" => 129]);"#,
         "TypeError",
     );
+}
+
+#[test]
+fn string_and_binary_stdin_preserve_nul_utf8_empty_and_eof() {
+    let mut runtime = runtime();
+    run(
+        &mut runtime,
+        "Env::set('SCR_PROCESS_FIXTURE','stdin-echo');",
+    )
+    .unwrap();
+    for data in [Vec::new(), b"\0\xffabc\r\n".to_vec(), (0..=255).collect()] {
+        runtime
+            .set_global("input", Value::Bytes(data.clone().into()))
+            .unwrap();
+        run(&mut runtime, "$result=Process::run($program,$arguments,['input'=>$input,'stdout'=>'null','outputType'=>'bytes']);").unwrap();
+        assert_eq!(
+            property(&runtime, "result", "stderr"),
+            Value::Bytes(data.into())
+        );
+        assert_eq!(
+            property(&runtime, "result", "stdout"),
+            Value::Bytes(Vec::<u8>::new().into())
+        );
+        assert_eq!(property(&runtime, "result", "success"), Value::Bool(true));
+    }
+    let text = "é\0東京\r\n";
+    runtime
+        .set_global("input", Value::String(text.into()))
+        .unwrap();
+    run(
+        &mut runtime,
+        "$result=Process::run($program,$arguments,['input'=>$input,'stdout'=>'null']);",
+    )
+    .unwrap();
+    assert_eq!(
+        property(&runtime, "result", "stderr"),
+        Value::String(text.into())
+    );
+    for options in [
+        "['stdout'=>'null','outputType'=>'bytes']",
+        "['stdin'=>'null','stdout'=>'null','outputType'=>'bytes']",
+    ] {
+        run(
+            &mut runtime,
+            &format!("$result=Process::run($program,$arguments,{options});"),
+        )
+        .unwrap();
+        assert_eq!(
+            property(&runtime, "result", "stderr"),
+            Value::Bytes(Vec::<u8>::new().into())
+        );
+    }
+    runtime
+        .set_global("input", Value::Bytes(vec![0xff].into()))
+        .unwrap();
+    run(&mut runtime, "$result='unchanged';").unwrap();
+    error(
+        &mut runtime,
+        "$result=Process::run($program,$arguments,['input'=>$input,'stdout'=>'null']);",
+        "EncodingError",
+    );
+    assert_eq!(
+        runtime.get_global("result"),
+        Some(&Value::String("unchanged".into()))
+    );
+}
+
+#[test]
+fn large_bidirectional_transfers_run_and_spawn_without_pipe_deadlocks() {
+    let input: Vec<u8> = (0..2 * 1024 * 1024).map(|i| (i % 256) as u8).collect();
+    let mut runtime = runtime();
+    runtime
+        .set_global("input", Value::Bytes(input.as_slice().into()))
+        .unwrap();
+    run(
+        &mut runtime,
+        "Env::set('SCR_PROCESS_FIXTURE','write-before-input');",
+    )
+    .unwrap();
+    for method in ["run", "spawn"] {
+        let call = format!(
+            "Process::{method}($program,$arguments,['input'=>$input,'outputType'=>'bytes','timeoutMs'=>5000])"
+        );
+        if method == "spawn" {
+            run(
+                &mut runtime,
+                &format!(
+                    "$child={call}; $result=Process::wait($child); $again=Process::poll($child);"
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                property(&runtime, "again", "stderr"),
+                property(&runtime, "result", "stderr")
+            );
+        } else {
+            run(&mut runtime, &format!("$result={call};")).unwrap();
+        }
+        let Value::Bytes(stdout) = property(&runtime, "result", "stdout") else {
+            panic!()
+        };
+        assert!(stdout.ends_with(&vec![b'o'; 512 * 1024]));
+        let Value::Bytes(stderr) = property(&runtime, "result", "stderr") else {
+            panic!()
+        };
+        assert_eq!(&stderr[..512 * 1024], vec![b'e'; 512 * 1024]);
+        assert_eq!(&stderr[512 * 1024..], input);
+        assert_eq!(property(&runtime, "result", "success"), Value::Bool(true));
+    }
+}
+
+#[test]
+fn early_exit_discards_unread_stdin_without_a_broken_pipe_error() {
+    let mut runtime = runtime();
+    runtime
+        .set_global("input", Value::Bytes(vec![0xff; 2 * 1024 * 1024].into()))
+        .unwrap();
+    for (mode, code, expected) in [
+        ("skip-input", 0, Vec::new()),
+        ("early-input-exit", 17, vec![0xff]),
+    ] {
+        runtime
+            .set_global("mode", Value::String(mode.into()))
+            .unwrap();
+        run(&mut runtime,"Env::set('SCR_PROCESS_FIXTURE',$mode); $result=Process::run($program,$arguments,['input'=>$input,'stdout'=>'null','outputType'=>'bytes','timeoutMs'=>2000]);").unwrap();
+        assert_eq!(property(&runtime, "result", "exitCode"), Value::Int(code));
+        assert_eq!(
+            property(&runtime, "result", "stderr"),
+            Value::Bytes(expected.into())
+        );
+    }
+}
+
+#[test]
+fn input_ceilings_conflicts_and_output_type_are_checked_before_launch() {
+    let config = scr_stdlib::process::ProcessConfig {
+        max_input_bytes: 2,
+        ..Default::default()
+    };
+    let mut runtime = configured_runtime(config, Default::default());
+    run(
+        &mut runtime,
+        "Env::set('SCR_PROCESS_FIXTURE','stdin-echo'); $result='unchanged';",
+    )
+    .unwrap();
+    for options in [
+        "['input'=>null]",
+        "['input'=>1]",
+        "['input'=>'x','stdin'=>'inherit']",
+        "['stdin'=>'null','input'=>'']",
+        "['maxInputBytes'=>3]",
+        "['maxInputBytes'=>-1]",
+        "['outputType'=>'binary']",
+        "['outputType'=>true]",
+    ] {
+        error(
+            &mut runtime,
+            &format!("$result=Process::run('never-launched',[],{options});"),
+            "TypeError",
+        );
+        assert_eq!(
+            runtime.get_global("result"),
+            Some(&Value::String("unchanged".into()))
+        );
+    }
+    for input in [
+        Value::String("abc".into()),
+        Value::Bytes(vec![1, 2, 3].into()),
+    ] {
+        runtime.set_global("input", input).unwrap();
+        error(
+            &mut runtime,
+            "$result=Process::run('never-launched',[],['input'=>$input]);",
+            "InputLimitError",
+        );
+        assert_eq!(
+            runtime.get_global("result"),
+            Some(&Value::String("unchanged".into()))
+        );
+    }
+    run(&mut runtime,"$result=Process::run($program,$arguments,['input'=>'é','stdout'=>'null','maxInputBytes'=>2]);").unwrap();
+    assert_eq!(
+        property(&runtime, "result", "stderr"),
+        Value::String("é".into())
+    );
+    error(
+        &mut runtime,
+        "Process::run('never-launched',[],['input'=>'é','maxInputBytes'=>1]);",
+        "InputLimitError",
+    );
+    run(&mut runtime,"$result=Process::run($program,$arguments,['input'=>'','maxInputBytes'=>0,'stdout'=>'null']);").unwrap();
+    assert_eq!(
+        property(&runtime, "result", "stderr"),
+        Value::String(String::new())
+    );
+}
+
+#[test]
+fn exact_output_and_logical_value_budgets_charge_results_and_completed_handles() {
+    let mut runtime = runtime();
+    run(
+        &mut runtime,
+        "Env::set('SCR_PROCESS_FIXTURE','exact-output'); Env::set('SCR_PROCESS_BYTES','4096');",
+    )
+    .unwrap();
+    for output_type in ["text", "bytes"] {
+        run(&mut runtime,&format!("$result=Process::run($program,$arguments,['stdout'=>'null','outputType'=>'{output_type}','maxOutputBytes'=>4096]);")).unwrap();
+        let Some(Value::NativeObject(result)) = runtime.get_global("result") else {
+            panic!()
+        };
+        assert_eq!(result.payload_bytes(), 4096);
+        run(&mut runtime, "$result='unchanged';").unwrap();
+        error(
+            &mut runtime,
+            &format!(
+                "$result=Process::run($program,$arguments,['stdout'=>'null','outputType'=>'{output_type}','maxOutputBytes'=>4095]);"
+            ),
+            "OutputLimitError",
+        );
+        assert_eq!(
+            runtime.get_global("result"),
+            Some(&Value::String("unchanged".into()))
+        );
+    }
+    for payload_budget in [4095, 4096] {
+        let mut rt = configured_runtime(
+            Default::default(),
+            RuntimeOptions {
+                max_value_bytes: Some(std::mem::size_of::<Value>() + payload_budget),
+                ..Default::default()
+            },
+        );
+        run(&mut rt,"Env::set('SCR_PROCESS_FIXTURE','exact-output'); Env::set('SCR_PROCESS_BYTES','4096'); $result='unchanged';").unwrap();
+        if payload_budget == 4095 {
+            error(
+                &mut rt,
+                "$result=Process::run($program,$arguments,['stdout'=>'null','outputType'=>'bytes']);",
+                "ResourceLimitError",
+            );
+            assert_eq!(
+                rt.get_global("result"),
+                Some(&Value::String("unchanged".into()))
+            );
+        } else {
+            run(&mut rt,"$child=Process::spawn($program,$arguments,['stdout'=>'null','outputType'=>'bytes']); $result=Process::wait($child);").unwrap();
+            for name in ["child", "result"] {
+                let value = rt.get_global(name).unwrap().clone();
+                let Value::NativeObject(object) = &value else {
+                    panic!()
+                };
+                assert_eq!(object.payload_bytes(), 4096);
+                assert!(rt.set_global("nested", Value::List(vec![value])).is_err());
+            }
+        }
+    }
+}
+
+#[test]
+fn pending_input_timeouts_cancellation_and_drop_reap_the_owned_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("pid");
+    let flag = Arc::new(AtomicBool::new(false));
+    let mut rt = configured_runtime(
+        Default::default(),
+        RuntimeOptions {
+            interrupt_flag: Some(flag.clone()),
+            ..Default::default()
+        },
+    );
+    rt.set_global("input", Value::Bytes(vec![0xff; 2 * 1024 * 1024].into()))
+        .unwrap();
+    rt.set_global("pidFile", Value::String(pid_file.to_str().unwrap().into()))
+        .unwrap();
+    run(&mut rt,"Env::set('SCR_PROCESS_FIXTURE','sleep'); Env::set('SCR_CHILD_PID_FILE',$pidFile); $result='unchanged';").unwrap();
+    error(
+        &mut rt,
+        "$result=Process::run($program,$arguments,['input'=>$input,'timeoutMs'=>300]);",
+        "TimeoutError",
+    );
+    assert_eq!(
+        rt.get_global("result"),
+        Some(&Value::String("unchanged".into()))
+    );
+    assert!(gone(
+        fs::read_to_string(&pid_file).unwrap().parse().unwrap()
+    ));
+    let cancellation_pid = dir.path().join("cancellation-pid");
+    rt.set_global(
+        "pidFile",
+        Value::String(cancellation_pid.to_str().unwrap().into()),
+    )
+    .unwrap();
+    run(&mut rt, "Env::set('SCR_CHILD_PID_FILE',$pidFile);").unwrap();
+    let observer = cancellation_pid.clone();
+    let cancel = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !observer.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        flag.store(true, Ordering::Relaxed);
+    });
+    let error = run(
+        &mut rt,
+        "$result=Process::run($program,$arguments,['input'=>$input,'timeoutMs'=>5000]);",
+    )
+    .unwrap_err();
+    cancel.join().unwrap();
+    assert!(error.message.contains("interrupted"));
+    assert_eq!(
+        rt.get_global("result"),
+        Some(&Value::String("unchanged".into()))
+    );
+    assert!(gone(
+        fs::read_to_string(cancellation_pid)
+            .unwrap()
+            .parse()
+            .unwrap()
+    ));
+    // Dropping an unattended spawned handle also releases the input file/child.
+    let mut rt = runtime();
+    rt.set_global("input", Value::Bytes(vec![0xff; 2 * 1024 * 1024].into()))
+        .unwrap();
+    run(&mut rt,"Env::set('SCR_PROCESS_FIXTURE','sleep'); $child=Process::spawn($program,$arguments,['input'=>$input]);").unwrap();
+    let child_pid = pid(&rt, "child");
+    rt.set_global("child", Value::Null).unwrap();
+    assert!(gone(child_pid));
 }
 
 #[cfg(windows)]

@@ -1,5 +1,5 @@
-//! Direct argv execution with bounded temporary-file capture and owned children.
-use crate::{environment, paths};
+//! Direct argv execution with bounded temporary-file I/O and owned children.
+use crate::{bytes, environment, paths};
 use process_wrap::std::{StdChildWrapper, StdCommandWrap, StdCommandWrapper};
 use scr_runtime::{
     MapKey, NativeError, NativeFunction, NativeObject, NativeResult, NativeSignature, NativeType,
@@ -11,7 +11,8 @@ use std::{
     collections::BTreeMap,
     ffi::OsString,
     fs::File,
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
+    mem::size_of,
     path::PathBuf,
     process::{Command, ExitStatus, Stdio},
     rc::Rc,
@@ -28,12 +29,15 @@ pub struct ProcessConfig {
     pub default_timeout: Option<Duration>,
     /// A host ceiling: per-call options may lower, never raise this limit.
     pub max_output_bytes: usize,
+    /// A host ceiling for supplied stdin payloads, measured as raw UTF-8/bytes.
+    pub max_input_bytes: usize,
 }
 impl Default for ProcessConfig {
     fn default() -> Self {
         Self {
             default_timeout: Some(Duration::from_secs(60)),
             max_output_bytes: 8 * 1024 * 1024,
+            max_input_bytes: 8 * 1024 * 1024,
         }
     }
 }
@@ -43,6 +47,11 @@ enum Stream {
     Inherit,
     Null,
 }
+#[derive(Clone, Copy)]
+enum OutputType {
+    Text,
+    Bytes,
+}
 struct Options {
     cwd: PathBuf,
     environment: BTreeMap<OsString, OsString>,
@@ -51,6 +60,9 @@ struct Options {
     stdout: Stream,
     stderr: Stream,
     stdin_inherit: bool,
+    input_limit: usize,
+    output_type: OutputType,
+    value_limit: Option<usize>,
 }
 fn type_error(message: &str) -> NativeError {
     NativeError::type_error(message)
@@ -78,11 +90,11 @@ fn stream(value: &Value) -> NativeResult<Stream> {
         _ => Err(type_error("stream mode must be capture, inherit, or null")),
     }
 }
-fn options(
+fn options<'a>(
     context: &RuntimeContext<'_>,
-    value: Option<&Value>,
+    value: Option<&'a Value>,
     config: &ProcessConfig,
-) -> NativeResult<Options> {
+) -> NativeResult<(Options, Option<&'a [u8]>)> {
     let mut result = Options {
         cwd: paths::resolve(context, ".")?,
         environment: context.environment.clone(),
@@ -91,7 +103,12 @@ fn options(
         stdout: Stream::Capture,
         stderr: Stream::Capture,
         stdin_inherit: false,
+        input_limit: config.max_input_bytes,
+        output_type: OutputType::Text,
+        value_limit: context.max_value_bytes,
     };
+    let mut input = None;
+    let mut explicit_stdin = false;
     if let Some(value) = value {
         let Value::Map(entries) = value else {
             return Err(type_error("process options must be a map"));
@@ -118,11 +135,35 @@ fn options(
                 }
                 "stdout" => result.stdout = stream(value)?,
                 "stderr" => result.stderr = stream(value)?,
-                "stdin" => match value {
-                    Value::String(value) if value == "inherit" => result.stdin_inherit = true,
-                    Value::String(value) if value == "null" => result.stdin_inherit = false,
-                    _ => return Err(type_error("stdin mode must be inherit or null")),
-                },
+                "stdin" => {
+                    explicit_stdin = true;
+                    match value {
+                        Value::String(value) if value == "inherit" => result.stdin_inherit = true,
+                        Value::String(value) if value == "null" => result.stdin_inherit = false,
+                        _ => return Err(type_error("stdin mode must be inherit or null")),
+                    }
+                }
+                "input" => {
+                    input = Some(match value {
+                        Value::String(text) => text.as_bytes(),
+                        Value::Bytes(data) => data.as_ref(),
+                        _ => return Err(type_error("input must be a string or bytes")),
+                    })
+                }
+                "maxInputBytes" => {
+                    result.input_limit = usize::try_from(number(value, key)?)
+                        .map_err(|_| type_error("input limit is too large"))?;
+                    if result.input_limit > config.max_input_bytes {
+                        return Err(type_error("input limit exceeds the host ceiling"));
+                    }
+                }
+                "outputType" => {
+                    result.output_type = match value {
+                        Value::String(mode) if mode == "text" => OutputType::Text,
+                        Value::String(mode) if mode == "bytes" => OutputType::Bytes,
+                        _ => return Err(type_error("outputType must be text or bytes")),
+                    }
+                }
                 "env" => {
                     let entries = match value {
                         Value::Map(entries) => entries.as_slice(),
@@ -158,7 +199,18 @@ fn options(
     // Script writes/overrides are validated above. Preserve the native host
     // snapshot unchanged, including Windows' reserved =drive: entries and
     // non-UTF-8 OS strings; Command reports invalid host data on spawn.
-    Ok(result)
+    if input.is_some() && explicit_stdin {
+        return Err(type_error(
+            "input cannot be combined with an explicit stdin mode",
+        ));
+    }
+    if input.is_some_and(|data| data.len() > result.input_limit) {
+        return Err(NativeError::new(
+            "InputLimitError",
+            "stdin payload exceeds configured limit",
+        ));
+    }
+    Ok((result, input))
 }
 fn capture(mode: Stream) -> NativeResult<(Stdio, Option<File>)> {
     match mode {
@@ -184,48 +236,159 @@ fn check_size(stdout: &Option<File>, stderr: &Option<File>, limit: usize) -> Nat
     }
     Ok(())
 }
-fn read_capture(file: &mut Option<File>, remaining: &mut usize) -> NativeResult<String> {
-    let Some(file) = file else {
-        return Ok(String::new());
-    };
-    file.seek(SeekFrom::Start(0)).map_err(os_error)?;
-    let mut bytes = Vec::new();
-    file.take((*remaining as u64).saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(os_error)?;
-    if bytes.len() > *remaining {
-        return Err(NativeError::new(
-            "OutputLimitError",
-            "captured output exceeds configured limit",
+const IO_CHUNK: usize = 16 * 1024;
+fn value_budget(limit: Option<usize>, count: u64) -> NativeResult<()> {
+    let size = usize::try_from(count)
+        .ok()
+        .and_then(|n| n.checked_add(size_of::<Value>()));
+    if size.is_none() || limit.is_some_and(|limit| size.is_some_and(|size| size > limit)) {
+        return Err(bytes::resource(
+            "captured output exceeds execution value byte limit",
         ));
     }
-    *remaining -= bytes.len();
-    String::from_utf8(bytes).map_err(|_| {
-        NativeError::new(
-            "EncodingError",
-            "captured process output is not valid UTF-8",
+    Ok(())
+}
+fn execution_checkpoint(
+    cancellation: Option<&AtomicBool>,
+    start: Instant,
+    timeout: Option<Duration>,
+) -> NativeResult<()> {
+    if cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        return Err(NativeError::new("Interrupted", "execution interrupted"));
+    }
+    if timeout.is_some_and(|timeout| start.elapsed() >= timeout) {
+        return Err(NativeError::new(
+            "TimeoutError",
+            "process exceeded configured timeout",
+        ));
+    }
+    Ok(())
+}
+fn stage_input(
+    input: &[u8],
+    mut checkpoint: impl FnMut() -> NativeResult<()>,
+) -> NativeResult<Stdio> {
+    checkpoint()?;
+    let mut file = tempfile::tempfile().map_err(os_error)?;
+    for chunk in input.chunks(IO_CHUNK) {
+        checkpoint()?;
+        file.write_all(chunk).map_err(os_error)?;
+    }
+    file.seek(SeekFrom::Start(0)).map_err(os_error)?;
+    checkpoint()?;
+    Ok(Stdio::from(file))
+}
+struct CaptureBudget {
+    remaining: usize,
+    used: u64,
+    value_limit: Option<usize>,
+}
+impl CaptureBudget {
+    fn check(&self, extra: u64) -> NativeResult<()> {
+        if extra > self.remaining as u64 {
+            return Err(NativeError::new(
+                "OutputLimitError",
+                "captured output exceeds configured limit",
+            ));
+        }
+        value_budget(self.value_limit, self.used.saturating_add(extra))
+    }
+    fn consume(&mut self, extra: usize) -> NativeResult<()> {
+        self.check(extra as u64)?;
+        self.remaining -= extra;
+        self.used += extra as u64;
+        Ok(())
+    }
+}
+#[derive(Debug)]
+enum Captured {
+    Text(String),
+    Bytes(Vec<u8>),
+}
+impl Captured {
+    fn len(&self) -> usize {
+        match self {
+            Self::Text(text) => text.len(),
+            Self::Bytes(data) => data.len(),
+        }
+    }
+    fn value(&self) -> Value {
+        match self {
+            Self::Text(text) => Value::String(text.clone()),
+            Self::Bytes(data) => Value::Bytes(data.as_slice().into()),
+        }
+    }
+}
+fn read_capture(
+    file: &mut Option<File>,
+    budget: &mut CaptureBudget,
+    output_type: OutputType,
+    mut checkpoint: impl FnMut() -> NativeResult<()>,
+) -> NativeResult<Captured> {
+    checkpoint()?;
+    budget.check(0)?;
+    let mut data = Vec::new();
+    if let Some(file) = file {
+        let expected = file.metadata().map_err(os_error)?.len();
+        budget.check(expected)?;
+        data.try_reserve_exact(
+            usize::try_from(expected).map_err(|_| bytes::resource("capture size overflow"))?,
         )
-    })
+        .map_err(|_| bytes::resource("capture allocation failed"))?;
+        file.seek(SeekFrom::Start(0)).map_err(os_error)?;
+        let mut chunk = [0; IO_CHUNK];
+        loop {
+            checkpoint()?;
+            let allowed = budget.remaining.saturating_add(1).min(chunk.len());
+            let count = file.read(&mut chunk[..allowed]).map_err(os_error)?;
+            if count == 0 {
+                break;
+            }
+            budget.consume(count)?;
+            data.try_reserve(count)
+                .map_err(|_| bytes::resource("capture allocation failed"))?;
+            data.extend_from_slice(&chunk[..count]);
+        }
+    }
+    let result = match output_type {
+        OutputType::Bytes => Captured::Bytes(data),
+        OutputType::Text => Captured::Text(String::from_utf8(data).map_err(|_| {
+            NativeError::new(
+                "EncodingError",
+                "captured process output is not valid UTF-8",
+            )
+        })?),
+    };
+    checkpoint()?;
+    Ok(result)
 }
 #[derive(Debug)]
 struct Outcome {
     exit_code: Option<i64>,
-    stdout: String,
-    stderr: String,
+    stdout: Captured,
+    stderr: Captured,
     success: bool,
     duration_ms: i64,
 }
 #[derive(Debug)]
 struct ResultObject(Arc<Outcome>);
+impl Outcome {
+    fn payload_bytes(&self) -> usize {
+        self.stdout.len().saturating_add(self.stderr.len())
+    }
+}
 impl NativeObject for ResultObject {
     fn type_name(&self) -> &str {
         "ProcessResult"
     }
+    fn payload_bytes(&self) -> usize {
+        self.0.payload_bytes()
+    }
     fn get_property(&self, name: &str) -> Result<Value, String> {
         match name {
             "exitCode" => Ok(self.0.exit_code.map_or(Value::Null, Value::Int)),
-            "stdout" => Ok(Value::String(self.0.stdout.clone())),
-            "stderr" => Ok(Value::String(self.0.stderr.clone())),
+            "stdout" => Ok(self.0.stdout.value()),
+            "stderr" => Ok(self.0.stderr.value()),
             "success" => Ok(Value::Bool(self.0.success)),
             "durationMs" => Ok(Value::Int(self.0.duration_ms)),
             _ => Err(format!("unknown ProcessResult property {name}")),
@@ -394,6 +557,16 @@ impl NativeObject for ProcessHandle {
     fn type_name(&self) -> &str {
         "ProcessHandle"
     }
+    fn payload_bytes(&self) -> usize {
+        self.shared
+            .result
+            .lock()
+            .map(|result| match result.as_ref() {
+                Some(Ok(outcome)) => outcome.payload_bytes(),
+                _ => 0,
+            })
+            .unwrap_or(usize::MAX)
+    }
     fn get_property(&self, name: &str) -> Result<Value, String> {
         match name {
             "pid" => Ok(Value::Int(i64::from(self.pid))),
@@ -420,18 +593,14 @@ fn monitor(
                 return Err(NativeError::new("Interrupted", "execution interrupted"));
             }
             check_size(&stdout, &stderr, options.limit)?;
+            value_budget(
+                options.value_limit,
+                captured_size(&stdout)?.saturating_add(captured_size(&stderr)?),
+            )?;
             if shared.kill.load(Ordering::Relaxed) {
                 break;
             }
-            if options
-                .timeout
-                .is_some_and(|timeout| start.elapsed() >= timeout)
-            {
-                return Err(NativeError::new(
-                    "TimeoutError",
-                    "process exceeded configured timeout",
-                ));
-            }
+            execution_checkpoint(cancellation, start, options.timeout)?;
             if child
                 .child()?
                 .inner_mut()
@@ -457,12 +626,20 @@ fn monitor(
     }
     let status = cleanup?;
     check_size(&stdout, &stderr, options.limit)?;
-    let mut remaining = options.limit;
+    let mut budget = CaptureBudget {
+        remaining: options.limit,
+        used: 0,
+        value_limit: options.value_limit,
+    };
     Ok(Arc::new(Outcome {
         exit_code: status.code().map(i64::from),
         success: status.success(),
-        stdout: read_capture(&mut stdout, &mut remaining)?,
-        stderr: read_capture(&mut stderr, &mut remaining)?,
+        stdout: read_capture(&mut stdout, &mut budget, options.output_type, || {
+            execution_checkpoint(cancellation, start, options.timeout)
+        })?,
+        stderr: read_capture(&mut stderr, &mut budget, options.output_type, || {
+            execution_checkpoint(cancellation, start, options.timeout)
+        })?,
         duration_ms: i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX),
     }))
 }
@@ -471,6 +648,7 @@ fn launch(
     command: &str,
     args: &[String],
     options: Options,
+    input: Option<&[u8]>,
     shell: bool,
 ) -> NativeResult<ProcessHandle> {
     if command.is_empty() || command.contains('\0') || args.iter().any(|value| value.contains('\0'))
@@ -514,6 +692,18 @@ fn launch(
     if matches!(options.stderr, Stream::Inherit) {
         context.error.flush()?;
     }
+    bytes::payload(context, 0)?;
+    let start = Instant::now();
+    let stdin = if let Some(input) = input {
+        bytes::payload(context, input.len())?;
+        stage_input(input, || {
+            execution_checkpoint(context.cancellation.as_deref(), start, options.timeout)
+        })?
+    } else if options.stdin_inherit {
+        Stdio::inherit()
+    } else {
+        Stdio::null()
+    };
     let mut builder = Command::new(executable);
     #[cfg(windows)]
     if shell {
@@ -536,16 +726,11 @@ fn launch(
         .current_dir(&options.cwd)
         .env_clear()
         .envs(&options.environment)
-        .stdin(if options.stdin_inherit {
-            Stdio::inherit()
-        } else {
-            Stdio::null()
-        });
+        .stdin(stdin);
     let (out, stdout) = capture(options.stdout)?;
     let (err, stderr) = capture(options.stderr)?;
     builder.stdout(out).stderr(err);
-    context.check_cancelled()?;
-    let start = Instant::now();
+    execution_checkpoint(context.cancellation.as_deref(), start, options.timeout)?;
     let mut wrapped = StdCommandWrap::from(builder);
     wrapped.wrap(SetupCleanup);
     #[cfg(unix)]
@@ -651,8 +836,15 @@ pub fn register(runtime: &mut Runtime, config: ProcessConfig) -> NativeResult<()
                         };
                         (command.clone(), arguments, values.get(2))
                     };
-                    let options = options(context, options_value, &config)?;
-                    let child = launch(context, &command, &arguments, options, method == "shell")?;
+                    let (options, input) = options(context, options_value, &config)?;
+                    let child = launch(
+                        context,
+                        &command,
+                        &arguments,
+                        options,
+                        input,
+                        method == "shell",
+                    )?;
                     if method == "spawn" {
                         Ok(Value::NativeObject(Rc::new(child)))
                     } else {
@@ -727,6 +919,147 @@ pub fn register(runtime: &mut Runtime, config: ProcessConfig) -> NativeResult<()
 #[cfg(test)]
 mod setup_tests {
     use super::*;
+
+    #[test]
+    fn staged_input_cancellation_covers_creation_chunks_and_completion() {
+        let input = vec![0xff; IO_CHUNK * 2 + 1];
+        for stop in 0..5 {
+            let mut calls = 0;
+            let result = stage_input(&input, || {
+                let current = calls;
+                calls += 1;
+                if current == stop {
+                    Err(NativeError::new("Interrupted", "execution interrupted"))
+                } else {
+                    Ok(())
+                }
+            });
+            assert_eq!(result.unwrap_err().kind, "Interrupted");
+            assert_eq!(calls, stop + 1);
+        }
+        let flag = AtomicBool::new(true);
+        let start = Instant::now();
+        assert_eq!(
+            execution_checkpoint(Some(&flag), start, Some(Duration::ZERO))
+                .unwrap_err()
+                .kind,
+            "Interrupted"
+        );
+        assert_eq!(
+            stage_input(b"", || execution_checkpoint(
+                None,
+                start,
+                Some(Duration::ZERO)
+            ))
+            .unwrap_err()
+            .kind,
+            "TimeoutError"
+        );
+    }
+
+    #[test]
+    fn capture_preflights_combined_exact_limits_and_typed_empty_outputs() {
+        for output_type in [OutputType::Text, OutputType::Bytes] {
+            let mut first = tempfile::tempfile().unwrap();
+            first.write_all(b"ab").unwrap();
+            let mut second = tempfile::tempfile().unwrap();
+            second.write_all(b"cd").unwrap();
+            let mut first = Some(first);
+            let mut second = Some(second);
+            let mut budget = CaptureBudget {
+                remaining: 4,
+                used: 0,
+                value_limit: Some(size_of::<Value>() + 4),
+            };
+            assert_eq!(
+                read_capture(&mut first, &mut budget, output_type, || Ok(()))
+                    .unwrap()
+                    .len(),
+                2
+            );
+            assert_eq!(
+                read_capture(&mut second, &mut budget, output_type, || Ok(()))
+                    .unwrap()
+                    .len(),
+                2
+            );
+            assert_eq!(budget.used, 4);
+            assert_eq!(budget.remaining, 0);
+            let expected = match output_type {
+                OutputType::Text => Value::String(String::new()),
+                OutputType::Bytes => Value::Bytes(Vec::<u8>::new().into()),
+            };
+            assert_eq!(
+                read_capture(&mut None, &mut budget, output_type, || Ok(()))
+                    .unwrap()
+                    .value(),
+                expected
+            );
+            let mut budget = CaptureBudget {
+                remaining: 3,
+                used: 2,
+                value_limit: Some(size_of::<Value>() + 3),
+            };
+            assert_eq!(
+                read_capture(&mut second, &mut budget, output_type, || Ok(()))
+                    .unwrap_err()
+                    .kind,
+                "ResourceLimitError"
+            );
+            assert_eq!(budget.used, 2);
+            let mut budget = CaptureBudget {
+                remaining: 1,
+                used: 2,
+                value_limit: None,
+            };
+            assert_eq!(
+                read_capture(&mut second, &mut budget, output_type, || Ok(()))
+                    .unwrap_err()
+                    .kind,
+                "OutputLimitError"
+            );
+            assert_eq!(budget.used, 2);
+        }
+        assert_eq!(
+            value_budget(Some(size_of::<Value>() - 1), 0)
+                .unwrap_err()
+                .kind,
+            "ResourceLimitError"
+        );
+        assert_eq!(
+            value_budget(None, u64::MAX).unwrap_err().kind,
+            "ResourceLimitError"
+        );
+    }
+
+    #[test]
+    fn capture_collection_remains_cancellable_after_child_cleanup() {
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(&vec![0xff; IO_CHUNK * 2 + 1]).unwrap();
+        let mut file = Some(file);
+        // Entry, three reads, EOF probe, completion.
+        for stop in 0..6 {
+            let mut calls = 0;
+            let mut budget = CaptureBudget {
+                remaining: IO_CHUNK * 2 + 1,
+                used: 0,
+                value_limit: None,
+            };
+            let error = read_capture(&mut file, &mut budget, OutputType::Bytes, || {
+                let current = calls;
+                calls += 1;
+                if current == stop {
+                    Err(NativeError::new("Interrupted", "execution interrupted"))
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap_err();
+            assert_eq!(error.kind, "Interrupted");
+            assert_eq!(calls, stop + 1);
+        }
+    }
+
     #[derive(Debug)]
     struct FailSetup(Arc<std::sync::atomic::AtomicU32>);
     impl StdCommandWrapper for FailSetup {

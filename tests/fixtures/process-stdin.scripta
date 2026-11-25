@@ -1,0 +1,5 @@
+// A controlled text reader for the binary-capture example's CLI tests.
+$line = Cli::readLine();
+if ($line !== null) {
+    echo $line;
+}
