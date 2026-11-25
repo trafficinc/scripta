@@ -183,5 +183,5 @@ PostgreSQL tests cover typing, binding, cursors, limits, cancellation, TLS and
 authentication failures, aborted transactions, DDL rollback, two-session IDs,
 trigger sequences, and suppression of an actual successful COMMIT acknowledgement.
 Normal cargo test runs deliberately leave live-server tests ignored; an ignored
-test is not a passing native validation receipt. See the temporary review record
-for the local checks performed; release-platform evidence remains separate.
+test is not a passing native validation receipt. Release-platform evidence remains
+separate from these development checks.

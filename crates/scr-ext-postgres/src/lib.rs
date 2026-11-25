@@ -1,5 +1,5 @@
 //! Verified-TLS PostgreSQL connections for the shared Db API.
-//! Native execution, typed fetching and transactions; optional CLI mysql feature.
+//! Native execution, typed fetching and transactions; optional CLI postgres feature.
 mod decode;
 mod protocol;
 mod settings;

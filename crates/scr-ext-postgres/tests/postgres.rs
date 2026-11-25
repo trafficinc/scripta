@@ -405,6 +405,11 @@ fn lost_commit_acknowledgement_is_never_replayed() {
     );
     fails(&mut r, "$destination=Db::commit($proxied);", "DbError");
     value(&r, "destination", Value::String("preserved".into()));
+    run(
+        &mut r,
+        "$info=Db::errorInfo($proxied);$category=$info['category'];",
+    );
+    value(&r, "category", Value::String("connection".into()));
     fails(&mut r, "Db::execute($write,[2]);", "DbStateError");
     run(
         &mut r,

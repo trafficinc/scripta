@@ -21,7 +21,11 @@ pub(crate) fn failure(kind: &str, message: &str, fatal: bool) -> Failure {
     Failure {
         error: NativeError::new(kind, message),
         fatal,
-        details: None,
+        details: (fatal && kind == "DbError").then_some(scr_db::ErrorDetails {
+            category: scr_db::ErrorCategory::Connection,
+            sql_state: None,
+            driver_code: None,
+        }),
     }
 }
 pub(crate) struct Limits {

@@ -136,6 +136,8 @@ pub trait Connection: fmt::Debug {
             "row counts are not supported",
         ))
     }
+    /// Backends with sequence lookups must use the supplied context for bounded
+    /// network I/O and permissions; local metadata implementations may ignore it.
     fn last_insert_id(
         &mut self,
         _context: &mut RuntimeContext<'_>,
