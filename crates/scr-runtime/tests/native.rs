@@ -435,3 +435,56 @@ fn registry_signature_metadata_is_available_to_hosts() {
     let error = NativeError::type_error("bad argument");
     assert_eq!(error.to_string(), "TypeError: bad argument");
 }
+
+#[test]
+fn composed_module_policies_preserve_order_and_stop_at_the_first_denial() {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let base_deny = Rc::new(Cell::new(true));
+    let added_deny = Rc::new(Cell::new(true));
+    let mut runtime = Runtime::new();
+    let observed = seen.clone();
+    let deny = base_deny.clone();
+    runtime.set_module_policy(move |_| {
+        observed.borrow_mut().push("filesystem");
+        if deny.get() {
+            Err(NativeError::new(
+                "PermissionError",
+                "host filesystem boundary",
+            ))
+        } else {
+            Ok(())
+        }
+    });
+    let observed = seen.clone();
+    let deny = added_deny.clone();
+    runtime.add_module_policy(move |_| {
+        observed.borrow_mut().push("watch");
+        if deny.get() {
+            Err(NativeError::new("ModuleError", "watch boundary"))
+        } else {
+            Ok(())
+        }
+    });
+    let observed = seen.clone();
+    runtime.add_module_policy(move |_| {
+        observed.borrow_mut().push("package");
+        Err(NativeError::new(
+            "PackageError",
+            "native extension unavailable",
+        ))
+    });
+    let source = "require 'policy-denies-before-any-file-read.scripta';";
+    let error = runtime.execute_source(source, &mut Vec::new()).unwrap_err();
+    assert!(error.message.starts_with("PermissionError"));
+    assert_eq!(*seen.borrow(), ["filesystem"]);
+    seen.borrow_mut().clear();
+    base_deny.set(false);
+    let error = runtime.execute_source(source, &mut Vec::new()).unwrap_err();
+    assert!(error.message.contains("watch boundary"));
+    assert_eq!(*seen.borrow(), ["filesystem", "watch"]);
+    seen.borrow_mut().clear();
+    added_deny.set(false);
+    let error = runtime.execute_source(source, &mut Vec::new()).unwrap_err();
+    assert!(error.message.starts_with("PackageError"));
+    assert_eq!(*seen.borrow(), ["filesystem", "watch", "package"]);
+}

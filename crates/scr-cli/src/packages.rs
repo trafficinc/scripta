@@ -10,6 +10,7 @@ use std::process::Command;
 
 mod commands;
 mod index;
+mod requirements;
 
 const MANIFEST: &str = "scripta.toml";
 const LOCK: &str = "scripta.lock";
@@ -26,6 +27,8 @@ struct Manifest {
     package: Option<Package>,
     #[serde(skip_serializing_if = "Option::is_none")]
     registry: Option<Registry>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    extensions: BTreeMap<String, requirements::Requirement>,
     #[serde(default)]
     dependencies: BTreeMap<String, Dependency>,
 }
@@ -106,6 +109,7 @@ fn read_manifest(root: &Path) -> Result<Manifest> {
     let path = root.join(MANIFEST);
     let manifest: Manifest = toml::from_str(&fs::read_to_string(&path)?)
         .map_err(|e| fail(format!("{}: {e}", path.display())))?;
+    requirements::validate(&manifest)?;
     if let Some(config) = &manifest.test {
         config.validate().map_err(fail)?;
     }
@@ -239,6 +243,14 @@ fn windows_git_path(path: &str) -> String {
 
 /// Package subcommands receive native OS arguments; manifest strings must be UTF-8.
 pub fn execute(args: &[std::ffi::OsString], cwd: &Path) -> Result<String> {
+    execute_with_extensions(args, cwd, &crate::extensions::compiled())
+}
+/// Package commands for an embedding host's actual registered extension catalog.
+pub fn execute_with_extensions(
+    args: &[std::ffi::OsString],
+    cwd: &Path,
+    extensions: &[crate::extensions::ExtensionInfo],
+) -> Result<String> {
     let args: Vec<&str> = args
         .iter()
         .map(|s| {
@@ -312,11 +324,14 @@ pub fn execute(args: &[std::ffi::OsString], cwd: &Path) -> Result<String> {
             install(
                 &root,
                 &manifest,
-                update,
-                rest.contains(&"--locked"),
-                rest.contains(&"--offline"),
-                None,
-                false,
+                InstallOptions {
+                    update,
+                    locked: rest.contains(&"--locked"),
+                    offline: rest.contains(&"--offline"),
+                    new_manifest: None,
+                    reuse_installed: false,
+                    extensions,
+                },
             )?;
             Ok("Installed dependencies".into())
         }
@@ -358,6 +373,7 @@ pub fn execute(args: &[std::ffi::OsString], cwd: &Path) -> Result<String> {
             }
             let root = project(cwd)?;
             let mut manifest = read_manifest(&root)?;
+            requirements::check(&manifest, extensions)?;
             if dep.path.is_none() && dep.git.is_none() {
                 let catalog = index::load(
                     cwd,
@@ -390,7 +406,18 @@ pub fn execute(args: &[std::ffi::OsString], cwd: &Path) -> Result<String> {
             let validation = tempfile::tempdir()?;
             fs::write(validation.path().join(MANIFEST), &text)?;
             read_manifest(validation.path())?;
-            install(&root, &manifest, false, false, offline, Some(text), false)?;
+            install(
+                &root,
+                &manifest,
+                InstallOptions {
+                    update: false,
+                    locked: false,
+                    offline,
+                    new_manifest: Some(text),
+                    reuse_installed: false,
+                    extensions,
+                },
+            )?;
             Ok(format!("Added {name} and installed dependencies"))
         }
         ["remove", name] => commands::remove(cwd, name),
@@ -415,16 +442,30 @@ struct Installer {
     reuse_installed: bool,
     active: HashSet<String>,
     count: usize,
+    extensions: Vec<crate::extensions::ExtensionInfo>,
 }
-fn install(
-    root: &Path,
-    manifest: &Manifest,
+struct InstallOptions<'a> {
     update: bool,
     locked: bool,
     offline: bool,
     new_manifest: Option<String>,
     reuse_installed: bool,
-) -> Result<()> {
+    extensions: &'a [crate::extensions::ExtensionInfo],
+}
+fn install(root: &Path, manifest: &Manifest, options: InstallOptions<'_>) -> Result<()> {
+    let InstallOptions {
+        update,
+        locked,
+        offline,
+        new_manifest,
+        reuse_installed,
+        extensions,
+    } = options;
+    // Remove only reuses verified snapshots, so it can repair an incompatible
+    // project on this host without requiring the removed native extension.
+    if !reuse_installed {
+        requirements::check(manifest, extensions)?;
+    }
     let guard_path = root.join(".scripta-install.lock");
     fs::OpenOptions::new()
         .write(true)
@@ -458,6 +499,7 @@ fn install(
         reuse_installed,
         active: HashSet::new(),
         count: 0,
+        extensions: extensions.to_vec(),
     };
     let packages = installer.dependencies(
         root,
@@ -671,10 +713,22 @@ impl Installer {
                     return Err(fail(format!("{name}: invalid transitive lock entries")));
                 }
             }
+            if !self.reuse_installed {
+                requirements::check(&package_manifest, &self.extensions)?;
+            }
             copy_tree(&source, &destination)?;
             if checksum(&destination)? != digest {
                 return Err(fail(format!(
                     "{name}: source changed during installation; retry"
+                )));
+            }
+            // Requirements must describe the snapshot actually being installed,
+            // not a manifest that changed between metadata parsing and hashing.
+            if toml::to_string(&read_manifest(&destination)?)?
+                != toml::to_string(&package_manifest)?
+            {
+                return Err(fail(format!(
+                    "{name}: manifest changed during installation; retry"
                 )));
             }
             if !destination.join(&package.entry).is_file() {
@@ -737,13 +791,21 @@ fn git(root: Option<&Path>, args: &[&str]) -> Result<String> {
 // Deterministic content identity, independent of timestamps, file modes and host
 // path separators. Links and special files are rejected rather than followed.
 fn files(root: &Path) -> Result<Vec<(String, PathBuf)>> {
+    files_checked(root, &mut || Ok(()))
+}
+fn files_checked(
+    root: &Path,
+    probe: &mut dyn FnMut() -> Result<()>,
+) -> Result<Vec<(String, PathBuf)>> {
     fn visit(
         root: &Path,
         at: &Path,
         out: &mut Vec<(String, PathBuf)>,
         bytes: &mut u64,
+        probe: &mut dyn FnMut() -> Result<()>,
     ) -> Result<()> {
         for entry in fs::read_dir(at)? {
+            probe()?;
             let entry = entry?;
             let name = entry.file_name();
             if name.to_str().is_none_or(|s| s.contains('\\')) {
@@ -766,7 +828,7 @@ fn files(root: &Path) -> Result<Vec<(String, PathBuf)>> {
                 if entry.path().strip_prefix(root)?.components().count() > 64 {
                     return Err(fail("package directory depth exceeds 64 levels"));
                 }
-                visit(root, &entry.path(), out, bytes)?;
+                visit(root, &entry.path(), out, bytes, probe)?;
             } else if kind.is_file() {
                 *bytes = bytes
                     .checked_add(entry.metadata()?.len())
@@ -788,18 +850,25 @@ fn files(root: &Path) -> Result<Vec<(String, PathBuf)>> {
         Ok(())
     }
     let mut out = Vec::new();
-    visit(root, root, &mut out, &mut 0)?;
+    visit(root, root, &mut out, &mut 0, probe)?;
     out.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(out)
 }
 fn checksum(root: &Path) -> Result<String> {
+    checksum_checked(root, &mut || Ok(()))
+}
+fn checksum_checked(root: &Path, probe: &mut dyn FnMut() -> Result<()>) -> Result<String> {
     let mut hash = Sha256::new();
-    for (name, path) in files(root)? {
+    for (name, path) in files_checked(root, probe)? {
+        probe()?;
         let bytes = fs::read(path)?;
         hash.update((name.len() as u64).to_le_bytes());
         hash.update(name.as_bytes());
         hash.update((bytes.len() as u64).to_le_bytes());
-        hash.update(&bytes);
+        for chunk in bytes.chunks(64 * 1024) {
+            probe()?;
+            hash.update(chunk);
+        }
     }
     Ok(format!("{:x}", hash.finalize()))
 }
@@ -816,6 +885,22 @@ fn copy_tree(source: &Path, dest: &Path) -> Result<()> {
 /// Resolve a bare package name from the nearest manifest. Direct dependencies
 /// are private to that manifest, preventing accidental access to a parent's deps.
 pub fn resolve(base: &Path, name: &str) -> Result<Option<PathBuf>> {
+    resolve_with_extensions(base, name, &crate::extensions::compiled())
+}
+/// Resolve using the metadata of the embedding host's actual registered extensions.
+pub fn resolve_with_extensions(
+    base: &Path,
+    name: &str,
+    extensions: &[crate::extensions::ExtensionInfo],
+) -> Result<Option<PathBuf>> {
+    resolve_checked(base, name, extensions, &mut || Ok(()))
+}
+fn resolve_checked(
+    base: &Path,
+    name: &str,
+    extensions: &[crate::extensions::ExtensionInfo],
+    probe: &mut dyn FnMut() -> Result<()>,
+) -> Result<Option<PathBuf>> {
     if !valid_name(name) {
         return Ok(None);
     }
@@ -823,6 +908,7 @@ pub fn resolve(base: &Path, name: &str) -> Result<Option<PathBuf>> {
         Ok(root) => root,
         Err(_) => return Ok(None),
     };
+    check_execution_checked(&root, extensions, probe)?;
     let manifest = read_manifest(&root)?;
     if !manifest.dependencies.contains_key(name) {
         return Ok(None);
@@ -847,6 +933,157 @@ pub fn resolve(base: &Path, name: &str) -> Result<Option<PathBuf>> {
         return Err(fail("package entry escapes package directory"));
     }
     Ok(Some(entry))
+}
+
+/// Validate native requirements before executing a project. No Git, package
+/// mutation, network or database work is performed. Standalone scripts are allowed.
+pub fn check_execution(start: &Path) -> Result<()> {
+    check_execution_with_extensions(start, &crate::extensions::compiled())
+}
+/// Hosts with a custom registration use the same metadata as their registration.
+pub fn check_execution_with_extensions(
+    start: &Path,
+    extensions: &[crate::extensions::ExtensionInfo],
+) -> Result<()> {
+    check_execution_checked(start, extensions, &mut || Ok(()))
+}
+fn check_execution_checked(
+    start: &Path,
+    extensions: &[crate::extensions::ExtensionInfo],
+    probe: &mut dyn FnMut() -> Result<()>,
+) -> Result<()> {
+    probe()?;
+    let Some(root) = start.ancestors().find(|path| path.join(MANIFEST).is_file()) else {
+        return Ok(());
+    };
+    let root = fs::canonicalize(root)?;
+    let mut top = root.clone();
+    // Entry paths inside a private installation still use the outer authoritative lock.
+    for depth in 0..=32 {
+        let Some(store) = installed_store(&top) else {
+            break;
+        };
+        if depth == 32 {
+            return Err(fail("installed dependency depth exceeded"));
+        }
+        top = store
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| fail("invalid package layout"))?
+            .to_owned();
+    }
+    let manifest = read_manifest(&top)?;
+    requirements::check(&manifest, extensions)?;
+    let packages = match read_lock(&top)? {
+        Some(lock) if lock_matches(&manifest, &lock.packages) => lock.packages,
+        None if manifest.dependencies.is_empty() => BTreeMap::new(),
+        _ => {
+            return Err(fail(
+                "scripta.lock is missing or out of date; run 'scripta install'",
+            ));
+        }
+    };
+    check_installed_tree(&top, &manifest, &packages, extensions, 0, &mut 0, probe)?;
+    if root != top {
+        requirements::check(&read_manifest(&root)?, extensions)?;
+    }
+    Ok(())
+}
+fn installed_store(root: &Path) -> Option<&Path> {
+    root.ancestors().skip(1).find(|p| {
+        p.file_name().is_some_and(|n| n == "packages")
+            && p.parent()
+                .is_some_and(|p| p.file_name().is_some_and(|n| n == ".scripta"))
+    })
+}
+fn check_installed_tree(
+    root: &Path,
+    manifest: &Manifest,
+    packages: &BTreeMap<String, Locked>,
+    extensions: &[crate::extensions::ExtensionInfo],
+    depth: usize,
+    count: &mut usize,
+    probe: &mut dyn FnMut() -> Result<()>,
+) -> Result<()> {
+    if depth > 32 || !lock_matches(manifest, packages) {
+        return Err(fail(
+            "invalid or oversized installed dependency graph; run 'scripta install'",
+        ));
+    }
+    for (name, pin) in packages {
+        probe()?;
+        *count += 1;
+        if *count > 256 || !valid_name(name) {
+            return Err(fail("invalid or oversized installed dependency graph"));
+        }
+        let directory = package_directory(&root.join(STORE), name);
+        if checksum_checked(&directory, probe)
+            .map_err(|_| fail(format!("{name} is not installed; run 'scripta install'")))?
+            != pin.checksum
+        {
+            return Err(fail(format!(
+                "{name}: installed checksum mismatch; run 'scripta install'"
+            )));
+        }
+        let child = read_manifest(&directory)?;
+        let package = child
+            .package
+            .as_ref()
+            .ok_or_else(|| fail("installed package has no [package] section"))?;
+        if package.name != *name || package.version != pin.version {
+            return Err(fail(format!(
+                "{name}: installed package metadata differs from its lock entry"
+            )));
+        }
+        requirements::check(&child, extensions)?;
+        check_installed_tree(
+            &directory,
+            &child,
+            &pin.dependencies,
+            extensions,
+            depth + 1,
+            count,
+            probe,
+        )?;
+    }
+    Ok(())
+}
+
+type Cancellation = Option<std::sync::Arc<std::sync::atomic::AtomicBool>>;
+fn cancelled(flag: &Cancellation) -> bool {
+    flag.as_ref()
+        .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+}
+fn probe(flag: &Cancellation) -> Result<()> {
+    if cancelled(flag) {
+        Err(fail("package validation interrupted"))
+    } else {
+        Ok(())
+    }
+}
+fn native_error(
+    error: Box<dyn std::error::Error>,
+    flag: &Cancellation,
+) -> scr_runtime::NativeError {
+    if cancelled(flag) {
+        scr_runtime::NativeError::new("Interrupted", "package validation interrupted")
+    } else {
+        scr_runtime::NativeError::new("PackageError", error.to_string())
+    }
+}
+pub(crate) fn preflight(start: &Path, flag: &Cancellation) -> scr_runtime::NativeResult<()> {
+    check_execution_checked(start, &crate::extensions::compiled(), &mut || probe(flag))
+        .map_err(|e| native_error(e, flag))
+}
+pub(crate) fn resolve_for_runtime(
+    base: &Path,
+    name: &str,
+    flag: &Cancellation,
+) -> scr_runtime::NativeResult<Option<PathBuf>> {
+    resolve_checked(base, name, &crate::extensions::compiled(), &mut || {
+        probe(flag)
+    })
+    .map_err(|e| native_error(e, flag))
 }
 
 // Walk the private installation layout back to the project's authoritative
@@ -896,6 +1133,38 @@ fn installed_dependencies(root: &Path, depth: usize) -> Result<BTreeMap<String, 
 mod tests {
     use super::windows_git_path;
 
+    #[test]
+    fn compatibility_preflight_and_snapshot_hashing_check_cancellation() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("payload"), vec![b'x'; 256 * 1024]).unwrap();
+        let flag = Some(Arc::new(AtomicBool::new(false)));
+        let mut count = 0;
+        let error = super::checksum_checked(directory.path(), &mut || {
+            count += 1;
+            if count == 4 {
+                flag.as_ref().unwrap().store(true, Ordering::Relaxed);
+            }
+            super::probe(&flag)
+        })
+        .unwrap_err();
+        assert_eq!(super::native_error(error, &flag).kind, "Interrupted");
+        let mut output = Vec::new();
+        let error = crate::pipeline::run_with_options(
+            "echo 'must not run';",
+            &mut output,
+            scr_runtime::RuntimeOptions {
+                interrupt_flag: flag,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.message.starts_with("Interrupted"));
+        assert!(output.is_empty());
+    }
     #[test]
     fn git_paths_preserve_windows_drives_and_unc_shares() {
         for (path, expected) in [

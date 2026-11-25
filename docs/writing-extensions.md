@@ -357,7 +357,15 @@ the interpreter. Document which extensions each binary includes; the current CLI
 reports built-in extensions in `scripta version --verbose`. Scripts using an unavailable
 extension fail when they call its native functions. The shared Db namespace remains
 registered without drivers to report DbUnsupportedError and an actionable build
-or registration hint.
+or registration hint. Packages may declare API/capability requirements in
+[extensions](packages.md#native-extension-requirements); the installer and runtime
+compare them with registered descriptor metadata. Publish truthful connector API
+versions and capability names rather than client dependency/server versions.
+
+For additional module restrictions after standard-library registration, use
+Runtime::add_module_policy. Runtime::set_module_policy intentionally replaces the
+existing policy. Custom embedding package catalogs must describe the extensions
+actually registered in that runtime; package declarations cannot grant capabilities.
 
 Built-in extension crates can live in this repository or in separate repositories
 referenced through Cargo. Pin external sources in Cargo.lock and build against a

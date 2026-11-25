@@ -33,6 +33,14 @@ The shared layer retains bounded error snapshots independently of backend lifeti
 MySQL supplies sanitized structured codes without a runtime-wide error redesign. SQLite
 remains default-enabled and exposes its independent Sqlite namespace.
 
+Package add/install/update checks optional `[extensions]` API/capability requirements
+against the same registered extension metadata. Execution preflights the installed
+graph before initialization and revalidates module loads. Lock format 1 remains
+host-independent; native libraries are never downloaded or compiled by package
+installation. `Runtime::add_module_policy` composes filesystem, watch and package
+restrictions without replacing earlier checks. Web watch workers retain the
+original entry path for project validation alongside the source snapshot boundary.
+
 ## Parsing and diagnostics
 
 The parser uses recursive descent for statements and Pratt parsing for

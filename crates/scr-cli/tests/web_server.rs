@@ -3067,3 +3067,25 @@ try { $s=Db::prepare($db,"SELECT ? AS n"); Db::execute($s,[42]); echo str(Db::fe
         assert_eq!(body, b"42");
     }
 }
+
+#[test]
+fn package_requirements_are_revalidated_on_web_requests_including_watch_snapshots() {
+    for options in [&[][..], &["--watch"][..]] {
+        let server = Server::start("File::write('request-ran','yes'); echo 'ok';", options);
+        assert_eq!(server.request("GET", "/", b"", "text/plain").0, 200);
+        let marker = server.directory.path().join("request-ran");
+        assert!(marker.exists());
+        std::fs::remove_file(&marker).unwrap();
+        std::fs::write(
+            server.directory.path().join("scripta.toml"),
+            "[extensions]\nmissingconnector={version='1'}\n",
+        )
+        .unwrap();
+        let (status, _, body) = server.request("GET", "/", b"", "text/plain");
+        assert_ne!(status, 200, "{}", String::from_utf8_lossy(&body));
+        assert!(
+            !marker.exists(),
+            "incompatible request initialized the script"
+        );
+    }
+}

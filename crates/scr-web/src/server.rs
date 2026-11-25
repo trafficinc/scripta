@@ -48,6 +48,9 @@ pub struct Config {
     pub watch: bool,
     pub watch_debounce: Duration,
     pub(crate) generation: Option<Arc<crate::dev::Snapshot>>,
+    // Keep host configuration checks anchored to the original entry when watch
+    // generations replace path with an immutable source snapshot.
+    original_entry: PathBuf,
     pub queue: usize,
     pub max_connections: usize,
     pub max_body_bytes: usize,
@@ -66,6 +69,7 @@ pub struct Config {
 impl Config {
     pub fn new(path: PathBuf, source: String) -> Self {
         Self {
+            original_entry: path.clone(),
             path,
             source: Arc::new(source),
             host: IpAddr::from([127, 0, 0, 1]),
@@ -251,6 +255,7 @@ impl Worker {
             .arg(config.sessions.max_bytes.to_string())
             .arg(config.sessions.secure.to_string())
             .arg(&config.uploads.directory)
+            .arg(&config.original_entry)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

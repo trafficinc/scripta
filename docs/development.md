@@ -49,6 +49,16 @@ discovery](database-connectors.md#building-and-identifying-mysql-support). Check
 test and web workers share registration in crates/scr-cli/src/extensions.rs.
 Add runnable examples and focused tests when behavior changes.
 
+Native package requirements are covered by `crates/scr-cli/tests/package_extensions.rs`
+and the manifest validator's unit tests. Test default, no-default-feature, MySQL-only
+and all-feature builds. The explicit cross-binary test requires a MySQL-enabled
+executable in SCR_EXTENSION_COMPATIBLE_BINARY and a minimal executable in
+SCR_EXTENSION_INCOMPATIBLE_BINARY; run the ignored
+native_requirements_are_revalidated_when_an_installed_project_moves_to_another_binary
+test after building those variants. It uses disposable local projects, not a
+running database. Never count that test as passed merely because a normal run
+ignored it. See [package requirements](packages.md#native-extension-requirements).
+
 ## Local disk cleanup
 
 From the workspace root, preview removable build outputs and Python caches:

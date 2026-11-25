@@ -19,9 +19,20 @@ impl Runtime {
     ) {
         self.module_resolver = Some(Rc::new(resolver));
     }
-    /// Additional host path restriction. filesystem.read is always required.
+    /// Replace the host path restriction. filesystem.read is always required.
     pub fn set_module_policy(&mut self, policy: impl Fn(&Path) -> NativeResult<()> + 'static) {
         self.module_policy = Some(Rc::new(policy));
+    }
+    /// Compose a restriction after the current module policy. Earlier rejection
+    /// stops later policies, preserving filesystem and host path boundaries.
+    pub fn add_module_policy(&mut self, policy: impl Fn(&Path) -> NativeResult<()> + 'static) {
+        let previous = self.module_policy.take();
+        self.module_policy = Some(Rc::new(move |path| {
+            if let Some(previous) = &previous {
+                previous(path)?;
+            }
+            policy(path)
+        }));
     }
     /// Parse and execute with retained source text for module/function diagnostics.
     /// The entry filename comes from ContextOptions.script_path, if supplied.

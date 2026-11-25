@@ -118,6 +118,8 @@ requests behind a reverse proxy.
   Source builds can opt into the [MySQL connector](docs/database-connectors.md)
   with `--features mysql`; verbose version output lists connector versions and capabilities.
   The [MySQL example](examples/mysql.scripta) uses environment credentials and verified TLS.
+  Packages can declare [native API/capability requirements](docs/packages.md#native-extension-requirements)
+  checked during installation and execution.
 
 Scripta is dynamically typed with strict operations and explicit conversions.
 Its syntax is inspired by PHP; the [language specification](docs/language-spec.md)

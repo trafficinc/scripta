@@ -50,6 +50,8 @@ fn run(request_path: &Path, path: &Path, directory: &Path) -> Result<WorkerResul
     let limits = crate::entry::limits()?;
     let source =
         crate::entry::read_source(path, limits.max_source_bytes).map_err(|e| e.to_string())?;
+    crate::packages::check_execution(path.parent().unwrap_or(directory))
+        .map_err(|e| e.to_string())?;
     let mut runtime = Runtime::with_options(RuntimeOptions {
         context: ContextOptions {
             script_path: Some(path.to_owned()),
@@ -65,6 +67,10 @@ fn run(request_path: &Path, path: &Path, directory: &Path) -> Result<WorkerResul
     });
     scr_stdlib::register(&mut runtime).map_err(|e| e.to_string())?;
     crate::extensions::register(&mut runtime).map_err(|e| e.to_string())?;
+    runtime.add_module_policy(|path| {
+        crate::packages::check_execution(path.parent().unwrap_or(path))
+            .map_err(|error| scr_runtime::NativeError::new("PackageError", error.to_string()))
+    });
     let state = Rc::new(RefCell::new(assertions::State::default()));
     assertions::register(&mut runtime, state.clone(), directory.join("tmp"))?;
     let mut output = std::io::stdout();

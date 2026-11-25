@@ -222,6 +222,85 @@ already installed package. Run `scripta update` to accept those edits. Relative 
 dependencies within a Git package must be available in that repository's checked
 out tree. Git submodules are not fetched.
 
+## Native extension requirements
+
+Applications and libraries can declare required compiled extensions in an optional
+top-level table, independently of script `[dependencies]`:
+
+```toml
+[extensions]
+mysql = { version = "^0.2", capabilities = ["prepare.native", "parameters.named", "transactions"] }
+```
+
+The expanded `[extensions.mysql]` table spelling works too. `version` is required;
+`capabilities` defaults to an empty list. Names/capabilities match the case-sensitive
+identifiers printed by `scripta version --verbose`. The version constrains the
+**connector API**, not the script package version, Rust mysql client version or
+remote MySQL/PostgreSQL server version. Standard semantic-version constraints
+such as `^0.2`, `~0.2.1`, `=0.2.1` and `>=0.2.1, <0.3` apply. Prerelease versions
+require a matching explicit prerelease constraint. Every declared capability must
+be provided; optional native requirements and native dependency downloads are not
+supported.
+
+MySQL is opt-in in source builds (`--features mysql`); SQLite remains default.
+A script library named mysql does not supply the compiled mysql connector. Use a
+compatible executable or register the connector in an embedding host. See
+[database builds and discovery](database-connectors.md#building-and-identifying-mysql-support).
+These requirements do not grant permissions or establish database connectivity,
+credentials, server-version compatibility or SQL privileges.
+
+Add/install/update check the root requirements before staging installation. Add
+checks known root requirements before catalog/Git lookup. Direct and transitive
+package requirements are checked as their source manifests are resolved, using
+the executable's actual extension descriptors. Git selection still picks the
+highest package version matching the dependency constraint; it does not silently
+fall back to an older package when native requirements fail. An unavailable
+extension, incompatible API or missing capability names the declaring package
+and points to verbose discovery or a compatible host/build. Failed installation
+preserves the previous manifest, lockfile and installed files. No script or native
+build/install hook runs to satisfy a requirement.
+
+Before initializing a project, CLI/embedding execution validates the root and
+all installed private dependency snapshots and native requirements. Declared
+dependencies must be installed with a matching lock even if this invocation would
+not load them. Local and cached module loads revalidate their applicable project;
+root initializers cannot catch a startup compatibility failure. Native test workers
+also preflight before initialization. Server startup/config checks and each fresh
+request runtime validate the original entry's project, including watch generations;
+watch includes remain confined to the immutable source snapshot. `scripta check`
+still validates only source syntax/known types and does not establish native
+availability. `scripta test --list` performs discovery without native compatibility
+checks. List/outdated/search/remove remain usable to inspect or repair an
+incompatible project; remove reuses verified retained snapshots.
+
+The lockfile remains format 1, without installed connector versions or host-specific
+capabilities. Requirements live in the root manifest and in checksummed dependency
+manifests. Legacy manifests need no new table or lockfile migration. `--locked`
+freezes script dependency sources/content, not the interpreter: changing only a
+compatible root native requirement does not require a new lock. Locked/offline
+installs still enforce native requirements, including when Git/index sources are
+unavailable but verified snapshots exist. Moving an installed project to a different
+binary or native host triggers runtime revalidation; use a compatible binary there
+as well. Offline mode never bypasses a compatibility failure.
+
+Validation walks the installed graph and hashes its contents; startup and module
+loads therefore add filesystem work for declared packages. Existing graph/content
+limits apply. Embedding pipeline cancellation is checked during this traversal
+and hashing. Manifests allow at most 64 required extensions, each with at most 64
+unique capabilities. Extension names use up to 64 lowercase ASCII letters/digits,
+`_` or `-`, beginning with a letter. Capabilities use dotted ASCII identifiers,
+at most 64 bytes; version constraints are limited to 256 bytes. Unknown fields,
+malformed constraints, duplicate capabilities and incorrect TOML types are errors.
+
+Embedding hosts using a custom native registration supply its actual catalog to
+`scr_cli::packages::execute_with_extensions`, `check_execution_with_extensions`
+and `resolve_with_extensions`. The catalog uses `scr_cli::extensions::ExtensionInfo`
+from the same descriptor versions/capabilities used for registration. Default CLI
+wrappers use `scr_cli::extensions::compiled()`. Preflight before executing root
+source, then compose per-module checks **after** standard-library registration
+using `Runtime::add_module_policy`; this preserves existing filesystem restrictions.
+The runtime always checks filesystem.read before resolution/policy callbacks.
+
 ## Install and update
 
 ```sh
@@ -258,7 +337,8 @@ lockfile and raises `PackageError` for stale metadata, missing installations,
 or checksum mismatches. `scripta check` continues to check only the supplied source.
 The runtime's read permission, include-depth limits, and module path policy
 continue to apply to loading package entry scripts. Embedders opt in with
-`Runtime::set_module_resolver`; `scr_cli::pipeline` configures the package resolver.
+`Runtime::set_module_resolver` and a composed module policy; `scr_cli::pipeline`
+configures the resolver, startup compatibility preflight and module revalidation.
 Custom resolvers are host code and must enforce any host policy on their own
 metadata reads.
 

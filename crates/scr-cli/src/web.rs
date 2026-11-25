@@ -22,7 +22,7 @@ fn register(runtime: &mut scr_runtime::Runtime) -> scr_runtime::NativeResult<()>
 }
 pub(crate) fn worker(arguments: Vec<OsString>) -> ExitCode {
     let result = (|| -> Result<(), Box<dyn std::error::Error>> {
-        if !matches!(arguments.len(), 8 | 9) {
+        if !matches!(arguments.len(), 9 | 10) {
             return Err("invalid internal worker arguments".into());
         }
         let output = arguments[1]
@@ -55,10 +55,14 @@ pub(crate) fn worker(arguments: Vec<OsString>) -> ExitCode {
             sessions,
             arguments[7].clone().into(),
             |runtime| {
+                let original = PathBuf::from(&arguments[8]);
+                crate::packages::check_execution(original.parent().unwrap_or(&original)).map_err(
+                    |error| scr_runtime::NativeError::new("PackageError", error.to_string()),
+                )?;
                 register(runtime)?;
-                if let Some(root) = arguments.get(8) {
+                if let Some(root) = arguments.get(9) {
                     let root = std::fs::canonicalize(root)?;
-                    runtime.set_module_policy(move |path| {
+                    runtime.add_module_policy(move |path| {
                         let path = std::fs::canonicalize(path)?;
                         if path.starts_with(&root) {
                             Ok(())
@@ -70,6 +74,11 @@ pub(crate) fn worker(arguments: Vec<OsString>) -> ExitCode {
                         }
                     });
                 }
+                runtime.add_module_policy(|path| {
+                    crate::packages::check_execution(path.parent().unwrap_or(path)).map_err(
+                        |error| scr_runtime::NativeError::new("PackageError", error.to_string()),
+                    )
+                });
                 Ok(())
             },
         )
@@ -106,6 +115,7 @@ fn config(
     let source = crate::entry::read_source(&path, crate::entry::limits()?.max_source_bytes)?;
     let options = settings::Options::parse(arguments)?;
     let mode = options.mode;
+    crate::packages::check_execution(path.parent().unwrap_or(&path))?;
     let mut config = scr_web::Config::new(path, source);
     options.apply(&mut config)?;
     if let Err(errors) = crate::pipeline::check(&config.source) {

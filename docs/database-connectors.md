@@ -50,6 +50,11 @@ extension list, or build one from source. Existing published releases are not
 changed by this implementation; release downloads remain the four-platform SQLite
 packages with checksums and validation evidence.
 
+Script libraries can declare their required connector API version and capabilities
+in `[extensions]`; installation and execution compare those declarations with the
+actual interpreter. See [native package requirements](packages.md#native-extension-requirements).
+This does not install a connector or check database server connectivity.
+
 ## Runnable example
 
 [examples/mysql.scripta](../examples/mysql.scripta) uses environment settings

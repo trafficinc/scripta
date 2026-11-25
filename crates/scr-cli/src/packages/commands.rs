@@ -13,7 +13,18 @@ pub(super) fn remove(cwd: &Path, name: &str) -> Result<String> {
     // Reuse verified snapshots for retained packages, including local sources
     // that have moved or changed. The existing installer stages the new graph
     // and rolls back the store and lock if metadata replacement fails.
-    install(&root, &manifest, false, false, true, Some(text), true)?;
+    install(
+        &root,
+        &manifest,
+        InstallOptions {
+            update: false,
+            locked: false,
+            offline: true,
+            new_manifest: Some(text),
+            reuse_installed: true,
+            extensions: &[],
+        },
+    )?;
     Ok(format!("Removed {name}"))
 }
 

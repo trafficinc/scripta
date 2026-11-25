@@ -53,18 +53,31 @@ fn run_configured(
     options: scr_runtime::RuntimeOptions,
     input: Option<Box<dyn std::io::BufRead>>,
 ) -> Result<u8, scr_runtime::RuntimeError> {
+    let start = options
+        .context
+        .script_path
+        .as_ref()
+        .map(|path| options.context.working_directory.join(path))
+        .and_then(|path| path.parent().map(std::path::Path::to_owned))
+        .unwrap_or_else(|| options.context.working_directory.clone());
+    crate::packages::preflight(&start, &options.interrupt_flag)
+        .map_err(|error| Diagnostic::new(error.to_string(), Default::default()))?;
+    let cancellation = options.interrupt_flag.clone();
     let mut runtime = scr_runtime::Runtime::with_options(options);
     if let Some(input) = input {
         runtime.set_input_stream(input);
     }
-    runtime.set_module_resolver(|base, name| {
-        crate::packages::resolve(base, name)
-            .map_err(|error| scr_runtime::NativeError::new("PackageError", error.to_string()))
+    let resolve_cancellation = cancellation.clone();
+    runtime.set_module_resolver(move |base, name| {
+        crate::packages::resolve_for_runtime(base, name, &resolve_cancellation)
     });
     scr_stdlib::register(&mut runtime)
         .map_err(|error| Diagnostic::new(error.to_string(), Default::default()))?;
     crate::extensions::register(&mut runtime)
         .map_err(|error| Diagnostic::new(error.to_string(), Default::default()))?;
+    runtime.add_module_policy(move |path| {
+        crate::packages::preflight(path.parent().unwrap_or(path), &cancellation)
+    });
     runtime.execute_source(source, output)
 }
 

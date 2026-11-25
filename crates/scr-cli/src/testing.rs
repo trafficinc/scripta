@@ -388,6 +388,7 @@ fn run(args: Vec<OsString>) -> Result<u8, String> {
         }
         return Ok(0);
     }
+    crate::packages::check_execution(&root).map_err(|e| e.to_string())?;
     let interrupted = Arc::new(AtomicBool::new(false));
     let flag = interrupted.clone();
     ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed)).map_err(|e| e.to_string())?;
