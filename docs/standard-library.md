@@ -45,8 +45,8 @@ registered by default.
 
 ## Export index
 
-This reference covers 208 core functions and four default CLI SQLite functions
-(212 in total), plus 19 request-context Web/Session functions, native response/entry
+This reference covers 210 core functions and four default CLI SQLite functions
+(214 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -80,7 +80,7 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Hex | `Hex::encode`, `Hex::decode` | [Binary encoding](#binary-encoding) |
 | Hash | `Hash::sha256`, `Hash::hmacSha256`, `Hash::sha256Init`, `Hash::hmacSha256Init`, `Hash::update`, `Hash::finalize`, `Hash::close` | [SHA-256 and HMAC](#sha-256-and-hmac) |
 | Csv | `Csv::parse`, `Csv::encode`, `Csv::open`, `Csv::readRow`, `Csv::close` | [CSV](#csv) |
-| Regex | `Regex::isMatch`, `Regex::findAll`, `Regex::replace` | [Regex](#regex) |
+| Regex | `Regex::isMatch`, `Regex::findAll`, `Regex::replace`, `Regex::captures`, `Regex::capturesAll` | [Regex](#regex) |
 | Web (request context only) | `Web::request`, `Web::status`, `Web::header`, `Web::addHeader`, `Web::redirect`, `Web::write`, `Web::download`, `Web::cookie`, `Web::deleteCookie` | [Web requests](#web-requests) |
 | Session (request context only) | `Session::start`, `Session::id`, `Session::get`, `Session::has`, `Session::set`, `Session::remove`, `Session::all`, `Session::regenerate`, `Session::destroy`, `Session::close` | [Sessions](#sessions) |
 | Http | `Http::get`, `Http::post`, `Http::request`, `Http::download` | [HTTP](#http) |
@@ -354,16 +354,58 @@ backslash in a double-quoted Scripta string, e.g. `"\\d+"`.
 | --- | --- |
 | `Regex::isMatch(text, pattern): bool` | Whether the pattern matches anywhere in the text. Use anchors for a full-text match. |
 | `Regex::findAll(text, pattern): list` | Full matched strings in left-to-right, nonoverlapping order; empty list for no match. |
+| `Regex::captures(text: string, pattern: string): map or null` | First match with numbered/named groups and scalar positions; null for no match. |
+| `Regex::capturesAll(text: string, pattern: string): list` | Capture maps for left-to-right, nonoverlapping matches; empty list for no match. |
 | `Regex::replace(text, pattern, replacement): string` | Replaces all nonoverlapping matches with the literal replacement. `$1`, backslashes, and capture names have no special replacement meaning. |
+
+A capture map has two fields:
+
+| Field | Value |
+| --- | --- |
+| `groups` | List indexed by capture number. Index 0 is the full match; later groups follow opening-parenthesis order, including named groups. Noncapturing `(?:...)` groups have no entry. |
+| `named` | Map containing every named group in declaration order, keyed by its exact name. Each value reports the same group as its numbered entry. Empty map when there are no names. |
+
+Every participating group is a map with `text: string`, `start: int`, and
+`end: int`. Positions are zero-based Unicode scalar offsets relative to the
+entire input, with an inclusive start and exclusive end. They are suitable for
+`String::substring(text, start, end - start)`; they are not byte or grapheme
+positions. A participating empty group has empty text and equal start/end.
+An optional group that did not participate is null in both its numbered and
+named entries. Repeated groups report the last participating capture, following
+the regex engine. No numeric conversion is applied to captured text.
+
+```scripta
+$match = Regex::captures("é job-42", "job-(?P<id>[0-9]+)");
+echo $match["groups"][0]["text"] . "\n"; // job-42
+echo str($match["named"]["id"]["start"]) . "\n"; // 6
+```
+
+Capture iteration uses the same nonoverlapping/zero-width progression as
+`Regex::findAll`, including suppression of an empty match immediately following
+a nonempty match at the same end boundary. The first-match API stops after its
+first capture map. The all-match API accumulates complete maps within the value
+budget. All nested value/map-key slots, key bytes, captured UTF-8 payloads, and
+duplicate named views are charged before building each map. Excess output or
+allocation failure raises `ResourceLimitError` and preserves the assignment
+destination. Wrong types or counts raise `TypeError`.
+
+Scalar conversion sorts/deduplicates endpoints per match, then advances a cursor
+through each input prefix once across all matches. Its temporary position storage
+depends on the number of groups rather than the whole input length. Conversion,
+preflight, text copying, and result construction check cancellation during their
+loops; cancellation remains fatal. Backend matching/compilation and endpoint
+sorting are synchronous operations with checks around them. These value budgets
+are not a process heap cap and do not account for every engine scratch buffer.
+See the self-contained [capture example](../examples/regex-captures.scripta).
 
 Empty patterns are valid and match at Unicode scalar boundaries, including both
 ends. Matching does not normalize text or treat grapheme clusters as a unit.
 Lookaround and pattern backreferences are unsupported. Invalid or oversized
 patterns raise `RegexError`; patterns are limited to 65,536 UTF-8 bytes, compiled
-regex size to 1 MiB, and DFA cache size to 1 MiB. Captures, compiled script objects,
+regex size to 1 MiB, and DFA cache size to 1 MiB. Compiled script objects,
 callbacks, and regex splitting are not exposed. Output growth is checked against
 runtime value limits before each append; cancellation is checked between matches.
-Successful compilations are shared by these three APIs within each runtime in a
+Successful compilations are shared by these five APIs within each runtime in a
 least-recently-used cache of at most 8 entries and 256 KiB of retained pattern
 text. Invalid patterns are not cached and do not evict successful entries. Cache
 hits still check cancellation and obey the same output limits. Cache storage is
@@ -705,14 +747,16 @@ Comparisons are always strict, without PHP's default coercion.
 
 ## Database connectors
 
-The CLI always registers the shared Db signatures. MySQL is an opt-in source-build
-feature (`--features mysql`); SQLite retains its independent Sqlite API and remains
+The CLI always registers the shared Db signatures. MySQL and PostgreSQL are opt-in
+source-build features (`--features mysql,postgres`); SQLite retains its independent Sqlite API and remains
 enabled by default. `scripta version --verbose` lists compiled connector versions
 and capabilities without connecting. Missing drivers raise DbUnsupportedError;
 installing a script package cannot enable a native driver. See the
 [connector guide](database-connectors.md) for build, permissions, limits, type
 mapping and installation details, and [mysql.scripta](../examples/mysql.scripta)
-for a runnable parameterized query that changes no schema or data.
+for a runnable parameterized query that changes no schema or data. See the
+[PostgreSQL guide](postgres.md) and [postgres.scripta](../examples/postgres.scripta)
+for PostgreSQL casts, RETURNING, sequence IDs and aborted transactions.
 
 | Shared API | Result |
 | --- | --- |
@@ -726,7 +770,7 @@ for a runnable parameterized query that changes no schema or data.
 | `Db::fetchAll(stmt)` | List of remaining maps; empty at exhaustion |
 | `Db::fetchColumn(stmt, column = 0)` | Scalar/bytes/null; DbEndOfResultsError at exhaustion |
 | `Db::rowCount(stmt)` | int affected DML rows; unsupported for SELECT |
-| `Db::lastInsertId(db, sequence = null)` | Exact generated-ID string or null; MySQL rejects sequence names |
+| `Db::lastInsertId(db, sequence = null)` | MySQL generated-ID string or null; PostgreSQL requires a sequence and performs bounded network I/O |
 | `Db::beginTransaction(db)` | null; rejects nesting |
 | `Db::commit(db)` | null; rejects idle state |
 | `Db::rollBack(db)` | null; rejects idle state |
@@ -749,10 +793,10 @@ Native hosts can prepare a shared `FilesystemPolicy` using `policy.prepare()`
 and call `policy.open_read(context, path)` to open regular files with the
 standard path, capability, root, and symlink checks. Extensions must bound their
 reads and check cancellation. The developing [database connector API](database-connectors.md)
-uses this interface for MySQL CA files. Embedding hosts can register its prepared
+uses this interface for MySQL and PostgreSQL CA files. Embedding hosts can register its prepared
 statements, typed fetching, execution metadata and transaction controls. The CLI
-registers shared Db signatures in every build and includes the MySQL driver with
-`--features mysql`; default builds retain SQLite. Use `scripta version --verbose`
+registers shared Db signatures in every build and includes the MySQL/PostgreSQL
+drivers with `--features mysql,postgres`; default builds retain SQLite. Use `scripta version --verbose`
 to inspect compiled connector versions and capabilities without connecting.
 
 For a complete extension crate with optional Cargo features, CLI startup wiring,

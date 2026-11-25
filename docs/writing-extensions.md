@@ -16,7 +16,10 @@ feature. Backends implement the shared TransactionOperation controls with
 server-derived state and invalidate handles on uncertain outcomes. Return sanitized
 ErrorDetails through Connection::take_error_details for shared post-close
 Db::errorInfo snapshots; never supply raw server messages or credentials. The shared
-layer owns snapshot limits and reset semantics.
+layer owns snapshot limits and reset semantics. The separate
+[PostgreSQL driver](postgres.md) reads authoritative ReadyForQuery state and
+implements bounded sequence lookups through Connection::last_insert_id, which
+receives a mutable RuntimeContext for permission, deadline and cancellation checks.
 
 This guide adds a small optional `Greeting::hello(name)` extension in a source
 checkout. The crate, feature, and function below are tutorial additions; they

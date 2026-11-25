@@ -1,0 +1,18 @@
+// Capture positions count Unicode scalars, including the initial é as one.
+$text = "é user=ada id=42\nuser=bob";
+$pattern = "user=(?P<name>[a-z]+)(?: id=(?P<id>[0-9]+))?";
+$matches = Regex::capturesAll($text, $pattern);
+foreach ($matches as $match) {
+    $whole = $match["groups"][0];
+    $name = $match["named"]["name"];
+    $id = $match["named"]["id"];
+    echo $name["text"] . ": " . str($whole["start"]) . ".." . str($whole["end"]);
+    if ($id === null) {
+        echo " id=none\n";
+    } else {
+        echo " id=" . $id["text"] . "\n";
+    }
+}
+$empty = Regex::captures("", "(?P<empty>)");
+echo "Empty capture: " . str($empty["named"]["empty"]["start"]) . ".." . str($empty["named"]["empty"]["end"]) . "\n";
+echo "No match: " . str(Regex::captures("none", $pattern) === null) . "\n";

@@ -60,6 +60,7 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
     let names = [
         "hello.scripta",
         "mysql.scripta",
+        "postgres.scripta",
         "html-escaping.scripta",
         "password-hashing.scripta",
         "variables.scripta",
@@ -92,6 +93,7 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
         "hashing.scripta",
         "secure-random.scripta",
         "process-data.scripta",
+        "regex-captures.scripta",
         "csv-reader.scripta",
         "download.scripta",
     ];
@@ -102,6 +104,10 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
     for (name, expected) in [
         ("hello.scripta", "Hello, Scripta!\n"),
         ("loops.scripta", "1\n2\n3\n"),
+        (
+            "regex-captures.scripta",
+            "ada: 2..16 id=42\nbob: 17..25 id=none\nEmpty capture: 0..0\nNo match: true\n",
+        ),
         (
             "secure-random.scripta",
             "Key bytes: 32\nToken characters: 32\nTag verified: true\nChanged bytes equal: false\nEmpty bytes: 0\n",
@@ -635,7 +641,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             "sha256 hmacSha256 sha256Init hmacSha256Init update finalize close",
         ),
         ("Csv", "parse encode open readRow close"),
-        ("Regex", "isMatch findAll replace"),
+        ("Regex", "isMatch findAll replace captures capturesAll"),
         (
             "String",
             "trim split join contains startsWith endsWith replace substring lower upper format graphemeLength graphemeSubstring",
@@ -664,7 +670,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 212);
+    assert_eq!(count, 214);
     for name in [
         "start",
         "id",

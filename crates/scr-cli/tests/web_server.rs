@@ -3089,3 +3089,25 @@ fn package_requirements_are_revalidated_on_web_requests_including_watch_snapshot
         );
     }
 }
+
+#[test]
+#[cfg(feature = "postgres")]
+#[ignore = "requires disposable PostgreSQL SCRAM/TLS fixture"]
+fn postgres_live_connections_work_in_persistent_web_workers() {
+    assert!(
+        std::env::var_os("SCR_PG_FIXTURE_CA").is_some(),
+        "run postgres_fixture.py"
+    );
+    let server = Server::start(
+        r#"
+$db=Db::connect(Env::get("SCR_PG_FIXTURE_DSN"),Env::get("SCR_PG_FIXTURE_USER"),Env::get("SCR_PG_FIXTURE_PASSWORD"),["tlsCaFile"=>Env::get("SCR_PG_FIXTURE_CA")]);
+try { $s=Db::prepare($db,"SELECT ?::bigint AS n"); Db::execute($s,[42]); echo str(Db::fetchColumn($s)); } finally { Db::close($db); }
+"#,
+        &[],
+    );
+    for _ in 0..2 {
+        let (status, _, body) = server.request("GET", "/", b"", "text/plain");
+        assert_eq!(status, 200);
+        assert_eq!(body, b"42");
+    }
+}

@@ -136,7 +136,11 @@ pub trait Connection: fmt::Debug {
             "row counts are not supported",
         ))
     }
-    fn last_insert_id(&self, _sequence: Option<&str>) -> NativeResult {
+    fn last_insert_id(
+        &mut self,
+        _context: &mut RuntimeContext<'_>,
+        _sequence: Option<&str>,
+    ) -> NativeResult {
         Err(NativeError::new(
             "DbUnsupportedError",
             "insert IDs are not supported",
@@ -498,6 +502,8 @@ pub fn register_with_options(
                         "DbUnsupportedError",
                         if name == "mysql" {
                             "MySQL driver is unavailable in this executable or host registration; inspect scripta version --verbose; CLI source builds need --features mysql, embedding hosts must register the driver; installing a script package cannot enable it"
+                        } else if name == "pgsql" {
+                            "PostgreSQL driver is unavailable in this executable or host registration; inspect scripta version --verbose; CLI source builds need --features postgres, embedding hosts must register the driver; installing a script package cannot enable it"
                         } else {
                             "database driver is unavailable in this executable or host registration; inspect scripta version --verbose and use a compatible executable or register the required driver"
                         },
@@ -658,7 +664,7 @@ pub fn register_with_options(
                     "lastInsertId",
                     None,
                     |_| false,
-                    |backend| backend.last_insert_id(sequence),
+                    |backend| backend.last_insert_id(context, sequence),
                 )
             },
         ),

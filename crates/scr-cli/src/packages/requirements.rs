@@ -90,6 +90,8 @@ pub(super) fn check(manifest: &Manifest, extensions: &[ExtensionInfo]) -> Result
         let Some(extension) = extensions.iter().find(|item| item.name == name) else {
             let hint = if name == "mysql" {
                 "; CLI source builds can enable MySQL with --features mysql"
+            } else if name == "pgsql" {
+                "; CLI source builds can enable PostgreSQL with --features postgres"
             } else {
                 ""
             };

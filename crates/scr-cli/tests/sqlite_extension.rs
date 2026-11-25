@@ -6,12 +6,15 @@ fn sqlite_feature_controls_cli_registration() {
         .args(["version", "--verbose"])
         .output()
         .unwrap();
-    let expected = match (cfg!(feature = "sqlite"), cfg!(feature = "mysql")) {
-        (true, true) => "extensions: sqlite, mysql",
-        (true, false) => "extensions: sqlite",
-        (false, true) => "extensions: mysql",
-        (false, false) => "extensions: none",
-    };
+    let names = scr_cli::extensions::compiled()
+        .iter()
+        .map(|info| info.name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let expected = format!(
+        "extensions: {}",
+        if names.is_empty() { "none" } else { &names }
+    );
     assert!(
         String::from_utf8_lossy(&version.stdout)
             .lines()

@@ -14,6 +14,8 @@ fn database_drivers() -> Vec<Rc<dyn scr_db::Driver>> {
     vec![
         #[cfg(feature = "mysql")]
         scr_ext_mysql::driver(),
+        #[cfg(feature = "postgres")]
+        scr_ext_postgres::driver(),
     ]
 }
 

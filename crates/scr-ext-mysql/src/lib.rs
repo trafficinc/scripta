@@ -66,8 +66,12 @@ impl Connection for worker::Worker {
     fn row_count(&self, id: u64) -> NativeResult<i64> {
         self.row_count(id)
     }
-    fn last_insert_id(&self, sequence: Option<&str>) -> NativeResult {
-        self.last_insert_id(sequence)
+    fn last_insert_id(
+        &mut self,
+        _context: &mut RuntimeContext<'_>,
+        sequence: Option<&str>,
+    ) -> NativeResult {
+        worker::Worker::last_insert_id(self, sequence)
     }
     fn transaction(
         &mut self,

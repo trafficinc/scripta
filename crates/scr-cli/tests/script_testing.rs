@@ -584,3 +584,22 @@ fn mysql_live_connections_work_in_script_test_workers() {
     let report = json(directory.path(), &[], 0);
     assert_eq!(report["summary"]["passed"], 1, "{report}");
 }
+
+#[test]
+#[cfg(feature = "postgres")]
+#[ignore = "requires disposable PostgreSQL SCRAM/TLS fixture"]
+fn postgres_live_connections_work_in_script_test_workers() {
+    assert!(
+        std::env::var_os("SCR_PG_FIXTURE_CA").is_some(),
+        "run postgres_fixture.py"
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let source = include_str!("../../../tests/fixtures/database-contract.scripta");
+    write(
+        directory.path(),
+        "tests/postgres_test.scripta",
+        &format!("function test_postgres() {{ {source} }}"),
+    );
+    let report = json(directory.path(), &[], 0);
+    assert_eq!(report["summary"]["passed"], 1, "{report}");
+}

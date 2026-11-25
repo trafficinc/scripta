@@ -1,8 +1,9 @@
 # Database connector development
 
-The shared database interface supports verified-TLS MySQL connections, native
-prepared statements, typed fetching, execution metadata and transactions. MySQL
-is an optional CLI source-build feature. Default builds retain the existing
+The shared database interface supports verified-TLS MySQL and [PostgreSQL](postgres.md)
+connections, native prepared statements, typed fetching, execution metadata and
+transactions. Both are optional CLI source-build features. This page describes
+MySQL; the PostgreSQL guide records its dialect and behavior differences. Default builds retain the existing
 [SQLite API](sqlite.md). Installing a script package cannot enable a compiled-out
 native driver.
 
@@ -83,8 +84,8 @@ supplies its API version and capability names for host discovery.
 
 `scr-ext-mysql` depends on scr-db, scr-runtime, the Rust mysql client, tempfile for
 private CA snapshots, and scr-stdlib for its existing filesystem policy. Concrete
-network and database work stays outside the runtime and shared API. Future
-PostgreSQL support belongs in a separate driver crate. Redis and other non-SQL
+network and database work stays outside the runtime and shared API. PostgreSQL
+support lives in the separate scr-ext-postgres driver crate. Redis and other non-SQL
 connectors do not implement this interface.
 
 ## Native registration and connection API
@@ -292,7 +293,7 @@ unread rows with bounded cleanup; the connection remains usable if cleanup succe
 Timeout/cancellation breaks the connection and invalidates all its handles. Already
 returned values remain valid after cursor/connection closure. A failed fetchAll
 never assigns a partial list. Fetch errors do not rewind rows or undo committed
-writes; future drivers supporting write statements with RETURNING must preserve
+writes; drivers supporting write statements with RETURNING must preserve
 this distinction too.
 
 ### Execution metadata and transactions

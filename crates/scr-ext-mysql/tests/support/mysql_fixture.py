@@ -68,6 +68,7 @@ def main():
                     time.sleep(0.1)
                 env = os.environ.copy()
                 env.update(SCR_MYSQL_FIXTURE_DSN="mysql:host=localhost;port=" + str(port) + ";dbname=scripta_fixture", SCR_MYSQL_FIXTURE_USER="scripta_fixture", SCR_MYSQL_FIXTURE_PASSWORD=password, SCR_MYSQL_FIXTURE_CA=str(root / "ca.crt"), SCR_MYSQL_FIXTURE_PORT=str(port))
+                env.update({f"SCR_DB_{name}": env[f"SCR_MYSQL_FIXTURE_{name}"] for name in ["DSN", "USER", "PASSWORD", "CA"]})
                 print("Disposable MySQL TLS fixture ready on loopback", flush=True)
                 proxy = CommitAckProxy(root, port)
                 try:

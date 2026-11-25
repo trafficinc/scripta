@@ -12,6 +12,9 @@ const MAX_CACHE_ENTRIES: usize = 8;
 const MAX_CACHE_PATTERN_BYTES: usize = 256 * 1024;
 const REGEX_SIZE_LIMIT: usize = 1024 * 1024;
 
+#[path = "regex_captures.rs"]
+mod captures;
+
 // Oldest entry first. Fixed entry and key-byte limits bound retained backend
 // state independently of script value budgets. Regex's size limits are engine
 // limits, not exact heap accounting (scratch space and metadata add overhead).
@@ -65,8 +68,14 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
 }
 
 fn register_with_cache(runtime: &mut Runtime, cache: Rc<RefCell<RegexCache>>) -> NativeResult<()> {
-    use NativeType::{Bool, Int, List, String as Text};
-    for (name, returns) in [("isMatch", Bool), ("findAll", List), ("replace", Text)] {
+    use NativeType::{Bool, Int, List, Map, Null, OneOf, String as Text};
+    for (name, returns) in [
+        ("isMatch", Bool),
+        ("findAll", List),
+        ("replace", Text),
+        ("captures", OneOf(vec![Map, Null])),
+        ("capturesAll", List),
+    ] {
         let mut parameters = vec![Text, Text];
         if name == "replace" {
             parameters.push(Text);
@@ -86,6 +95,9 @@ fn register_with_cache(runtime: &mut Runtime, cache: Rc<RefCell<RegexCache>>) ->
                     context.check_cancelled()?;
                     let regex = cache.borrow_mut().get_or_compile(pattern)?;
                     context.check_cancelled()?;
+                    if name == "captures" || name == "capturesAll" {
+                        return captures::collect(context, input, &regex, name == "capturesAll");
+                    }
                     if name == "isMatch" {
                         return Ok(Value::Bool(regex.is_match(input)));
                     }
@@ -243,6 +255,8 @@ mod tests {
             "Regex::isMatch('é', '.');",
             "Regex::findAll('é', '.');",
             "Regex::replace('é', '.', '$1');",
+            "Regex::captures('é', '.');",
+            "Regex::capturesAll('é', '.');",
         ] {
             runtime.execute_source(source, &mut Vec::new()).unwrap();
             assert_eq!(cache.borrow().entries.len(), 1);

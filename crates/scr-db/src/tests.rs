@@ -62,7 +62,7 @@ impl Connection for TestConnection {
     fn row_count(&self, _: u64) -> NativeResult<i64> {
         Ok(7)
     }
-    fn last_insert_id(&self, _: Option<&str>) -> NativeResult {
+    fn last_insert_id(&mut self, _: &mut RuntimeContext<'_>, _: Option<&str>) -> NativeResult {
         Ok(Value::String("123".into()))
     }
     fn transaction(

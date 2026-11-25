@@ -117,7 +117,9 @@ requests behind a reverse proxy.
   transactions, and bounded query results. See the [SQLite extension](docs/sqlite.md).
   Source builds can opt into the [MySQL connector](docs/database-connectors.md)
   with `--features mysql`; verbose version output lists connector versions and capabilities.
-  The [MySQL example](examples/mysql.scripta) uses environment credentials and verified TLS.
+  PostgreSQL is available with `--features postgres`; see its [connector guide](docs/postgres.md).
+  The [MySQL](examples/mysql.scripta) and [PostgreSQL](examples/postgres.scripta) examples
+  use environment credentials and verified TLS.
   Packages can declare [native API/capability requirements](docs/packages.md#native-extension-requirements)
   checked during installation and execution.
 

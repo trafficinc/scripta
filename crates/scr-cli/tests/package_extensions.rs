@@ -450,3 +450,19 @@ fn test_and_server_preflight_do_not_initialize_an_incompatible_project() {
     );
     assert!(!app.join("test-initialized").exists());
 }
+
+#[test]
+fn postgres_manifest_uses_actual_compiled_version_and_capabilities() {
+    let root = tempfile::tempdir().unwrap();
+    package(
+        root.path(),
+        "postgres-consumer",
+        "[extensions]\npgsql={version='^0.2', capabilities=['prepare.native','dml.returning','lastInsertId.sequence']}",
+    );
+    let output = command(root.path(), &["install", "--offline"]);
+    if cfg!(feature = "postgres") {
+        success(output);
+    } else {
+        failure(output, "--features postgres");
+    }
+}

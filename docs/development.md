@@ -47,6 +47,9 @@ MySQL is opt-in through `--features mysql`; see [database connector builds and
 discovery](database-connectors.md#building-and-identifying-mysql-support). Check
 `version --verbose` for compiled versions/capabilities. CLI, embedding, checking,
 test and web workers share registration in crates/scr-cli/src/extensions.rs.
+PostgreSQL is optional through `--features postgres`; its [driver guide](postgres.md)
+describes isolated SCRAM/TLS fixture tests and the common contract run under both drivers.
+Test PostgreSQL-only source builds alongside the default/minimal/all-feature variants.
 Add runnable examples and focused tests when behavior changes.
 
 Native package requirements are covered by `crates/scr-cli/tests/package_extensions.rs`

@@ -38,6 +38,19 @@ fn database_discovery_uses_registered_descriptor_versions_and_capabilities_witho
         assert!(entry.capabilities.contains(&"transactions.state"));
         assert!(entry.capabilities.contains(&"tls.verifyIdentity"));
     }
+    assert_eq!(
+        info.iter().any(|i| i.name == "pgsql"),
+        cfg!(feature = "postgres")
+    );
+    #[cfg(feature = "postgres")]
+    {
+        let pg = scr_ext_postgres::driver().info();
+        let entry = info.iter().find(|i| i.name == pg.name).unwrap();
+        assert_eq!(entry.version, pg.version);
+        assert_eq!(entry.capabilities, pg.capabilities);
+        assert!(entry.capabilities.contains(&"dml.returning"));
+        assert!(entry.capabilities.contains(&"lastInsertId.sequence"));
+    }
     let mut outputs = Vec::new();
     for binary in [env!("CARGO_BIN_EXE_scripta"), env!("CARGO_BIN_EXE_scr")] {
         let output = Command::new(binary)
@@ -264,4 +277,104 @@ fn database_reference_covers_registered_api_in_every_feature_combination() {
         );
         assert!(!error.message.contains("undefined function"), "{function}");
     }
+}
+
+#[test]
+fn postgres_availability_is_explicit_before_connection() {
+    let source = "Db::connect('pgsql:host=;dbname=unused','fixture','secret');";
+    scr_cli::pipeline::check(source).unwrap();
+    let error = scr_cli::pipeline::run(source, &mut Vec::new()).unwrap_err();
+    let kind = if cfg!(feature = "postgres") {
+        "TypeError"
+    } else {
+        "DbUnsupportedError"
+    };
+    assert!(error.message.contains(kind), "{error:?}");
+    assert!(!error.message.contains("secret"));
+    if !cfg!(feature = "postgres") {
+        assert!(error.message.contains("--features postgres"));
+    }
+}
+
+#[test]
+#[cfg(feature = "postgres")]
+#[ignore = "requires disposable PostgreSQL SCRAM/TLS fixture"]
+fn postgres_public_example_runs_with_fixture_credentials() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/postgres.scripta");
+    let source = std::fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    for binary in [env!("CARGO_BIN_EXE_scripta"), env!("CARGO_BIN_EXE_scr")] {
+        let mut command = Command::new(binary);
+        for (target, fixture) in [
+            ("DSN", "DSN"),
+            ("USER", "USER"),
+            ("PASSWORD", "PASSWORD"),
+            ("CA_FILE", "CA"),
+        ] {
+            command.env(
+                format!("SCR_PG_{target}"),
+                std::env::var(format!("SCR_PG_FIXTURE_{fixture}"))
+                    .expect("run postgres_fixture.py"),
+            );
+        }
+        let output = command.arg("run").arg(&path).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"Ada: 2\n");
+    }
+}
+
+#[test]
+#[ignore = "requires either MySQL or PostgreSQL TLS fixture and its compiled feature"]
+fn shared_driver_contract_file_stdin_aliases_and_embedding() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/database-contract.scripta"),
+    )
+    .unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), &source).unwrap();
+    for binary in [env!("CARGO_BIN_EXE_scripta"), env!("CARGO_BIN_EXE_scr")] {
+        let output = Command::new(binary)
+            .arg("run")
+            .arg(file.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"database-contract-ok\n");
+        let mut child = Command::new(binary)
+            .args(["run", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(source.as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"database-contract-ok\n");
+    }
+    let mut output = Vec::new();
+    scr_cli::pipeline::run(&source, &mut output).unwrap();
+    assert_eq!(output, b"database-contract-ok\n");
 }

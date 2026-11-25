@@ -1,0 +1,36 @@
+// The same contract runs against both native database fixture drivers.
+$db = Db::connect(Env::get("SCR_DB_DSN"), Env::get("SCR_DB_USER"), Env::get("SCR_DB_PASSWORD"), ["tlsCaFile" => Env::get("SCR_DB_CA")]);
+try {
+    Db::exec($db, "CREATE TABLE IF NOT EXISTS shared_contract (id BIGINT PRIMARY KEY, label TEXT)");
+    Db::beginTransaction($db);
+    $insert = Db::prepare($db, "INSERT INTO shared_contract (id, label) VALUES (:id, :label)");
+    Db::execute($insert, ["id" => 1, "label" => "Ada ' ? :marker é"]);
+    if (Db::rowCount($insert) !== 1) {
+        throw "insert count";
+    }
+    $select = Db::prepare($db, "SELECT id, label FROM shared_contract WHERE id = ?");
+    Db::execute($select, [1]);
+    $row = Db::fetch($select);
+    if ($row["id"] !== 1 || $row["label"] !== "Ada ' ? :marker é" || Db::fetch($select) !== null) {
+        throw "binding and fetch";
+    }
+    Db::rollBack($db);
+    Db::execute($select, [1]);
+    if (Db::fetch($select) !== null) {
+        throw "rollback";
+    }
+    Db::beginTransaction($db);
+    Db::execute($insert, ["id" => 2, "label" => "committed"]);
+    Db::commit($db);
+    $delete = Db::prepare($db, "DELETE FROM shared_contract WHERE id = ?");
+    Db::execute($delete, [2]);
+    if (Db::rowCount($delete) !== 1 || Db::inTransaction($db)) {
+        throw "commit and delete count";
+    }
+    Db::closeStatement($select);
+    Db::closeStatement($insert);
+    Db::closeStatement($delete);
+    echo "database-contract-ok\n";
+} finally {
+    Db::close($db);
+}
