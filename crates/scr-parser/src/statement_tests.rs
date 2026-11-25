@@ -413,15 +413,15 @@ fn every_statement_annotation_and_block_preserves_utf8_spans() {
 }
 
 #[test]
-fn collects_independent_errors_including_legacy_equality() {
-    let source = "<?scr echo ; $a == 1; $b != 2; break; continue; return; echo \"valid\";";
+fn collects_independent_errors_including_missing_operands() {
+    let source = "<?scr echo ; $a == ); $b != ]; break; continue; return; echo \"valid\";";
     let tokens = scr_lexer::lex(source).unwrap();
     let diagnostics = parse_with_diagnostics(&tokens).unwrap_err();
     assert_eq!(diagnostics.len(), 6, "{diagnostics:?}");
     assert_eq!(parse(&tokens).unwrap_err(), diagnostics[0]);
     for (diagnostic, text) in diagnostics
         .iter()
-        .zip([";", "==", "!=", "break", "continue", "return"])
+        .zip([";", ")", "]", "break", "continue", "return"])
     {
         assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], text);
     }

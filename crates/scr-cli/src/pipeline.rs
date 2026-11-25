@@ -84,7 +84,9 @@ mod tests {
     fn check_validates_syntax_without_execution() {
         assert!(check("<?scr function foo($x: int) { if ($x === 1) return; }").is_ok());
         assert!(check("<?scr echo").is_err());
-        assert!(check("<?scr $x == $y;").is_err());
+        assert!(check("<?scr $x == $y;").is_ok());
+        assert!(check("<?scr $x != $y;").is_ok());
+        assert!(check("<?scr $x == ;").is_err());
         assert!(check("<?scr /* unfinished").is_err());
     }
 

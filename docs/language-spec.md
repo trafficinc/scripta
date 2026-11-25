@@ -127,7 +127,8 @@ compares values without coercion:
 `1 === 1.0`, `1 === "1"`, and `true === 1` are all false. Cross-type comparison is
 false rather than an exception. Concatenation binds more tightly than equality;
 both operators associate left to right. Parentheses override precedence.
-`!==` is the negation of strict equality.
+`!==` is the negation of strict equality. `==` and `!=` are aliases for `===`
+and `!==`, respectively; all four spellings use strict types.
 
 ```scr
 $usage = 85;
@@ -148,10 +149,10 @@ Operators and punctuation: `+ - * / % . = += -= *= /= .= == != === !== < <= > >=
 && || ! ; , : ( ) { } [ ] => -> ::`. Longest supported spellings take precedence.
 Unsupported operators such as `++`, `--`, `**`, `%=` and bitwise operators fail.
 
-Only `===` and `!==` are allowed equality operators in Scripta. Legacy `==` and
-`!=` are tokenized so the parser can reject them with a targeted diagnostic.
-The expression parser implements both strict equality operators and rejects
-legacy equality with a diagnostic pointing to the offending operator.
+`==` and `===` perform the same strict equality comparison; `!=` and `!==`
+perform its negation. No spelling performs implicit type conversion. The parser
+maps each pair to the same AST operation, with identical precedence and
+associativity. Formatting preserves the original operator spelling.
 
 `scripta check` validates both lexical structure and statement syntax, including the
 equality policy. It reports parser diagnostics without executing the program.
@@ -176,7 +177,7 @@ operations chain from left to right.
 | 1 | `= += -= *= /= .=` | Assignment, right |
 | 2 | `\|\|` | Logical OR, left |
 | 3 | `&&` | Logical AND, left |
-| 4 | `=== !==` | Strict equality / inequality, left |
+| 4 | `== != === !==` | Strict equality / inequality, left |
 | 5 | `< <= > >=` | Comparison, left |
 | 6 | `.` | String concatenation, left |
 | 7 | `+ -` | Addition / subtraction, left |
@@ -546,8 +547,8 @@ error. Explicit `float(int)` conversion may round large integers to f64 precisio
 
 `<`, `<=`, `>`, and `>=` accept matching numeric types or two strings. String
 ordering is lexicographic in UTF-8 order. Other combinations are errors. Strict
-`===` and `!==` never coerce, including int versus float. Lists compare by ordered
-recursive value equality. Maps compare by key/value contents independent of
+`==`, `!=`, `===`, and `!==` never coerce, including int versus float. Lists compare
+by ordered recursive value equality. Maps compare by key/value contents independent of
 insertion order. Byte values compare by byte contents; bytes and strings are
 distinct types even when their UTF-8 payloads match. Native objects and callables
 compare by identity.
@@ -800,9 +801,10 @@ executing code. It is not complete static type checking; unknown variables,
 function targets, custom annotations, and required-file dependencies may remain
 unresolved until execution. Runtime annotation and strict-value checks are unchanged.
 
-Legacy PHP `==`, `!=`, `<>`, `<=>`, `and`, `or`, `xor`, increment/decrement,
-coalescing, and other unsupported operators produce explicit diagnostics. Use
-`===`/`!==` and `&&`/`||` for supported comparisons and boolean operations.
+PHP `<>`, `<=>`, `and`, `or`, `xor`, increment/decrement, coalescing, and other
+unsupported operators produce explicit diagnostics. Use `==`/`!=` (also
+`===`/`!==`) and `&&`/`||` for supported comparisons and boolean operations.
+Unlike PHP, `==` and `!=` always use strict equality without coercion.
 The PHP word operators are reserved and cannot be used as bare identifiers.
 
 `scripta fmt file.scripta` preserves lexical tokens, comments and string spelling while

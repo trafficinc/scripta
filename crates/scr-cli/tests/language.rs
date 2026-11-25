@@ -35,21 +35,10 @@ fn explicit_conversions_and_strict_equality() {
 }
 
 #[test]
-fn parser_rejects_legacy_equality_with_targeted_diagnostics() {
-    for operator in ["==", "!="] {
-        let source = format!("<?scr echo str(1 {operator} 1);");
-        // Check enforces the same parser policy as run.
-        assert!(scr_cli::pipeline::check(&source).is_err());
-        let tokens = scr_lexer::lex(&source).unwrap();
-        let error = scr_parser::parse(&tokens).unwrap_err();
-        assert!(
-            error
-                .message
-                .contains("unsupported legacy equality operator")
-        );
-        assert!(error.message.contains("=== or !=="));
-        assert_eq!(&source[error.span.start..error.span.end], operator);
-    }
+fn equality_aliases_pass_check_and_execute_with_strict_types() {
+    let source = include_str!("../../../examples/equality.scripta");
+    scr_cli::pipeline::check(source).unwrap();
+    assert_eq!(run(source).unwrap(), "true\nfalse\nfalse\ntrue\ntrue\n");
 }
 
 #[test]

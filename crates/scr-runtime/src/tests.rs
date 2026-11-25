@@ -776,3 +776,40 @@ fn read_only_host_properties_fail_and_uncaught_string_throws_retain_the_message(
             .contains("useful message")
     );
 }
+
+#[test]
+fn equality_aliases_reuse_strict_value_semantics() {
+    let cases = [
+        ("1", "1", true),
+        ("1", "1.0", false),
+        ("1", "'1'", false),
+        ("true", "1", false),
+        ("null", "null", true),
+        ("[1, [2]]", "[1, [2]]", true),
+        ("[1]", "[1.0]", false),
+        ("['a' => 1, 'b' => 2]", "['b' => 2, 'a' => 1]", true),
+        ("[]", "[0 => 1]", false),
+        ("$f", "$f", true),
+        ("$f", "function () {}", false),
+    ];
+    for (left, right, equal) in cases {
+        let (runtime, _, _) = execute(&format!(
+            "$f = function () {{}}; $alias = {left} == {right}; $strict = {left} === {right}; \
+             $notAlias = {left} != {right}; $notStrict = {left} !== {right};"
+        ));
+        for name in ["alias", "strict"] {
+            assert_eq!(
+                runtime.get_global(name),
+                Some(&Value::Bool(equal)),
+                "{left} == {right}"
+            );
+        }
+        for name in ["notAlias", "notStrict"] {
+            assert_eq!(
+                runtime.get_global(name),
+                Some(&Value::Bool(!equal)),
+                "{left} != {right}"
+            );
+        }
+    }
+}

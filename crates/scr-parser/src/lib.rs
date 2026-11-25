@@ -589,19 +589,6 @@ impl Parser<'_> {
         })
     }
 
-    fn reject_legacy_equality(&self) -> Result<(), Diagnostic> {
-        if matches!(self.current().kind, TokenKind::Equal | TokenKind::NotEqual) {
-            Err(Diagnostic::new(
-                "unsupported legacy equality operator; use === or !==",
-                self.current().span,
-            )
-            .with_code("E0202")
-            .with_help("replace == with ===, or != with !=="))
-        } else {
-            Ok(())
-        }
-    }
-
     fn current(&self) -> &Token {
         &self.tokens[self.pos]
     }
@@ -673,7 +660,6 @@ impl Parser<'_> {
                 left = self.postfix(left)?;
                 continue;
             }
-            self.reject_legacy_equality()?;
             let Some((precedence, operator)) = infix(&self.current().kind) else {
                 break;
             };
@@ -753,7 +739,6 @@ impl Parser<'_> {
 
     fn primary(&mut self) -> Result<Expr, Diagnostic> {
         let token = self.current().clone();
-        self.reject_legacy_equality()?;
         if !matches!(
             token.kind,
             TokenKind::String(_)
@@ -943,7 +928,9 @@ fn operator_spelling(kind: &TokenKind) -> &'static str {
     match kind {
         Or => "||",
         And => "&&",
+        Equal => "==",
         StrictEqual => "===",
+        NotEqual => "!=",
         StrictNotEqual => "!==",
         Less => "<",
         LessEqual => "<=",
@@ -1022,8 +1009,8 @@ fn infix(token: &TokenKind) -> Option<(u8, Infix)> {
         TokenKind::DotAssign => (1, Assignment(A::Concat)),
         TokenKind::Or => (2, Binary(B::Or)),
         TokenKind::And => (3, Binary(B::And)),
-        TokenKind::StrictEqual => (4, Binary(B::Equal)),
-        TokenKind::StrictNotEqual => (4, Binary(B::NotEqual)),
+        TokenKind::Equal | TokenKind::StrictEqual => (4, Binary(B::Equal)),
+        TokenKind::NotEqual | TokenKind::StrictNotEqual => (4, Binary(B::NotEqual)),
         TokenKind::Less => (5, Binary(B::Less)),
         TokenKind::LessEqual => (5, Binary(B::LessEqual)),
         TokenKind::Greater => (5, Binary(B::Greater)),

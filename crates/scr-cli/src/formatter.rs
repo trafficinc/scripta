@@ -218,6 +218,8 @@ fn operator(kind: &K) -> bool {
             | K::StarAssign
             | K::SlashAssign
             | K::DotAssign
+            | K::Equal
+            | K::NotEqual
             | K::StrictEqual
             | K::StrictNotEqual
             | K::Less

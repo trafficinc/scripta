@@ -56,6 +56,8 @@ fn every_binary_operator_is_left_associative() {
     for (spelling, op) in [
         ("||", BinaryOp::Or),
         ("&&", BinaryOp::And),
+        ("==", BinaryOp::Equal),
+        ("!=", BinaryOp::NotEqual),
         ("===", BinaryOp::Equal),
         ("!==", BinaryOp::NotEqual),
         ("<", BinaryOp::Less),
@@ -368,8 +370,8 @@ fn nested_spans_preserve_original_utf8_offsets_and_delimiters() {
 #[test]
 fn syntax_errors_have_useful_spans_and_messages() {
     for (source, message, offending) in [
-        ("$a == $b", "use === or !==", "=="),
-        ("$a != $b", "use === or !==", "!="),
+        ("== $b", "expected expression", "=="),
+        ("!= $b", "expected expression", "!="),
         ("1 = 2", "invalid assignment target", "1"),
         ("f() = 2", "invalid assignment target", "f()"),
         ("[1][0] = 2", "invalid assignment target", "[1][0]"),
@@ -448,4 +450,29 @@ fn interpolation_parses_expressions_with_original_spans_and_shared_limits() {
     let deep = format!("\"{{$x + {}1{}}}\"", "(".repeat(64), ")".repeat(64));
     let error = parse_expression(&scr_lexer::lex(&deep).unwrap()).unwrap_err();
     assert!(error.message.contains("nesting exceeds"));
+}
+
+#[test]
+fn equality_aliases_share_precedence_and_preserve_spans() {
+    for (alias, strict, op) in [
+        ("==", "===", BinaryOp::Equal),
+        ("!=", "!==", BinaryOp::NotEqual),
+    ] {
+        let source = format!("$a {alias} $b {strict} $c");
+        let expr = expression(&source);
+        let (left, _) = binary(&expr, op);
+        binary(left, op);
+        assert_eq!(expr.span, Span::new(6, 6 + source.len()));
+        assert_eq!(left.span, Span::new(6, 6 + format!("$a {alias} $b").len()));
+        let expr = expression(&format!("$a < $b {alias} $c && $d"));
+        let (equality, _) = binary(&expr, BinaryOp::And);
+        let (comparison, _) = binary(equality, op);
+        binary(comparison, BinaryOp::Less);
+        let tokens = scr_lexer::lex(&format!("$a {alias}")).unwrap();
+        let error = parse_expression(&tokens).unwrap_err();
+        assert_eq!(
+            error.help.as_deref(),
+            Some(format!("provide a value after '{alias}'").as_str())
+        );
+    }
 }

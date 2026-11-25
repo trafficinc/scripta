@@ -117,7 +117,6 @@ fn check_validates_declarations_control_flow_and_legacy_syntax_without_execution
         ("<?scr break;", "E0201"),
         ("<?scr return;", "E0201"),
         ("<?scr while (true) { function f() { continue; } }", "E0201"),
-        ("<?scr $x == 1;", "E0202"),
         ("<?scr $x++;", "E0101"),
         ("<?scr $x <> 1;", "E0101"),
         ("<?scr $x and true;", "E0101"),
@@ -408,5 +407,22 @@ fn formatter_keeps_tag_free_source_tag_free_with_preambles_and_empty_programs() 
             assert_eq!(before, b"<?scr ?>");
             assert_eq!(before, after);
         }
+    }
+}
+
+#[test]
+fn formatter_preserves_equality_spellings_and_execution() {
+    let source = "echo str(1==1);echo str(1!=1.0);echo str(1===1);echo str(1!==1.0);";
+    let formatted = formatter::format(source).unwrap();
+    assert_eq!(
+        formatted,
+        "echo str(1 == 1);\necho str(1 != 1.0);\necho str(1 === 1);\necho str(1 !== 1.0);\n"
+    );
+    assert_eq!(formatter::format(&formatted).unwrap(), formatted);
+    for source in [source, &formatted] {
+        pipeline::check(source).unwrap();
+        let mut output = Vec::new();
+        pipeline::run(source, &mut output).unwrap();
+        assert_eq!(output, b"truetruetruetrue");
     }
 }

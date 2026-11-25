@@ -145,7 +145,7 @@ impl From<LexerError> for Diagnostic {
                 "move script content before ?> or omit the closing tag"
             }
             LexerErrorKind::InvalidOperator => {
-                "use supported Scripta operators; equality uses === and !=="
+                "use supported Scripta operators; equality uses ==, !=, ===, and !=="
             }
             LexerErrorKind::UnterminatedString => "close the string with its matching quote",
             LexerErrorKind::UnterminatedInterpolation => "close the interpolation with }",

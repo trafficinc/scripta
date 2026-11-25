@@ -186,7 +186,7 @@ and syntax check, not complete static type checking of a dynamically typed langu
 | E0002 | Host file/stream setup I/O (exit 1) |
 | E0101 | Lexical/tag/unsupported operator errors |
 | E0201 | Syntax and invalid control flow |
-| E0202 | Unsupported legacy equality (`==`, `!=`) |
+| E0202 | Reserved (formerly rejected `==` and `!=`; now strict equality aliases) |
 | E0204 | Parser nesting/expression complexity limit |
 | E0301 | Duplicate function declaration in one body |
 | E0302 | Duplicate function parameter |

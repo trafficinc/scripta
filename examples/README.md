@@ -15,6 +15,7 @@ package or source checkout; sample input directories must already exist.
 | password-hashing.scripta | `scripta examples/password-hashing.scripta` | Hashes a public demo value with Argon2id and reports verification/rehash status without printing the input or hash. |
 | html-escaping.scripta | `scripta examples/html-escaping.scripta` | Generates HTML using escaped text and a quoted title attribute; optional first argument supplies the name. |
 | string-interpolation.scripta | `scripta examples/string-interpolation.scripta` | Interpolates variables, fields, indexes, arithmetic, and bools; demonstrates literal escaping. |
+| equality.scripta | `scripta examples/equality.scripta` | Short and long equality operators share strict type semantics. |
 | variables.scripta | `scripta examples/variables.scripta` | Explicit values, concatenation and conversion. |
 | loops.scripta | `scripta examples/loops.scripta` | Prints 1, 2, 3 on separate lines. |
 | functions.scripta | `scripta examples/functions.scripta` | Typed function arguments/returns; greeting and addition. |
