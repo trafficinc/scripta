@@ -567,6 +567,12 @@ Comparisons are always strict, without PHP's default coercion.
 
 ## Registering Rust modules
 
+Native hosts can prepare a shared `FilesystemPolicy` using `policy.prepare()`
+and call `policy.open_read(context, path)` to open regular files with the
+standard path, capability, root, and symlink checks. Extensions must bound their
+reads and check cancellation. The developing [database connector API](database-connectors.md)
+uses this interface for MySQL CA files; it is not registered by the CLI yet.
+
 For a complete extension crate with optional Cargo features, CLI startup wiring,
 tests, and distribution instructions, see [Writing built-in extensions](writing-extensions.md).
 

@@ -8,6 +8,11 @@ configure. The standard library uses this same API.
 The default-enabled [SQLite extension](sqlite.md), implemented in `crates/scr-ext-sqlite`,
 provides a complete stateful example with runtime-owned handles and resource limits.
 
+For shared APIs with multiple backend drivers, see the experimental
+[database connector foundation](database-connectors.md). Its MySQL crate provides a
+verified-TLS connection, native prepared-statement and typed result-fetching
+implementation for embedding hosts; CLI wiring remains under development.
+
 This guide adds a small optional `Greeting::hello(name)` extension in a source
 checkout. The crate, feature, and function below are tutorial additions; they
 are not shipped or enabled by the current CLI. Keep the pinned Rust toolchain

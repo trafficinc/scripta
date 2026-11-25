@@ -34,7 +34,8 @@ impl Default for FilesystemPolicy {
     }
 }
 impl FilesystemPolicy {
-    pub(crate) fn prepare(mut self) -> NativeResult<Self> {
+    /// Validate and canonicalize host roots before sharing this policy with an extension.
+    pub fn prepare(mut self) -> NativeResult<Self> {
         if let Some(roots) = &mut self.roots {
             for root in roots {
                 if !root.is_absolute() {
@@ -55,6 +56,14 @@ impl FilesystemPolicy {
             }
         }
         Ok(self)
+    }
+    /// Open a regular file for a native extension using the same path, capability,
+    /// root and symlink checks as File::read. Call prepare once before use.
+    /// The extension remains responsible for bounding reads and checking cancellation.
+    pub fn open_read(&self, context: &RuntimeContext<'_>, path: &str) -> NativeResult<File> {
+        let path = paths::resolve(context, path)?;
+        self.check(context, &path, false)?;
+        open_read(&path)
     }
     pub(crate) fn check(
         &self,

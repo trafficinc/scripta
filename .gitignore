@@ -55,3 +55,6 @@ id_ed25519.*
 
 # Temporary runtime experiment journal; append future experiments here.
 /docs/temporary-runtime-experiments.md
+
+# Temporary database connector implementation checklist.
+/docs/temporary-database-connectors-plan.md
