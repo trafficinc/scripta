@@ -1,0 +1,29 @@
+$db = Db::connect(Env::get("SCR_MYSQL_FIXTURE_DSN"), Env::get("SCR_MYSQL_FIXTURE_USER"), Env::get("SCR_MYSQL_FIXTURE_PASSWORD"), ["tlsCaFile" => Env::get("SCR_MYSQL_FIXTURE_CA")]);
+try {
+    Db::exec($db, "CREATE TABLE IF NOT EXISTS cli_feature_rows (id BIGINT AUTO_INCREMENT PRIMARY KEY, name TEXT) ENGINE=InnoDB");
+    Db::beginTransaction($db);
+    $insert = Db::prepare($db, "INSERT INTO cli_feature_rows(name) VALUES (:name)");
+    Db::execute($insert, ["name" => "Ada 🦀"]);
+    $id = Db::lastInsertId($db);
+    if (Db::rowCount($insert) !== 1 || !Db::inTransaction($db)) {
+        throw "incorrect insert metadata or transaction state";
+    }
+    $select = Db::prepare($db, "SELECT name FROM cli_feature_rows WHERE id = ?");
+    Db::execute($select, [$id]);
+    if (Db::fetchColumn($select) !== "Ada 🦀" || Db::fetch($select) !== null) {
+        throw "incorrect fetched values or exhaustion";
+    }
+    Db::rollBack($db);
+    if (Db::lastInsertId($db) !== null || Db::inTransaction($db)) {
+        throw "incorrect rollback metadata or state";
+    }
+    Db::execute($select, [$id]);
+    if (Db::fetchAll($select) !== []) {
+        throw "rollback left an inserted row";
+    }
+    Db::closeStatement($insert);
+    Db::closeStatement($select);
+    echo "mysql-cli-ok\n";
+} finally {
+    Db::close($db);
+}

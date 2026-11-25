@@ -1,5 +1,5 @@
 //! Verified-TLS MySQL connections for the shared Db API.
-//! Native execution, typed fetching and transactions are available; CLI wiring follows later.
+//! Native execution, typed fetching and transactions; optional CLI mysql feature.
 mod decode;
 mod protocol;
 mod settings;
@@ -24,6 +24,20 @@ impl Driver for MysqlDriver {
         DriverInfo {
             name: "mysql",
             version: env!("CARGO_PKG_VERSION"),
+            capabilities: &[
+                "tls.verifyIdentity",
+                "prepare.native",
+                "parameters.positional",
+                "parameters.named",
+                "fetch.assoc",
+                "fetch.column",
+                "exec",
+                "rowCount",
+                "lastInsertId",
+                "transactions",
+                "transactions.state",
+                "errorInfo",
+            ],
         }
     }
     fn connect(
@@ -43,6 +57,9 @@ impl Driver for MysqlDriver {
     }
 }
 impl Connection for worker::Worker {
+    fn take_error_details(&mut self) -> Option<scr_db::ErrorDetails> {
+        self.last_error_details.take()
+    }
     fn exec(&mut self, context: &mut RuntimeContext<'_>, sql: &str) -> NativeResult<i64> {
         self.exec(context, sql)
     }

@@ -22,6 +22,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Version and operations of the compiled extension, independent of server state.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CAPABILITIES: &[&str] = &[
+    "open",
+    "execute",
+    "query.assoc",
+    "close",
+    "transactions.sql",
+];
+
 const MAX_SQL_BYTES: usize = 1024 * 1024;
 const MAX_CELL_BYTES: usize = 1024 * 1024;
 const MAX_PARAMS: usize = 1024;

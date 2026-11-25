@@ -115,6 +115,9 @@ requests behind a reverse proxy.
   source locations, and runtime stack traces.
 - **Built-in SQLite:** default builds include parameterized SQL,
   transactions, and bounded query results. See the [SQLite extension](docs/sqlite.md).
+  Source builds can opt into the [MySQL connector](docs/database-connectors.md)
+  with `--features mysql`; verbose version output lists connector versions and capabilities.
+  The [MySQL example](examples/mysql.scripta) uses environment credentials and verified TLS.
 
 Scripta is dynamically typed with strict operations and explicit conversions.
 Its syntax is inspired by PHP; the [language specification](docs/language-spec.md)
@@ -460,7 +463,7 @@ an SSH terminal open. See the [crontab reference](https://man7.org/linux/man-pag
 | `scripta serve app.scripta` | Receive HTTP requests with persistent workers; use a reverse proxy for public HTTPS. |
 | `scripta playground` | Launch the separately installed, optional local browser playground. |
 | `scripta version` | Print the interpreter version. |
-| `scripta version --verbose` | Show version, build target, compiler, profile, and supplied commit metadata. |
+| `scripta version --verbose` | Show version, build target, compiler, profile, commit metadata, and compiled connector versions/capabilities. |
 | `scripta help` | Show usage; `scripta help run`, `check`, `fmt`, `test`, or `serve` shows command help. |
 
 `check` is a syntax/declaration check, not complete static type checking. It does

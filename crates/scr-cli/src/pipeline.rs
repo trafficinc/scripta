@@ -12,8 +12,7 @@ pub fn check(source: &str) -> Result<(), Vec<Diagnostic>> {
         let mut runtime = scr_runtime::Runtime::new();
         scr_stdlib::register(&mut runtime)
             .map_err(|error| vec![Diagnostic::new(error.to_string(), Default::default())])?;
-        #[cfg(feature = "sqlite")]
-        scr_ext_sqlite::register(&mut runtime)
+        crate::extensions::register(&mut runtime)
             .map_err(|error| vec![Diagnostic::new(error.to_string(), Default::default())])?;
         errors.extend(runtime.check_program(&program));
     }
@@ -64,8 +63,7 @@ fn run_configured(
     });
     scr_stdlib::register(&mut runtime)
         .map_err(|error| Diagnostic::new(error.to_string(), Default::default()))?;
-    #[cfg(feature = "sqlite")]
-    scr_ext_sqlite::register(&mut runtime)
+    crate::extensions::register(&mut runtime)
         .map_err(|error| Diagnostic::new(error.to_string(), Default::default()))?;
     runtime.execute_source(source, output)
 }

@@ -17,8 +17,7 @@ fn register(runtime: &mut scr_runtime::Runtime) -> scr_runtime::NativeResult<()>
             .map_err(|e| scr_runtime::NativeError::new("PackageError", e.to_string()))
     });
     scr_stdlib::register(runtime)?;
-    #[cfg(feature = "sqlite")]
-    scr_ext_sqlite::register(runtime)?;
+    crate::extensions::register(runtime)?;
     Ok(())
 }
 pub(crate) fn worker(arguments: Vec<OsString>) -> ExitCode {

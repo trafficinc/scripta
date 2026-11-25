@@ -1,19 +1,80 @@
 # Database connector development
 
-The shared database interface is under development. Embedding hosts can open and
-close verified-TLS MySQL connections, inspect/configure attributes, and execute
-native prepared statements with positional or named values, fetch typed results,
-inspect execution metadata, and control transactions. CLI feature wiring remains
-a later stage. The standard CLI still exposes only the
-existing [SQLite API](sqlite.md); it does not register `Db::` or a MySQL feature.
-Installing a script package cannot enable a compiled-out native driver.
+The shared database interface supports verified-TLS MySQL connections, native
+prepared statements, typed fetching, execution metadata and transactions. MySQL
+is an optional CLI source-build feature. Default builds retain the existing
+[SQLite API](sqlite.md). Installing a script package cannot enable a compiled-out
+native driver.
+
+## Building and identifying MySQL support
+
+MySQL is opt-in; SQLite remains the only default CLI extension. From the workspace
+root, use the pinned toolchain and your native target. On Apple Silicon macOS:
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo build -p scr-cli --locked --features mysql --target aarch64-apple-darwin
+./target/aarch64-apple-darwin/debug/scripta version --verbose
+```
+
+Use `--no-default-features --features mysql` for MySQL without SQLite, or
+`--no-default-features` for a minimal build without database backends. Minimal
+builds still register the shared Db signatures so unavailable drivers produce
+DbUnsupportedError with a rebuild/registration hint. They do not compile the
+MySQL client. SQLite's existing API is independent and remains feature-gated.
+Use the matching native target on Linux or Windows; see [development](development.md)
+and [compatibility](compatibility.md). These commands build source variants; they
+do not change existing published downloads or certify new release platforms.
+
+Verbose discovery retains the extension summary and adds one line per compiled
+extension, for example a default build plus MySQL reports:
+
+```text
+extensions: sqlite, mysql
+extension sqlite: version=0.2.1 capabilities=open,execute,query.assoc,close,transactions.sql
+extension mysql: version=0.2.1 capabilities=tls.verifyIdentity,prepare.native,parameters.positional,parameters.named,fetch.assoc,fetch.column,exec,rowCount,lastInsertId,transactions,transactions.state,errorInfo
+```
+
+Versions identify the compiled connector API, not a live server or the underlying
+Rust client's version. Capabilities describe implemented connector operations;
+they do not promise server-version compatibility, grants, connectivity or working
+credentials. Discovery uses the same descriptors as registration and performs no
+network/database I/O. The `scr` compatibility command reports the same metadata.
+A plain `scripta version` remains the single version line.
+
+CLI file/stdin execution, the embedding pipeline, static checking, script-test
+workers, and web workers use one extension registrar. `scripta check` can validate
+known Db signatures, but never connects, validates a DSN or confirms driver
+availability. Installing a library with `scripta add`/`require` cannot change the
+executable's compiled connectors. Use an executable showing `mysql` in its verbose
+extension list, or build one from source. Existing published releases are not
+changed by this implementation; release downloads remain the four-platform SQLite
+packages with checksums and validation evidence.
+
+## Runnable example
+
+[examples/mysql.scripta](../examples/mysql.scripta) uses environment settings
+SCR_MYSQL_DSN, SCR_MYSQL_USER and SCR_MYSQL_PASSWORD, plus optional
+SCR_MYSQL_CA_FILE for a private CA. Set these in the invoking process environment;
+the example never prints them. Use a DSN such as
+mysql:host=localhost;port=3306;dbname=app;charset=utf8mb4. It opens a verified-TLS
+connection, runs a native named-parameter SELECT in an explicit transaction,
+prints `Ada: 2`, closes the statement and commits. It creates no schema or rows.
+The finally block closes the connection and rolls back still-active transactional
+work on ordinary errors; Rust owns cleanup when fatal limits bypass script finally.
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo run -p scr-cli --features mysql --locked --target aarch64-apple-darwin -- fmt --check examples/mysql.scripta
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo run -p scr-cli --features mysql --locked --target aarch64-apple-darwin -- check examples/mysql.scripta
+MACOSX_DEPLOYMENT_TARGET=15.0 cargo run -p scr-cli --features mysql --locked --target aarch64-apple-darwin -- run examples/mysql.scripta
+```
 
 ## Crate boundaries
 
 `scr-db` depends only on `scr-runtime`. It owns typed `Db::` registration, opaque
 connection and statement handles, ownership checks, and shared host limits.
 It contains no SQL protocol, TLS implementation, or concrete database driver.
-Register all enabled driver descriptors together, once per runtime.
+Register all enabled driver descriptors together, once per runtime. Each DriverInfo
+supplies its API version and capability names for host discovery.
 
 `scr-ext-mysql` depends on scr-db, scr-runtime, the Rust mysql client, tempfile for
 private CA snapshots, and scr-stdlib for its existing filesystem policy. Concrete
@@ -28,6 +89,11 @@ An embedding host composes descriptors through the public native interface:
 ```rust,ignore
 scr_db::register(&mut runtime, vec![scr_ext_mysql::driver()])?;
 ```
+
+Embedding callers using scr-cli's default feature composition can instead call
+`scr_cli::extensions::register(&mut runtime)` once after standard-library
+registration, and inspect `scr_cli::extensions::compiled()` without connecting.
+Directly embedding scr-runtime does not auto-register extensions.
 
 Use `scr_ext_mysql::driver_with_options(MysqlOptions)` for host destination grants,
 filesystem roots, timeouts, worker ceilings, and result-limit ceilings. Clone the
@@ -55,11 +121,12 @@ partially initialized runtime.
 | `Db::fetchColumn(stmt, column = 0)` | Consume the next row and return its zero-based column; throw DbEndOfResultsError at exhaustion |
 | `Db::closeCursor(stmt)` | Release unread buffered results, preserving the statement for reuse; repeated calls succeed |
 | `Db::closeStatement(stmt)` | Release a statement and cursor; repeated calls succeed |
+| `Db::errorInfo(handle)` | Return the latest failure map or null for an owned connection/statement; available after closure |
 | `Db::close(db)` | Disconnect, invalidate dependent handles, and return null; repeated close succeeds |
 
 Names in a DSN select an explicitly registered driver; there is no dynamic loading.
-Missing drivers raise DbUnsupportedError. Structured Db::errorInfo inspection
-remains planned; existing native error kinds and sanitized messages are available.
+Missing drivers raise DbUnsupportedError. Native error kinds and sanitized messages
+are available alongside structured Db::errorInfo snapshots.
 
 A MySQL DSN uses `mysql:host=localhost;port=3306;dbname=app;charset=utf8mb4`.
 Host and dbname are required; port defaults to 3306 and charset to utf8mb4.
@@ -281,6 +348,41 @@ connections close their sockets through Rust ownership; the server rolls back op
 transactional work when it observes disconnection, which can happen after the
 caller's timeout. Do not report an unconfirmed rollback as confirmed.
 
+### Structured error inspection
+
+Db::errorInfo(handle) returns null initially, or a map with operation (the bare API
+name, for example execute), category, sqlState, driverCode, and message. Categories
+are connection, authentication, constraint, query, timeout, state, unsupported,
+limit and type. Codes are exact strings or null; unavailable codes are not guessed
+from diagnostic text. `$error->code` remains the Scripta diagnostic code.
+
+A failed statement operation updates its statement and connection records. A
+connection-only failure leaves statement records unchanged. Successful work clears
+the affected records; attribute/metadata/transaction-state inspection and cleanup
+never clear them. Failed owned state/unsupported/limit operations are observable;
+type/index/permission preflight errors, cancellation and normal exhaustion are not
+stored as backend failures. A successful fetchColumn returning SQL NULL clears
+history, while fetch null and fetchAll [] at exhaustion preserve it. Consumed rows
+are not rewound by inspection or errors.
+
+Snapshots contain owned, bounded data and remain readable after handle closure or
+connection invalidation. Foreign/spoofed handles are rejected. Messages contain no
+raw server text, SQL, credentials or DSNs and are truncated at a UTF-8 boundary to
+1024 bytes. SQLSTATE is validated as five uppercase ASCII letters/digits; driver
+codes have a 64-byte ASCII ceiling. Retained payload includes snapshots, with one
+shared snapshot counted once within a statement and its connection. Output map
+sizes include keys, slots and string bytes before allocation; an insufficient
+runtime budget raises DbLimitError without assigning a partial map. These are
+logical value limits, not a process heap cap.
+
+Embedding drivers can return sanitized ErrorDetails through take_error_details,
+separately from NativeError. The shared layer consumes details on each operation
+so a later local error cannot reuse stale server codes. MySQL preserves the actual
+SQLSTATE and numeric driver code, classifying integrity failures as constraint.
+Connection-construction errors have no handle; their diagnostic includes only safe
+category/code context. ErrorInfo itself performs no network I/O and does not
+modify the retained record when inspection fails.
+
 ### Blocking I/O and worker lifecycle
 
 Each MySQL connection has one dedicated worker owning the blocking client session.
@@ -345,7 +447,7 @@ buffer pooling are disabled. MySQL and mysql_common use MIT/Apache-2.0 licensing
 Existing tempfile and standard-library dependencies are reused. A direct,
 default-feature-free mysql_common dependency validates that the client cannot
 rewrite the normalized placeholder SQL; it reuses the existing locked version. The MySQL client
-is not part of the current CLI dependency graph.
+enters the CLI dependency graph only with its mysql feature enabled.
 
 The mysql 28.0.4 candidate resolved mysql_common 0.37.3, which failed actual Rust
 1.85 compilation on unavailable integer APIs. The selected 26.x release preserves
@@ -374,7 +476,7 @@ install native mysqld/mysql (MySQL 8.x), OpenSSL and Python 3.9+, then invoke fr
 the workspace root on macOS ARM64:
 
 ```sh
-MACOSX_DEPLOYMENT_TARGET=15.0 python3 crates/scr-ext-mysql/tests/support/mysql_fixture.py -- cargo test -p scr-ext-mysql --test mysql_lifecycle --test mysql_statements --test mysql_fetching --test mysql_transactions --locked --offline --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1
+MACOSX_DEPLOYMENT_TARGET=15.0 python3 crates/scr-ext-mysql/tests/support/mysql_fixture.py -- cargo test -p scr-ext-mysql --test mysql_lifecycle --test mysql_statements --test mysql_fetching --test mysql_transactions --test mysql_errors --locked --offline --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1
 ```
 
 The helper creates its own temporary data directory, test users/database, and
@@ -393,14 +495,62 @@ exhausted results, strict type mapping, duplicate labels, recovery after decodin
 errors, and exact/default decoded cell limits. Transaction tests cover affected counts, first/large IDs, found-row
 settings, commit/rollback, successful/failed DDL commits, deadlock rollback,
 connection/runtime cleanup, interrupted/timed-out writes, killed sessions and a
-lost successful COMMIT acknowledgement. Decoder unit tests cover invalid
+lost successful COMMIT acknowledgement. Error-information tests exercise real
+SQLSTATE/code preservation, reset rules, retained closed-handle snapshots, timeout
+diagnostics and independent sessions with overlapping transactions/cursors. Decoder unit tests cover invalid
 UTF-8, non-finite values, cancellation, and exact aggregate output sizes. Generated fixture credentials are public demo values, never production
 credentials. A default run with this test ignored does not establish live-server
 success. Use the equivalent native target and deployment settings on other hosts;
 fixture portability and platform release support need native evidence.
+
+CLI integration has a separate explicit live run:
+
+```sh
+MACOSX_DEPLOYMENT_TARGET=15.0 python3 crates/scr-ext-mysql/tests/support/mysql_fixture.py -- cargo test -p scr-cli --features mysql --test database_extensions --test script_testing --test web_server --locked --offline --target aarch64-apple-darwin mysql_live -- --ignored --nocapture --test-threads=1
+```
+
+It executes the formatted shared fixture in tests/fixtures/mysql-cli.scripta through
+file/stdin, both command names, embedding execution, script tests and persistent
+web workers. The fixture uses only disposable-server environment variables and
+checks prepared binding, fetching, metadata and rollback; do not point it at a
+production database. Feature-matrix tests separately cover default SQLite, neither
+backend, MySQL alone and both backends without requiring a server.
 
 Full workspace default/all-feature tests, Clippy and formatting follow the repository's
 validation guidance. Debug validation on one host does not establish release support
 or MySQL/MariaDB server compatibility on other systems. To exercise alternate SQL
 quoting modes, prefix the fixture command with
 `SCR_MYSQL_FIXTURE_SQL_MODE=ANSI_QUOTES,NO_BACKSLASH_ESCAPES,STRICT_TRANS_TABLES`.
+
+### Local validation snapshot
+
+On 2026-11-25 the working tree based on
+4de22c721eb286f30ce949da3ca8b44e276795fa passed native debug validation on
+macOS 27.0.1 ARM64, Rust 1.99.1, target aarch64-apple-darwin and MySQL 8.0.46.
+Rust build/test/Clippy commands used MACOSX_DEPLOYMENT_TARGET=15.0. This is a
+working-tree validation record, not a claim that the base commit alone includes
+the connector changes.
+
+| Scope | Result |
+| --- | --- |
+| Shared API and driver library tests | 22 scr-db and 22 scr-ext-mysql tests passed |
+| Explicit live server audit | 26 driver tests and 4 CLI/embedding/worker/example tests passed, separately with default and alternate SQL modes |
+| Minimal build | Shared API reference/discovery and disabled-backend behavior passed without default features |
+| Workspace | Default and all-feature tests passed; all-target/all-feature Clippy passed with warnings denied |
+| Minimum compiler | Rust 1.85.0 all-target/all-feature checks passed for scr-cli, scr-db and scr-ext-mysql |
+| Collections | 6 focused resource-limit tests and 22 behavior tests passed |
+| Static/repository checks | Formatting, example syntax/format/runtime, documentation paths, locked host metadata, dependency pins and diff whitespace passed |
+
+Live tests used only the helper's disposable loopback server and certificates.
+Server-dependent ignored tests were counted only after explicit execution. The
+four CLI tests cover file/stdin, both command names, embedding pipelines, native
+test workers, persistent web workers and the public MySQL example. The API reference
+checks all 19 shared Db exports. Driver coverage includes TLS/permissions, hostile
+values, exact/plus-one limits, cancellation, timeouts, cleanup, overlapping sessions,
+transactions, implicit commits, deadlocks, structured errors and deliberately lost
+successful COMMIT acknowledgements.
+
+Linux x86-64/ARM64, Windows x86-64 and the native macOS 15 baseline remain pending.
+No dist-profile/package inspection/extracted-package smoke certification was done
+for MySQL builds. Other MySQL/MariaDB versions remain unvalidated. Existing release
+assets and platform-support declarations were not changed.

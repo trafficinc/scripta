@@ -546,3 +546,41 @@ fn workers_register_only_extensions_available_in_the_executable() {
         );
     }
 }
+
+#[test]
+fn database_extensions_are_registered_in_script_test_workers() {
+    let directory = tempfile::tempdir().unwrap();
+    let kind = if cfg!(feature = "mysql") {
+        "TypeError"
+    } else {
+        "DbUnsupportedError"
+    };
+    write(
+        directory.path(),
+        "tests/database_test.scripta",
+        &format!(
+            "function test_database() {{ Assert::throws(function () {{ Db::connect('mysql:host=;dbname=unused','fixture','secret'); }}, '{kind}'); }}"
+        ),
+    );
+    let report = json(directory.path(), &[], 0);
+    assert_eq!(report["summary"]["passed"], 1, "{report}");
+}
+
+#[test]
+#[cfg(feature = "mysql")]
+#[ignore = "requires disposable verified-TLS MySQL fixture"]
+fn mysql_live_connections_work_in_script_test_workers() {
+    assert!(
+        std::env::var_os("SCR_MYSQL_FIXTURE_CA").is_some(),
+        "run mysql_fixture.py"
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let source = include_str!("../../../tests/fixtures/mysql-cli.scripta");
+    write(
+        directory.path(),
+        "tests/mysql_test.scripta",
+        &format!("function test_mysql() {{ {source} }}"),
+    );
+    let report = json(directory.path(), &[], 0);
+    assert_eq!(report["summary"]["passed"], 1, "{report}");
+}

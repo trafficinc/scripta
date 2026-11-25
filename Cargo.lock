@@ -1322,7 +1322,9 @@ dependencies = [
  "process-wrap",
  "proptest",
  "scr-ast",
+ "scr-db",
  "scr-diagnostics",
+ "scr-ext-mysql",
  "scr-ext-sqlite",
  "scr-lexer",
  "scr-parser",
@@ -1414,6 +1416,7 @@ name = "scr-stdlib"
 version = "0.2.1"
 dependencies = [
  "argon2",
+ "base64 0.22.1",
  "chrono",
  "csv",
  "fs2",
@@ -1423,6 +1426,7 @@ dependencies = [
  "process-wrap",
  "rcgen",
  "regex",
+ "ring",
  "rustls",
  "scr-lexer",
  "scr-parser",
@@ -1430,6 +1434,7 @@ dependencies = [
  "serde",
  "serde_json",
  "socket2 0.6.5",
+ "subtle",
  "sysinfo",
  "tempfile",
  "unicode-segmentation",

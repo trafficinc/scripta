@@ -54,12 +54,16 @@ pub fn main() -> ExitCode {
                 env!("SCR_PROFILE"),
                 env!("SCR_COMPILER"),
                 env!("SCR_COMMIT"),
-                if cfg!(feature = "sqlite") {
-                    "sqlite"
-                } else {
-                    "none"
-                }
+                crate::extensions::names()
             );
+            for extension in crate::extensions::compiled() {
+                println!(
+                    "extension {}: version={} capabilities={}",
+                    extension.name,
+                    extension.version,
+                    extension.capabilities.join(",")
+                );
+            }
             return ExitCode::SUCCESS;
         }
         Command::Version => {

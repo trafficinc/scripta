@@ -43,6 +43,10 @@ Use the [standard-library reference](standard-library.md) for native APIs and
 resource policies, and [Writing built-in extensions](writing-extensions.md) for
 crate registration and CLI wiring. SQLite is enabled by default; see
 [building with SQLite](sqlite.md#building-with-sqlite) for source requirements.
+MySQL is opt-in through `--features mysql`; see [database connector builds and
+discovery](database-connectors.md#building-and-identifying-mysql-support). Check
+`version --verbose` for compiled versions/capabilities. CLI, embedding, checking,
+test and web workers share registration in crates/scr-cli/src/extensions.rs.
 Add runnable examples and focused tests when behavior changes.
 
 ## Local disk cleanup

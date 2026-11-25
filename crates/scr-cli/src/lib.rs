@@ -1,5 +1,6 @@
 //! Application boundaries shared by the executable and embedding callers.
 pub mod args;
+pub mod extensions;
 pub mod pipeline;
 pub mod playground;
 

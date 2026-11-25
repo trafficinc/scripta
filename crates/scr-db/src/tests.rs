@@ -13,6 +13,7 @@ struct Observed {
     closes: Cell<usize>,
     drops: Cell<usize>,
     fail_connect: Cell<bool>,
+    fail_execute: Cell<bool>,
     fail_close: Cell<bool>,
     fail_statement_close: Cell<bool>,
     reuse_ids: Cell<bool>,
@@ -33,6 +34,7 @@ impl Driver for TestDriver {
         DriverInfo {
             name: "fixture",
             version: "1.0.0",
+            capabilities: &[],
         }
     }
     fn connect(
@@ -99,7 +101,17 @@ impl Connection for TestConnection {
                 "fixture execution timed out",
             ));
         }
+        if self.0.fail_execute.get() {
+            return Err(NativeError::new("DbError", "fixture constraint failure"));
+        }
         Ok(())
+    }
+    fn take_error_details(&mut self) -> Option<ErrorDetails> {
+        self.0.fail_execute.get().then(|| ErrorDetails {
+            category: ErrorCategory::Constraint,
+            sql_state: Some("23000".into()),
+            driver_code: Some("1062".into()),
+        })
     }
     fn validate_close_statement(&self, _: u64) -> NativeResult<()> {
         if self.0.deny_statement_close.get() {
@@ -353,6 +365,7 @@ fn foreign_and_spoofed_handles_cannot_operate_or_close_original_resources() {
     fails(&mut other, "Db::prepare($foreign,'SELECT 2');", "TypeError");
     fails(&mut other, "Db::closeStatement($foreignStmt);", "TypeError");
     fails(&mut other, "Db::close($spoof);", "TypeError");
+    fails(&mut other, "Db::errorInfo($spoof);", "TypeError");
     assert_eq!(observed.closes.get(), 0);
     assert_eq!(observed.statement_closes.get(), 0);
     run(&mut original, "Db::closeStatement($stmt);Db::close($db);");
@@ -652,4 +665,124 @@ fn uncertain_commit_invalidates_every_handle_preserves_destination_and_is_never_
     fails(&mut runtime, "Db::commit($db);", "DbStateError");
     assert_eq!(observed.transactions.get(), 1);
     assert_eq!(observed.drops.get(), 1);
+}
+
+fn info_field(runtime: &Runtime, name: &str, key: &str) -> Value {
+    let Some(Value::Map(fields)) = runtime.get_global(name) else {
+        panic!("expected info map")
+    };
+    fields
+        .iter()
+        .find(|(k, _)| *k == MapKey::String(key.into()))
+        .unwrap()
+        .1
+        .clone()
+}
+#[test]
+fn error_info_tracks_shared_failures_preserves_inspection_and_cleanup_and_survives_close() {
+    let (mut runtime, observed) = setup(DatabaseOptions::default());
+    run(&mut runtime, CONNECT);
+    run(
+        &mut runtime,
+        "$a=Db::prepare($db,'SELECT 1');$b=Db::prepare($db,'SELECT 2');$initial=Db::errorInfo($a);",
+    );
+    assert_eq!(runtime.get_global("initial"), Some(&Value::Null));
+    observed.fail_execute.set(true);
+    fails(&mut runtime, "Db::execute($a);", "DbError");
+    run(
+        &mut runtime,
+        "$info=Db::errorInfo($a);$connection=Db::errorInfo($db);$other=Db::errorInfo($b);Db::lastInsertId($db);Db::rowCount($a);Db::inTransaction($db);Db::closeStatement($a);$closed=Db::errorInfo($a);",
+    );
+    assert_eq!(
+        info_field(&runtime, "info", "category"),
+        Value::String("constraint".into())
+    );
+    assert_eq!(
+        info_field(&runtime, "info", "operation"),
+        Value::String("execute".into())
+    );
+    assert_eq!(
+        info_field(&runtime, "info", "sqlState"),
+        Value::String("23000".into())
+    );
+    assert_eq!(runtime.get_global("info"), runtime.get_global("connection"));
+    assert_eq!(runtime.get_global("info"), runtime.get_global("closed"));
+    assert_eq!(runtime.get_global("other"), Some(&Value::Null));
+    observed.fail_execute.set(false);
+    run(
+        &mut runtime,
+        "Db::execute($b);$cleared=Db::errorInfo($db);$unchanged=Db::errorInfo($a);",
+    );
+    assert_eq!(runtime.get_global("cleared"), Some(&Value::Null));
+    assert_eq!(runtime.get_global("unchanged"), runtime.get_global("info"));
+    observed.break_execute.set(true);
+    fails(&mut runtime, "Db::execute($b);", "DbTimeoutError");
+    run(
+        &mut runtime,
+        "$timeout=Db::errorInfo($b);Db::close($db);$after=Db::errorInfo($db);",
+    );
+    assert_eq!(
+        info_field(&runtime, "timeout", "category"),
+        Value::String("timeout".into())
+    );
+    assert_eq!(runtime.get_global("timeout"), runtime.get_global("after"));
+    let (mut other, _) = setup(DatabaseOptions::default());
+    for handle in ["db", "a", "b"] {
+        other
+            .set_global("foreign", runtime.get_global(handle).unwrap().clone())
+            .unwrap();
+        fails(&mut other, "Db::errorInfo($foreign);", "TypeError");
+    }
+    fails(&mut runtime, "Db::errorInfo(1);", "TypeError");
+}
+#[test]
+fn preflight_errors_and_scalar_exhaustion_preserve_failure_history_and_null_success_clears_it() {
+    let (mut runtime, observed) = setup(DatabaseOptions::default());
+    run(&mut runtime, CONNECT);
+    run(&mut runtime, "$s=Db::prepare($db,'SELECT 1');");
+    observed.fail_execute.set(true);
+    fails(&mut runtime, "Db::execute($s);", "DbError");
+    run(&mut runtime, "$before=Db::errorInfo($s);");
+    fails(&mut runtime, "Db::execute($s,1);", "TypeError");
+    fails(
+        &mut runtime,
+        "Db::fetchColumn($s,2);",
+        "DbEndOfResultsError",
+    );
+    run(&mut runtime, "$after=Db::errorInfo($s);");
+    assert_eq!(runtime.get_global("before"), runtime.get_global("after"));
+    run(
+        &mut runtime,
+        "$value=Db::fetchColumn($s,1);$cleared=Db::errorInfo($s);",
+    );
+    assert_eq!(runtime.get_global("value"), Some(&Value::Null));
+    assert_eq!(runtime.get_global("cleared"), Some(&Value::Null));
+}
+
+#[test]
+fn error_info_output_limits_preserve_destination_and_shared_snapshots_are_counted_once() {
+    let observed = Rc::new(Observed::default());
+    let mut runtime = Runtime::with_options(RuntimeOptions {
+        max_value_bytes: Some(256),
+        ..Default::default()
+    });
+    register(&mut runtime, vec![Rc::new(TestDriver(observed.clone()))]).unwrap();
+    run(&mut runtime, CONNECT);
+    run(
+        &mut runtime,
+        "$s=Db::prepare($db,'SELECT 1');$info='preserved';",
+    );
+    observed.fail_execute.set(true);
+    fails(&mut runtime, "Db::execute($s);", "DbError");
+    fails(&mut runtime, "$info=Db::errorInfo($s);", "DbLimitError");
+    assert_eq!(
+        runtime.get_global("info"),
+        Some(&Value::String("preserved".into()))
+    );
+    observed.fail_execute.set(false);
+    run(
+        &mut runtime,
+        "Db::execute($s);$info=Db::errorInfo($s);Db::close($db);",
+    );
+    assert_eq!(runtime.get_global("info"), Some(&Value::Null));
 }

@@ -27,9 +27,39 @@ fn success(output: Output) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 #[test]
+fn hashing_example_streams_empty_and_binary_files_with_known_outputs() {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("payload.bin");
+    // Expected digests/tags independently generated with Python hashlib/hmac.
+    for (data, expected) in [
+        (
+            Vec::new(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nkjWYym1krypdunnc0CGooP5cX1V1Ga2q8K1TLUUG3TA=\n",
+        ),
+        (
+            (0..50000).map(|i| (i % 256) as u8).collect(),
+            "9d3550b2e0ae28ea766fd775454403cd4888c27509cb10d1be190f89b3f1decd\nBSBKVqXVAZCPnyN9tilKbYpyKH/vQBiDHFfDL694Seo=\n",
+        ),
+    ] {
+        fs::write(&input, data).unwrap();
+        assert_eq!(
+            success(run("hashing.scripta", &[input.as_os_str()])),
+            expected
+        );
+    }
+    let missing = run("hashing.scripta", &[]);
+    assert_eq!(missing.status.code(), Some(2));
+    assert!(
+        String::from_utf8(missing.stdout)
+            .unwrap()
+            .contains("Usage:")
+    );
+}
+#[test]
 fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
     let names = [
         "hello.scripta",
+        "mysql.scripta",
         "html-escaping.scripta",
         "password-hashing.scripta",
         "variables.scripta",
@@ -58,6 +88,9 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
         "atomic-report.scripta",
         "data-handling.scripta",
         "url-encoding.scripta",
+        "binary-encoding.scripta",
+        "hashing.scripta",
+        "secure-random.scripta",
         "csv-reader.scripta",
         "download.scripta",
     ];
@@ -68,6 +101,14 @@ fn every_example_parses_and_simple_examples_run_without_external_runtimes() {
     for (name, expected) in [
         ("hello.scripta", "Hello, Scripta!\n"),
         ("loops.scripta", "1\n2\n3\n"),
+        (
+            "secure-random.scripta",
+            "Key bytes: 32\nToken characters: 32\nTag verified: true\nChanged bytes equal: false\nEmpty bytes: 0\n",
+        ),
+        (
+            "binary-encoding.scripta",
+            "Y2Fmw6k=\ncafé\n+/8A/w==\n-_8A_w\nfbff00ff\nMalformed input rejected; destination unchanged\n",
+        ),
         (
             "string-interpolation.scripta",
             "Hello, Ada!\nFirst item: apple\nTotal: 100; available: true\nLiteral: {$user->name}\n{$user->name}\n",
@@ -548,7 +589,14 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ),
         ("Form", "encode decode"),
         ("Sqlite", "open execute query close"),
-        ("Bytes", "encodeUtf8 decodeUtf8 slice"),
+        ("Bytes", "encodeUtf8 decodeUtf8 slice timingSafeEqual"),
+        ("Random", "bytes"),
+        ("Base64", "encode decode encodeUrl decodeUrl"),
+        ("Hex", "encode decode"),
+        (
+            "Hash",
+            "sha256 hmacSha256 sha256Init hmacSha256Init update finalize close",
+        ),
         ("Csv", "parse encode open readRow close"),
         ("Regex", "isMatch findAll replace"),
         (
@@ -579,7 +627,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 197);
+    assert_eq!(count, 212);
     for name in [
         "start",
         "id",

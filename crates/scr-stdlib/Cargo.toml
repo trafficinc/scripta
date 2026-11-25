@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = "0.22.1"
+ring = "0.17.14"
+subtle = { version = "2.6.1", default-features = false }
 mio = { version = "1.0", features = ["net", "os-poll"] }
 socket2 = { version = "0.6", features = ["all"] }
 scr-runtime.workspace = true

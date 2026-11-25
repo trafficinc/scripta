@@ -40,13 +40,13 @@ Embedders opt in by calling `scr_stdlib::register(&mut runtime)?`. Registration
 returns `NativeResult<()>`; duplicate names produce `RegistryError` and preserve
 the existing registration. `echo` and `exit` remain language statements. Neither
 is registered as a native function; exit returns a code without terminating the
-embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Clock`, `Log`, `Json`, `Html`, `Password`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Csv`, `Regex`, `Socket`, and `Stream` are
+embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Clock`, `Log`, `Json`, `Html`, `Password`, `Hash`, `Random`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Base64`, `Hex`, `Csv`, `Regex`, `Socket`, and `Stream` are
 registered by default.
 
 ## Export index
 
-This reference covers 203 core functions and four default CLI SQLite functions
-(207 in total), plus 19 request-context Web/Session functions, native response/entry
+This reference covers 208 core functions and four default CLI SQLite functions
+(212 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -74,7 +74,11 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Clock | `Clock::monotonicMs` | [Monotonic timing](#monotonic-timing) |
 | Log | `Log::info`, `Log::warn`, `Log::error`, `Log::debug`, `Log::setFile` | [Logging](#local-logging) |
 | Json | `Json::encode`, `Json::decode`, `Json::pretty` | [JSON](#json) |
-| Bytes | `Bytes::encodeUtf8`, `Bytes::decodeUtf8`, `Bytes::slice` | [Binary values](#binary-values) |
+| Bytes | `Bytes::encodeUtf8`, `Bytes::decodeUtf8`, `Bytes::slice`, `Bytes::timingSafeEqual` | [Binary values](#binary-values), [timing-safe comparison](#secure-randomness-and-comparison) |
+| Random | `Random::bytes` | [Secure randomness and comparison](#secure-randomness-and-comparison) |
+| Base64 | `Base64::encode`, `Base64::decode`, `Base64::encodeUrl`, `Base64::decodeUrl` | [Binary encoding](#binary-encoding) |
+| Hex | `Hex::encode`, `Hex::decode` | [Binary encoding](#binary-encoding) |
+| Hash | `Hash::sha256`, `Hash::hmacSha256`, `Hash::sha256Init`, `Hash::hmacSha256Init`, `Hash::update`, `Hash::finalize`, `Hash::close` | [SHA-256 and HMAC](#sha-256-and-hmac) |
 | Csv | `Csv::parse`, `Csv::encode`, `Csv::open`, `Csv::readRow`, `Csv::close` | [CSV](#csv) |
 | Regex | `Regex::isMatch`, `Regex::findAll`, `Regex::replace` | [Regex](#regex) |
 | Web (request context only) | `Web::request`, `Web::status`, `Web::header`, `Web::addHeader`, `Web::redirect`, `Web::write`, `Web::download`, `Web::cookie`, `Web::deleteCookie` | [Web requests](#web-requests) |
@@ -204,6 +208,140 @@ Byte payloads, including those nested in collections, count toward the runtime
 logical value byte limit. Shared values are charged by logical size, not pointer
 size. File and HTTP operations return byte values without decoding or replacing
 any data.
+
+## Binary encoding
+
+These pure codecs convert arbitrary bytes to ASCII strings and back. Text
+conversion remains explicit through `Bytes::encodeUtf8` and `Bytes::decodeUtf8`.
+
+| Function | Behavior |
+| --- | --- |
+| `Base64::encode(data: bytes): string` | Standard alphabet (`A–Z`, `a–z`, `0–9`, `+`, `/`), with canonical trailing `=` padding. |
+| `Base64::decode(text: string): bytes` | Standard alphabet; requires exactly the padding emitted by `encode` (none for complete three-byte groups). |
+| `Base64::encodeUrl(data: bytes): string` | URL-safe alphabet (`-` and `_` replace `+` and `/`), without padding. |
+| `Base64::decodeUrl(text: string): bytes` | URL-safe alphabet; rejects all `=` padding. |
+| `Hex::encode(data: bytes): string` | Two lowercase ASCII hex digits per byte, without a prefix. |
+| `Hex::decode(text: string): bytes` | Accepts uppercase or lowercase ASCII hex digits in pairs; rejects odd lengths and prefixes such as `0x`. |
+
+All codecs accept empty inputs. Base64 alphabets are case-sensitive and cannot be
+mixed. Decoders reject whitespace (including CR/LF), non-ASCII characters, invalid
+digits, misplaced padding, invalid lengths, and nonzero unused Base64 trailing
+bits with `EncodingError`. They do not trim or normalize input. Errors do not
+include encoded contents. Wrong argument types or counts raise `TypeError`.
+
+Output sizes are checked before allocation against the execution logical value
+byte limit, including the value slot and string/byte payload. Allocation or size
+failures raise `ResourceLimitError`; these limits are not a process heap cap.
+Conversion checks cancellation between bounded chunks. Failed calls preserve
+the assignment destination. Try the self-contained
+[binary encoding example](../examples/binary-encoding.scripta).
+
+## SHA-256 and HMAC
+
+These functions use the `ring` backend for SHA-256 and HMAC-SHA256. Inputs and
+keys are strictly `bytes`; outputs are 32 raw bytes. Use `Hex::encode` or
+`Base64::encode` for display, and `Bytes::encodeUtf8` for explicit text conversion.
+They require no capability permission.
+
+| Function | Behavior |
+| --- | --- |
+| `Hash::sha256(data: bytes): bytes` | One-shot SHA-256 digest. |
+| `Hash::hmacSha256(key: bytes, data: bytes): bytes` | One-shot HMAC-SHA256 tag, with the key first. Empty keys and messages are accepted. |
+| `Hash::sha256Init(): HashContext` | Creates an incremental SHA-256 context. |
+| `Hash::hmacSha256Init(key: bytes): HashContext` | Creates an incremental HMAC-SHA256 context. Keys longer than 64 bytes are normalized with SHA-256 as specified by RFC 2104. |
+| `Hash::update(context: HashContext, data: bytes): null` | Appends bytes to the hash input; empty chunks are allowed. |
+| `Hash::finalize(context: HashContext): bytes` | Returns the digest/tag and closes the context. With no updates, hashes an empty message. |
+| `Hash::close(context: HashContext): null` | Discards backend state; idempotent for an owned context. |
+
+`HashContext` has read-only `algorithm: string` (`"sha256"` or `"hmac-sha256"`)
+and `closed: bool` properties. Aliases share state. Updating or finalizing a closed
+context, including repeated finalization, raises `HashError`. Every handle
+operation checks the real native object and its creating registration; foreign
+or forged handles and wrong argument types/counts raise `TypeError`. Closing a
+foreign handle is rejected too.
+
+There are at most 64 open hash contexts per standard-library registration,
+combined across both algorithms. Closing, finalizing, or dropping the last handle
+alias releases an open slot. Exceeding this ceiling raises `HashLimitError`;
+one-shot calls do not consume a slot. SHA-256 accepts at most 2^61 − 1 input bytes
+cumulatively; HMAC messages accept 64 fewer bytes to account for the inner key-pad
+block. Oversized input raises `HashLimitError` before changing state. Long HMAC
+keys are subject to the SHA-256 input ceiling.
+
+Digest outputs and a fixed backend-state payload for each handle count toward
+the logical value byte limit, including inside collections. The handle payload
+remains charged after close until the value is released. Result sizes are checked
+and digest storage reserved before finalization consumes state; a resource
+failure preserves the open context and the assignment destination. These logical
+limits are not a process heap cap. Hashing and long-key normalization check
+cancellation between chunks of at most 16 KiB. Interruption during an update
+closes the possibly partially updated context; cancellation detected before a
+call starts leaves it unchanged. Rust cleanup releases one-shot state on failure.
+
+Incremental contexts retain fixed-size backend state rather than all prior
+chunks or the original key value. HMAC retains key-derived state capable of
+authenticating messages until close, finalize, last-alias drop, or runtime
+registration teardown (normally runtime drop). Teardown also closes host-retained
+handles. Handle APIs also validate the calling runtime identity. The temporary
+normalized long-key buffer is zeroized, but the backend does not guarantee
+erasure of its internal state or temporary copies. Immutable script key bytes,
+shared aliases, and host copies are not erased by these APIs. Debug output and
+errors do not include keys or message contents.
+
+```scripta
+$data = Bytes::encodeUtf8("abc");
+echo Hex::encode(Hash::sha256($data)) . "\n";
+```
+
+For bounded file hashing and HMAC together, run
+`scripta examples/hashing.scripta INPUT`. The [streaming example](../examples/hashing.scripta)
+prints a hex digest and a Base64 tag using a public demonstration key. Ordinary
+byte equality has no timing-safe guarantee; use `Bytes::timingSafeEqual` to compare
+received and expected digest/tag bytes.
+
+## Secure randomness and comparison
+
+| Function | Behavior |
+| --- | --- |
+| `Random::bytes(length: int): bytes` | Returns exactly the requested number of bytes from the OS-backed `getrandom` source. Zero returns empty bytes without accessing entropy. |
+| `Bytes::timingSafeEqual(left: bytes, right: bytes): bool` | Compares raw byte contents through `subtle::ConstantTimeEq`; two empty inputs are equal, and unequal lengths return false. |
+
+Both functions require strict types and exact argument counts (`TypeError` on
+mismatch), with no text conversion or capability permission. Convert text
+explicitly through `Bytes::encodeUtf8`; decode hex/Base64 before comparing tags.
+
+`Random::bytes` rejects negative or non-platform-sized lengths with `RangeError`.
+Its default per-call ceiling is 65,536 bytes (64 KiB). Requests above the host's
+ceiling raise `RandomLimitError`; scripts cannot raise the ceiling. Embedders can
+set `StdlibOptions.random` to `scr_stdlib::random::RandomConfig { max_bytes }`,
+from zero through 1,048,576 bytes (1 MiB). Zero permits only empty requests; a
+larger host setting fails registration with `RandomError`. This policy only
+controls `Random::bytes`, leaving password salts and session IDs under their
+existing policies.
+
+The output value slot and byte payload are checked against the logical value
+byte limit before allocation or entropy access; comparisons preflight one bool
+value slot. Allocation/size failures raise `ResourceLimitError`. These limits
+are not a process heap cap. Entropy failures raise `RandomError` with no backend
+details and never return partially generated bytes. There is no weak or
+deterministic fallback. Failed calls preserve the assignment destination. The
+temporary random buffer is zeroized on success or failure; returned immutable
+byte values and their shared aliases have no erasure guarantee.
+
+Generation checks cancellation before and between entropy calls of at most
+16 KiB, and after the final call. An OS entropy call can block and cannot be
+interrupted by these cooperative checks. Comparison checks cancellation between
+16 KiB chunks, scans all equal-length inputs without a mismatch shortcut, and
+combines backend comparison results before returning a bool. Cancellation remains
+fatal and can bypass script cleanup; neither function returns a partial result.
+
+Input lengths are observable: unequal lengths return immediately after the
+initial checks, and work for equal lengths depends on their length. This API
+does not promise constant-time evaluation of surrounding Scripta code, argument
+construction, allocation, scheduling, or the whole runtime. Tests check behavior
+and cancellation, not statistical randomness or wall-clock timing. See the
+self-contained [secure random example](../examples/secure-random.scripta), which
+uses random key/token bytes without printing them and verifies a transported HMAC.
 
 ## Regex
 
@@ -565,6 +703,46 @@ Comparisons are always strict, without PHP's default coercion.
 | `array_diff_key`, `array_intersect_key` | `Map::diffKeys`, `Map::intersectKeys` | Typed key comparison. |
 | `array_column` | `List::column`, `Map::column` | Requires map rows and existing fields; indexed output requires valid typed keys. |
 
+## Database connectors
+
+The CLI always registers the shared Db signatures. MySQL is an opt-in source-build
+feature (`--features mysql`); SQLite retains its independent Sqlite API and remains
+enabled by default. `scripta version --verbose` lists compiled connector versions
+and capabilities without connecting. Missing drivers raise DbUnsupportedError;
+installing a script package cannot enable a native driver. See the
+[connector guide](database-connectors.md) for build, permissions, limits, type
+mapping and installation details, and [mysql.scripta](../examples/mysql.scripta)
+for a runnable parameterized query that changes no schema or data.
+
+| Shared API | Result |
+| --- | --- |
+| `Db::connect(dsn, user, password, options = [])` | DbConnection; verified TLS, string credentials and a string-keyed options map |
+| `Db::getAttribute(db, name)` | Supported typed attribute |
+| `Db::setAttribute(db, name, value)` | null; validates settings and host ceilings |
+| `Db::prepare(db, sql)` | DbStatement; native preparation without execution |
+| `Db::execute(stmt, params = [])` | null; fresh positional or named values |
+| `Db::exec(db, sql)` | int affected rows; parameterless non-result DML or supported DDL |
+| `Db::fetch(stmt)` | Next associative map, or null at exhaustion |
+| `Db::fetchAll(stmt)` | List of remaining maps; empty at exhaustion |
+| `Db::fetchColumn(stmt, column = 0)` | Scalar/bytes/null; DbEndOfResultsError at exhaustion |
+| `Db::rowCount(stmt)` | int affected DML rows; unsupported for SELECT |
+| `Db::lastInsertId(db, sequence = null)` | Exact generated-ID string or null; MySQL rejects sequence names |
+| `Db::beginTransaction(db)` | null; rejects nesting |
+| `Db::commit(db)` | null; rejects idle state |
+| `Db::rollBack(db)` | null; rejects idle state |
+| `Db::inTransaction(db)` | bool server-derived state; performs network I/O |
+| `Db::closeCursor(stmt)` | null; discards remaining rows, preserving the prepared statement |
+| `Db::closeStatement(stmt)` | null; idempotent final statement cleanup |
+| `Db::close(db)` | null; disconnects and invalidates dependent handles |
+| `Db::errorInfo(handle)` | Last failure map or null; accepts owned connection/statement handles, including closed ones |
+
+Error maps contain operation, category, sqlState, driverCode and a sanitized message.
+Statement failures update both statement and connection; successful work clears
+the affected records. Inspection, cleanup, type/index/permission preflight failures,
+and normal exhaustion preserve them. SQL NULL remains distinguishable from scalar
+exhaustion. Messages are capped at 1024 UTF-8 bytes, and reading the map preflights
+its value budget. Codes are backend codes, separate from `$error->code` diagnostics.
+
 ## Registering Rust modules
 
 Native hosts can prepare a shared `FilesystemPolicy` using `policy.prepare()`
@@ -572,8 +750,10 @@ and call `policy.open_read(context, path)` to open regular files with the
 standard path, capability, root, and symlink checks. Extensions must bound their
 reads and check cancellation. The developing [database connector API](database-connectors.md)
 uses this interface for MySQL CA files. Embedding hosts can register its prepared
-statements, typed fetching, execution metadata and transaction controls; the CLI
-does not register this API yet.
+statements, typed fetching, execution metadata and transaction controls. The CLI
+registers shared Db signatures in every build and includes the MySQL driver with
+`--features mysql`; default builds retain SQLite. Use `scripta version --verbose`
+to inspect compiled connector versions and capabilities without connecting.
 
 For a complete extension crate with optional Cargo features, CLI startup wiring,
 tests, and distribution instructions, see [Writing built-in extensions](writing-extensions.md).

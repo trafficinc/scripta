@@ -31,6 +31,7 @@ pub(crate) struct Worker {
     active: Option<u64>,
     result_bytes: usize,
     last_insert_id: Option<u64>,
+    pub last_error_details: Option<scr_db::ErrorDetails>,
     pub attributes: Attributes,
     pub policy: Arc<MysqlOptions>,
     pub retained_bytes: usize,
@@ -185,7 +186,10 @@ pub(crate) fn connection_error(error: Error) -> NativeError {
         }
         Error::MySqlError(error) => {
             let state = if error.state.len() == 5
-                && error.state.bytes().all(|b| b.is_ascii_alphanumeric())
+                && error
+                    .state
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
             {
                 error.state
             } else {
@@ -356,6 +360,7 @@ impl Worker {
             active: None,
             result_bytes: 0,
             last_insert_id: None,
+            last_error_details: None,
         })
     }
     fn break_connection(&mut self) {
@@ -387,6 +392,7 @@ impl Worker {
         Ok(())
     }
     fn rpc(&mut self, context: &RuntimeContext<'_>, request: Request) -> NativeResult<Reply> {
+        self.last_error_details = None;
         if let Err(error) = context.check_cancelled() {
             self.break_connection();
             return Err(error);
@@ -400,11 +406,17 @@ impl Worker {
         };
         if sender.send(Message { request, response }).is_err() {
             self.break_connection();
+            self.last_error_details = Some(scr_db::ErrorDetails {
+                category: scr_db::ErrorCategory::Connection,
+                sql_state: None,
+                driver_code: None,
+            });
             return Err(NativeError::new("DbError", "MySQL worker disconnected"));
         }
         match wait(context, receiver, self.attributes.operation_timeout()) {
             Ok(Ok(reply)) => Ok(reply),
             Ok(Err(failure)) => {
+                self.last_error_details = failure.details;
                 if failure.fatal {
                     self.break_connection();
                 }
@@ -412,6 +424,13 @@ impl Worker {
             }
             Err(error) => {
                 self.break_connection();
+                if error.kind == "DbError" {
+                    self.last_error_details = Some(scr_db::ErrorDetails {
+                        category: scr_db::ErrorCategory::Connection,
+                        sql_state: None,
+                        driver_code: None,
+                    });
+                }
                 Err(error)
             }
         }

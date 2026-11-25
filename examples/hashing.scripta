@@ -1,0 +1,30 @@
+// Stream a file through both algorithms without retaining the whole file.
+$input = Cli::arg(0);
+if ($input === null) {
+    echo "Usage: scripta hashing.scripta INPUT\n";
+    exit(2);
+}
+// Public demonstration key; supply your own secret key in a real application.
+$key = Bytes::encodeUtf8("Jefe");
+$sha = Hash::sha256Init();
+$hmac = Hash::hmacSha256Init($key);
+try {
+    $stream = Stream::open($input, "r");
+    try {
+        while (true) {
+            $chunk = Stream::read($stream, 16384);
+            if ($chunk === null) {
+                break;
+            }
+            Hash::update($sha, $chunk);
+            Hash::update($hmac, $chunk);
+        }
+    } finally {
+        Stream::close($stream);
+    }
+    echo Hex::encode(Hash::finalize($sha)) . "\n";
+    echo Base64::encode(Hash::finalize($hmac)) . "\n";
+} finally {
+    Hash::close($sha);
+    Hash::close($hmac);
+}

@@ -9,7 +9,10 @@ cargo run -p scr-cli --locked -- examples/sqlite.scripta
 
 `scripta version --verbose` reports `extensions: sqlite` in standard builds.
 A minimal source build made with `cargo build -p scr-cli --locked --no-default-features`
-reports `extensions: none`. Minimal builds are not separate release downloads.
+reports `extensions: none`. Adding `--features mysql` enables the optional MySQL
+connector; with defaults it reports `extensions: sqlite, mysql`. Verbose output
+also lists each compiled extension's API version and capabilities. Minimal builds
+are not separate release downloads.
 SQLite registers four native functions;
 script packages and `require` do not enable it. The
 [runnable example](../examples/sqlite.scripta) uses an in-memory database and prints:

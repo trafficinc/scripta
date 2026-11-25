@@ -15,7 +15,7 @@ Scripta is a synchronous AST interpreter written in safe Rust:
 | `scr-stdlib` | Automation APIs and host policies |
 | `scr-db` | Shared database registration, runtime-owned handles, and driver boundaries |
 | `scr-ext-sqlite` | SQLite backend and database handles |
-| `scr-ext-mysql` | Verified-TLS MySQL connections, native prepared execution, typed fetching and transactions; CLI wiring remains under development |
+| `scr-ext-mysql` | Verified-TLS MySQL connections, native prepared execution, typed fetching and transactions; optional CLI mysql feature |
 | `scr-web` | HTTP supervision and interpreter workers |
 | `scr-cli` | Commands, formatting, packages and worker entry points |
 | `scr-release` | Distribution packaging and verification |
@@ -25,8 +25,13 @@ Extensions register through public native interfaces. The `scripta` and legacy
 `scr` commands share one CLI entry point; SQLite is enabled by default.
 
 The [database connector foundation](database-connectors.md) composes backend
-descriptors through `scr-db`. It is available to embedding hosts and tests;
-the current CLI does not register the experimental `Db::` namespace.
+descriptors through `scr-db`. The CLI always registers the shared Db namespace
+and enables the MySQL driver with its optional mysql feature. One scr-cli extension
+registrar covers checking, execution, embedding, test workers and web workers.
+Verbose discovery reads the same compiled descriptor metadata without I/O.
+The shared layer retains bounded error snapshots independently of backend lifetime;
+MySQL supplies sanitized structured codes without a runtime-wide error redesign. SQLite
+remains default-enabled and exposes its independent Sqlite namespace.
 
 ## Parsing and diagnostics
 

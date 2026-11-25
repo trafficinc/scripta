@@ -1,0 +1,13 @@
+// Generate an ephemeral key and token, and display only their sizes.
+$key = Random::bytes(32);
+$token = Base64::encodeUrl(Random::bytes(24));
+echo "Key bytes: " . str(len($key)) . "\n";
+echo "Token characters: " . str(len($token)) . "\n";
+// Encode and decode a tag as it might be transported, then compare raw bytes.
+$message = Bytes::encodeUtf8("controlled message");
+$expected = Hash::hmacSha256($key, $message);
+$received = Base64::decode(Base64::encode($expected));
+echo "Tag verified: " . str(Bytes::timingSafeEqual($expected, $received)) . "\n";
+// Fixed binary values make the unequal case deterministic.
+echo "Changed bytes equal: " . str(Bytes::timingSafeEqual(Hex::decode("00ff"), Hex::decode("00fe"))) . "\n";
+echo "Empty bytes: " . str(len(Random::bytes(0))) . "\n";

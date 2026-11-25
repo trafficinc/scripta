@@ -6,10 +6,11 @@ fn sqlite_feature_controls_cli_registration() {
         .args(["version", "--verbose"])
         .output()
         .unwrap();
-    let expected = if cfg!(feature = "sqlite") {
-        "extensions: sqlite"
-    } else {
-        "extensions: none"
+    let expected = match (cfg!(feature = "sqlite"), cfg!(feature = "mysql")) {
+        (true, true) => "extensions: sqlite, mysql",
+        (true, false) => "extensions: sqlite",
+        (false, true) => "extensions: mysql",
+        (false, false) => "extensions: none",
     };
     assert!(
         String::from_utf8_lossy(&version.stdout)

@@ -12,8 +12,10 @@ mod collections;
 mod csv;
 mod data_text;
 mod date;
+mod encoding;
 mod environment;
 pub mod filesystem;
+mod hash;
 mod html;
 pub mod http;
 mod json;
@@ -23,6 +25,7 @@ mod output;
 pub mod password;
 mod paths;
 pub mod process;
+pub mod random;
 pub mod streams;
 mod strings;
 mod system;
@@ -37,6 +40,7 @@ pub struct StdlibOptions {
     pub log: log::LogConfig,
     pub http: http::HttpConfig,
     pub password: password::PasswordConfig,
+    pub random: random::RandomConfig,
     pub streams: streams::StreamConfig,
 }
 
@@ -116,6 +120,9 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
     runtime.set_module_policy(move |path| module_policy.check_path(path, false));
     output::register(runtime)?;
     bytes::register(runtime)?;
+    random::register(runtime, options.random)?;
+    encoding::register(runtime)?;
+    hash::register(runtime)?;
     data_text::register(runtime)?;
     csv::register(runtime, options.filesystem.clone())?;
     json::register(runtime)?;

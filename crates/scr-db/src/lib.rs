@@ -3,6 +3,8 @@
 //! Backends implement [`Driver`] and [`Connection`]. Registration never connects
 //! to a server. The shared interface supports typed connection, prepared execution,
 //! typed result fetching, execution metadata, transactions, and explicit cleanup.
+mod error_info;
+pub use error_info::{ErrorCategory, ErrorDetails};
 use scr_runtime::{
     NativeError, NativeFunction, NativeObject, NativeResult, NativeSignature, NativeType, Runtime,
     RuntimeContext, Value,
@@ -19,6 +21,8 @@ use std::{
 pub struct DriverInfo {
     pub name: &'static str,
     pub version: &'static str,
+    /// Supported connector operations, not server-specific feature negotiation.
+    pub capabilities: &'static [&'static str],
 }
 
 /// Borrowed credentials and options. Intentionally does not implement Debug.
@@ -54,6 +58,11 @@ pub trait Driver: fmt::Debug {
 /// The backend owns statements/cursors, avoiding a borrow of a connection inside
 /// a script handle. Explicit close must release resources even when it fails.
 pub trait Connection: fmt::Debug {
+    /// Take details of the immediately preceding operation; never return stale
+    /// details for a later preflight error. NativeError messages must be sanitized.
+    fn take_error_details(&mut self) -> Option<ErrorDetails> {
+        None
+    }
     /// Broken I/O must invalidate every dependent script handle.
     fn is_broken(&self) -> bool {
         false
@@ -180,6 +189,7 @@ struct Session {
     registration: Rc<Registration>,
     backend: RefCell<Option<Box<dyn Connection>>>,
     statements: RefCell<BTreeMap<u64, Weak<Statement>>>,
+    error: RefCell<Option<Rc<error_info::Record>>>,
 }
 impl fmt::Debug for Session {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -189,18 +199,60 @@ impl fmt::Debug for Session {
     }
 }
 impl Session {
+    fn observe<T>(
+        &self,
+        operation: &'static str,
+        statement: Option<&Statement>,
+        clear: impl FnOnce(&T) -> bool,
+        result: &NativeResult<T>,
+        details: Option<ErrorDetails>,
+    ) {
+        match result {
+            Ok(value) if clear(value) => {
+                self.error.borrow_mut().take();
+                if let Some(statement) = statement {
+                    statement.error.borrow_mut().take();
+                }
+            }
+            Err(error) if !error_info::ignored(error) => {
+                let record = Rc::new(error_info::Record::new(operation, error, details));
+                *self.error.borrow_mut() = Some(record.clone());
+                if let Some(statement) = statement {
+                    *statement.error.borrow_mut() = Some(record);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn failure(
+        &self,
+        operation: &'static str,
+        statement: Option<&Statement>,
+        error: NativeError,
+    ) -> NativeError {
+        self.observe::<()>(operation, statement, |_| false, &Err(error.clone()), None);
+        error
+    }
     fn call<T>(
         &self,
+        operation: &'static str,
+        statement: Option<&Statement>,
+        clear: impl FnOnce(&T) -> bool,
         action: impl FnOnce(&mut dyn Connection) -> NativeResult<T>,
     ) -> NativeResult<T> {
-        let (result, broken) = {
+        let (result, broken, details) = {
             let mut backend = self.backend.borrow_mut();
-            let backend = backend
-                .as_mut()
-                .ok_or_else(|| state("database connection is closed"))?;
-            let result = action(backend.as_mut());
-            (result, backend.is_broken())
+            match backend.as_mut() {
+                Some(backend) => {
+                    backend.take_error_details();
+                    let result = action(backend.as_mut());
+                    let details = backend.take_error_details();
+                    (result, backend.is_broken(), details)
+                }
+                None => (Err(state("database connection is closed")), false, None),
+            }
         };
+        self.observe(operation, statement, clear, &result, details);
         if broken {
             drop(self.release());
         }
@@ -237,6 +289,12 @@ impl NativeObject for Session {
             .borrow()
             .as_ref()
             .map_or(0, |backend| backend.payload_bytes())
+            .saturating_add(
+                self.error
+                    .borrow()
+                    .as_ref()
+                    .map_or(0, |error| error.payload()),
+            )
     }
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
@@ -256,6 +314,7 @@ struct Statement {
     session: Rc<Session>,
     id: u64,
     closed: Cell<bool>,
+    error: RefCell<Option<Rc<error_info::Record>>>,
 }
 impl fmt::Debug for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -266,7 +325,19 @@ impl fmt::Debug for Statement {
 }
 impl NativeObject for Statement {
     fn payload_bytes(&self) -> usize {
-        self.session.payload_bytes()
+        let error = self.error.borrow();
+        let connection_error = self.session.error.borrow();
+        let bytes = error.as_ref().map_or(0, |error| {
+            if connection_error
+                .as_ref()
+                .is_some_and(|other| Rc::ptr_eq(error, other))
+            {
+                0
+            } else {
+                error.payload()
+            }
+        });
+        self.session.payload_bytes().saturating_add(bytes)
     }
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
@@ -425,7 +496,11 @@ pub fn register_with_options(
                 let driver = registered.drivers.get(name).ok_or_else(|| {
                     NativeError::new(
                         "DbUnsupportedError",
-                        "database driver is not available in this registration",
+                        if name == "mysql" {
+                            "MySQL driver is unavailable in this executable or host registration; inspect scripta version --verbose; CLI source builds need --features mysql, embedding hosts must register the driver; installing a script package cannot enable it"
+                        } else {
+                            "database driver is unavailable in this executable or host registration; inspect scripta version --verbose and use a compatible executable or register the required driver"
+                        },
                     )
                 })?;
                 if registered.live.get() >= registered.options.max_connections {
@@ -447,6 +522,7 @@ pub fn register_with_options(
                     registration: registered.clone(),
                     backend: RefCell::new(Some(backend)),
                     statements: RefCell::new(BTreeMap::new()),
+                    error: RefCell::new(None),
                 })))
             },
         ),
@@ -466,12 +542,12 @@ pub fn register_with_options(
                 let Value::String(name) = &args[1] else {
                     return Err(NativeError::type_error("attribute name must be a string"));
                 };
-                connection
-                    .backend
-                    .borrow()
-                    .as_ref()
-                    .ok_or_else(|| state("database connection is closed"))?
-                    .get_attribute(name)
+                connection.call(
+                    "getAttribute",
+                    None,
+                    |_| false,
+                    |backend| backend.get_attribute(name),
+                )
             },
         ),
     )?;
@@ -494,12 +570,12 @@ pub fn register_with_options(
                 let Value::String(name) = &args[1] else {
                     return Err(NativeError::type_error("attribute name must be a string"));
                 };
-                connection
-                    .backend
-                    .borrow_mut()
-                    .as_mut()
-                    .ok_or_else(|| state("database connection is closed"))?
-                    .set_attribute(name, &args[2])?;
+                connection.call(
+                    "setAttribute",
+                    None,
+                    |_| true,
+                    |backend| backend.set_attribute(name, &args[2]),
+                )?;
                 Ok(Value::Null)
             },
         ),
@@ -521,10 +597,14 @@ pub fn register_with_options(
                     return Err(NativeError::type_error("SQL must be a string"));
                 };
                 if sql.len() > registered.options.max_sql_bytes {
-                    return Err(limit("database SQL byte limit exceeded"));
+                    return Err(connection.failure(
+                        "exec",
+                        None,
+                        limit("database SQL byte limit exceeded"),
+                    ));
                 }
                 connection
-                    .call(|backend| backend.exec(context, sql))
+                    .call("exec", None, |_| true, |backend| backend.exec(context, sql))
                     .map(Value::Int)
             },
         ),
@@ -538,10 +618,19 @@ pub fn register_with_options(
                 require_owner(context, &registered)?;
                 let stmt = statement(&args[0], &registered)?;
                 if stmt.closed.get() {
-                    return Err(state("database statement is closed"));
+                    return Err(stmt.session.failure(
+                        "rowCount",
+                        Some(stmt),
+                        state("database statement is closed"),
+                    ));
                 }
                 stmt.session
-                    .call(|backend| backend.row_count(stmt.id))
+                    .call(
+                        "rowCount",
+                        Some(stmt),
+                        |_| false,
+                        |backend| backend.row_count(stmt.id),
+                    )
                     .map(Value::Int)
             },
         ),
@@ -565,7 +654,12 @@ pub fn register_with_options(
                     Some(Value::String(s)) => Some(s.as_str()),
                     _ => None,
                 };
-                connection.call(|backend| backend.last_insert_id(sequence))
+                connection.call(
+                    "lastInsertId",
+                    None,
+                    |_| false,
+                    |backend| backend.last_insert_id(sequence),
+                )
             },
         ),
     )?;
@@ -592,8 +686,12 @@ pub fn register_with_options(
                     let connection = session(&args[0], &registered)?;
                     context.check_cancelled()?;
                     context.permissions.require("network.connect")?;
-                    let active =
-                        connection.call(|backend| backend.transaction(context, operation))?;
+                    let active = connection.call(
+                        name.strip_prefix("Db::").unwrap_or(name),
+                        None,
+                        |_| operation != TransactionOperation::Inspect,
+                        |backend| backend.transaction(context, operation),
+                    )?;
                     Ok(if operation == TransactionOperation::Inspect {
                         Value::Bool(active)
                     } else {
@@ -620,27 +718,45 @@ pub fn register_with_options(
                     return Err(NativeError::type_error("SQL must be a string"));
                 };
                 if sql.len() > registered.options.max_sql_bytes {
-                    return Err(limit("database SQL byte limit exceeded"));
+                    return Err(connection.failure(
+                        "prepare",
+                        None,
+                        limit("database SQL byte limit exceeded"),
+                    ));
                 }
                 if connection.statements.borrow().len()
                     >= registered.options.max_statements_per_connection
                 {
-                    return Err(limit("database statement limit exceeded"));
+                    return Err(connection.failure(
+                        "prepare",
+                        None,
+                        limit("database statement limit exceeded"),
+                    ));
                 }
-                let id = connection.call(|backend| backend.prepare(context, sql))?;
+                let id = connection.call(
+                    "prepare",
+                    None,
+                    |_| true,
+                    |backend| backend.prepare(context, sql),
+                )?;
                 if let Err(error) = context.check_cancelled() {
                     drop(connection.release());
                     return Err(error);
                 }
                 if connection.statements.borrow().contains_key(&id) {
                     drop(connection.release());
-                    return Err(state("backend reused a live statement identifier"));
+                    return Err(connection.failure(
+                        "prepare",
+                        None,
+                        state("backend reused a live statement identifier"),
+                    ));
                 }
                 let shared = connection.shared()?;
                 let statement = Rc::new(Statement {
                     session: shared,
                     id,
                     closed: Cell::new(false),
+                    error: RefCell::new(None),
                 });
                 connection
                     .statements
@@ -663,14 +779,22 @@ pub fn register_with_options(
                 require_owner(context, &registered)?;
                 let stmt = statement(&args[0], &registered)?;
                 if stmt.closed.get() {
-                    return Err(state("database statement is closed"));
+                    return Err(stmt.session.failure(
+                        "execute",
+                        Some(stmt),
+                        state("database statement is closed"),
+                    ));
                 }
                 context.check_cancelled()?;
                 context.permissions.require("network.connect")?;
                 let empty = Value::List(Vec::new());
                 let params = args.get(1).unwrap_or(&empty);
-                stmt.session
-                    .call(|backend| backend.execute(context, stmt.id, params))?;
+                stmt.session.call(
+                    "execute",
+                    Some(stmt),
+                    |_| true,
+                    |backend| backend.execute(context, stmt.id, params),
+                )?;
                 Ok(Value::Null)
             },
         ),
@@ -704,21 +828,34 @@ pub fn register_with_options(
                 require_owner(context, &registered)?;
                 let stmt = statement(&args[0], &registered)?;
                 if stmt.closed.get() {
-                    return Err(state("database statement is closed"));
+                    return Err(stmt.session.failure(
+                        name.strip_prefix("Db::").unwrap_or(name),
+                        Some(stmt),
+                        state("database statement is closed"),
+                    ));
                 }
                 context.check_cancelled()?;
                 context.permissions.require("network.connect")?;
-                stmt.session.call(|backend| match name {
-                    "Db::fetch" => backend.fetch(context, stmt.id),
-                    "Db::fetchAll" => backend.fetch_all(context, stmt.id),
-                    _ => {
-                        let column = match args.get(1) {
-                            Some(Value::Int(column)) => *column,
-                            _ => 0,
-                        };
-                        backend.fetch_column(context, stmt.id, column)
-                    }
-                })
+                stmt.session.call(
+                    name.strip_prefix("Db::").unwrap_or(name),
+                    Some(stmt),
+                    |value| match name {
+                        "Db::fetch" => !matches!(value, Value::Null),
+                        "Db::fetchAll" => !matches!(value,Value::List(rows) if rows.is_empty()),
+                        _ => true,
+                    },
+                    |backend| match name {
+                        "Db::fetch" => backend.fetch(context, stmt.id),
+                        "Db::fetchAll" => backend.fetch_all(context, stmt.id),
+                        _ => {
+                            let column = match args.get(1) {
+                                Some(Value::Int(column)) => *column,
+                                _ => 0,
+                            };
+                            backend.fetch_column(context, stmt.id, column)
+                        }
+                    },
+                )
             }),
         )?;
     }
@@ -731,8 +868,12 @@ pub fn register_with_options(
                 require_owner(context, &registered)?;
                 let stmt = statement(&args[0], &registered)?;
                 if !stmt.closed.get() {
-                    stmt.session
-                        .call(|backend| backend.close_cursor(context, stmt.id))?;
+                    stmt.session.call(
+                        "closeCursor",
+                        Some(stmt),
+                        |_| false,
+                        |backend| backend.close_cursor(context, stmt.id),
+                    )?;
                 }
                 Ok(Value::Null)
             },
@@ -747,13 +888,20 @@ pub fn register_with_options(
                 require_owner(context, &registered)?;
                 let statement = statement(&args[0], &registered)?;
                 if !statement.closed.get() {
-                    statement
+                    let result = statement
                         .session
                         .backend
                         .borrow()
                         .as_ref()
-                        .ok_or_else(|| state("database connection is closed"))?
-                        .validate_close_statement(statement.id)?;
+                        .ok_or_else(|| state("database connection is closed"))
+                        .and_then(|backend| backend.validate_close_statement(statement.id));
+                    if let Err(error) = result {
+                        return Err(statement.session.failure(
+                            "closeStatement",
+                            Some(statement),
+                            error,
+                        ));
+                    }
                 }
                 if !statement.closed.replace(true) {
                     statement
@@ -761,10 +909,21 @@ pub fn register_with_options(
                         .statements
                         .borrow_mut()
                         .remove(&statement.id);
-                    let result = match statement.session.backend.borrow_mut().as_mut() {
-                        Some(backend) => backend.close_statement(context, statement.id),
-                        None => Ok(()),
+                    let (result, details) = match statement.session.backend.borrow_mut().as_mut() {
+                        Some(backend) => {
+                            backend.take_error_details();
+                            let result = backend.close_statement(context, statement.id);
+                            (result, backend.take_error_details())
+                        }
+                        None => (Ok(()), None),
                     };
+                    statement.session.observe(
+                        "closeStatement",
+                        Some(statement),
+                        |_| false,
+                        &result,
+                        details,
+                    );
                     if let Err(error) = result {
                         // Do not free a slot while leaving an unusable server
                         // statement/session available for subsequent work.
@@ -776,6 +935,34 @@ pub fn register_with_options(
             },
         ),
     )?;
+    let registered = registration.clone();
+    runtime.register(
+        "Db::errorInfo",
+        NativeFunction::new(
+            NativeSignature::new(
+                vec![NativeType::OneOf(vec![
+                    NativeType::Object("DbConnection"),
+                    NativeType::Object("DbStatement"),
+                ])],
+                NativeType::OneOf(vec![NativeType::Map, NativeType::Null]),
+            ),
+            move |context, args| {
+                require_owner(context, &registered)?;
+                context.check_cancelled()?;
+                let record = match &args[0] {
+                    Value::NativeObject(object)
+                        if object.as_any().is_some_and(|value| value.is::<Session>()) =>
+                    {
+                        session(&args[0], &registered)?.error.borrow().clone()
+                    }
+                    _ => statement(&args[0], &registered)?.error.borrow().clone(),
+                };
+                record.map_or(Ok(Value::Null), |record| {
+                    record.value(context.max_value_bytes)
+                })
+            },
+        ),
+    )?;
     runtime.register(
         "Db::close",
         NativeFunction::new(
@@ -784,7 +971,15 @@ pub fn register_with_options(
                 require_owner(context, &registration)?;
                 let connection = session(&args[0], &registration)?;
                 if let Some(mut backend) = connection.release() {
-                    backend.close(context)?;
+                    let result = backend.close(context);
+                    connection.observe(
+                        "close",
+                        None,
+                        |_| false,
+                        &result,
+                        backend.take_error_details(),
+                    );
+                    result?;
                 }
                 Ok(Value::Null)
             },

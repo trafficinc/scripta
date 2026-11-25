@@ -17,6 +17,7 @@ use std::{
 pub(crate) struct Failure {
     pub error: NativeError,
     pub fatal: bool,
+    pub details: Option<scr_db::ErrorDetails>,
 }
 pub(crate) enum Reply {
     Prepared {
@@ -86,19 +87,34 @@ fn failure(kind: &str, message: &str, fatal: bool) -> Failure {
     Failure {
         error: NativeError::new(kind, message),
         fatal,
+        details: None,
     }
 }
-fn backend(error: mysql::Error) -> Failure {
+pub(crate) fn backend(error: mysql::Error) -> Failure {
     let fatal = error.is_connectivity_error();
+    let details;
     let error = match error {
         mysql::Error::MySqlError(error) => {
             let state = if error.state.len() == 5
-                && error.state.bytes().all(|b| b.is_ascii_alphanumeric())
+                && error
+                    .state
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
             {
                 error.state
             } else {
                 "unknown".into()
             };
+            details = Some(scr_db::ErrorDetails {
+                category: match state.get(..2) {
+                    Some("23") => scr_db::ErrorCategory::Constraint,
+                    Some("28") => scr_db::ErrorCategory::Authentication,
+                    Some("08") => scr_db::ErrorCategory::Connection,
+                    _ => scr_db::ErrorCategory::Query,
+                },
+                sql_state: (state != "unknown").then(|| state.clone()),
+                driver_code: Some(error.code.to_string()),
+            });
             NativeError::new(
                 "DbError",
                 format!(
@@ -107,9 +123,20 @@ fn backend(error: mysql::Error) -> Failure {
                 ),
             )
         }
-        other => super::worker::connection_error(other),
+        other => {
+            details = Some(scr_db::ErrorDetails {
+                category: scr_db::ErrorCategory::Connection,
+                sql_state: None,
+                driver_code: None,
+            });
+            super::worker::connection_error(other)
+        }
     };
-    Failure { error, fatal }
+    Failure {
+        error,
+        fatal,
+        details,
+    }
 }
 pub(crate) fn mode(connection: &mut Conn) -> mysql::Result<Mode> {
     let modes: Option<String> = connection.query_first("SELECT @@SESSION.sql_mode")?;
@@ -497,4 +524,32 @@ pub(crate) fn serve(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+    #[test]
+    fn server_text_and_malformed_states_never_enter_failure_snapshots() {
+        for (state, expected) in [("23000", Some("23000")), ("secre", None), ("bad\n!", None)] {
+            let failure = backend(mysql::Error::MySqlError(mysql::MySqlError {
+                state: state.into(),
+                code: 1062,
+                message: "credential-secret SELECT private FROM confidential".into(),
+            }));
+            assert!(!failure.error.message.contains("credential-secret"));
+            assert!(!failure.error.message.contains("private"));
+            let details = failure.details.unwrap();
+            assert_eq!(details.sql_state.as_deref(), expected);
+            assert_eq!(details.driver_code.as_deref(), Some("1062"));
+            assert_eq!(
+                details.category,
+                if expected.is_some() {
+                    scr_db::ErrorCategory::Constraint
+                } else {
+                    scr_db::ErrorCategory::Query
+                }
+            );
+        }
+    }
 }

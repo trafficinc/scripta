@@ -1,0 +1,15 @@
+// Explicit text conversion and arbitrary binary data; no external input or I/O.
+$text = "café";
+$data = Bytes::encodeUtf8($text);
+echo Base64::encode($data) . "\n";
+echo Bytes::decodeUtf8(Base64::decode(Base64::encode($data))) . "\n";
+$binary = Hex::decode("FBFF00FF");
+echo Base64::encode($binary) . "\n";
+echo Base64::encodeUrl($binary) . "\n";
+echo Hex::encode(Base64::decodeUrl(Base64::encodeUrl($binary))) . "\n";
+$result = "unchanged";
+try {
+    $result = Base64::decode("Zh==");
+} catch (EncodingError $error) {
+    echo "Malformed input rejected; destination " . $result . "\n";
+}

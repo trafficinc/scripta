@@ -1,0 +1,25 @@
+// Requires a source build with --features mysql and SCR_MYSQL_DSN/USER/PASSWORD.
+$dsn = Env::get("SCR_MYSQL_DSN");
+$user = Env::get("SCR_MYSQL_USER");
+$password = Env::get("SCR_MYSQL_PASSWORD");
+if ($dsn === null || $user === null || $password === null) {
+    throw "Set SCR_MYSQL_DSN, SCR_MYSQL_USER, and SCR_MYSQL_PASSWORD first";
+}
+$options = [];
+$ca = Env::get("SCR_MYSQL_CA_FILE");
+if ($ca !== null) {
+    $options = ["tlsCaFile" => $ca];
+}
+$db = Db::connect($dsn, $user, $password, $options);
+try {
+    Db::beginTransaction($db);
+    $stmt = Db::prepare($db, "SELECT :name AS name, :amount AS amount");
+    Db::execute($stmt, ["name" => "Ada", "amount" => 2]);
+    $row = Db::fetch($stmt);
+    echo $row["name"] . ": " . str($row["amount"]) . "\n";
+    Db::closeStatement($stmt);
+    Db::commit($db);
+} finally {
+    // Close rolls back any still-active transactional work on ordinary errors.
+    Db::close($db);
+}

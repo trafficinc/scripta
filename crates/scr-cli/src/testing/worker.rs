@@ -64,8 +64,7 @@ fn run(request_path: &Path, path: &Path, directory: &Path) -> Result<WorkerResul
             .map_err(|e| scr_runtime::NativeError::new("PackageError", e.to_string()))
     });
     scr_stdlib::register(&mut runtime).map_err(|e| e.to_string())?;
-    #[cfg(feature = "sqlite")]
-    scr_ext_sqlite::register(&mut runtime).map_err(|e| e.to_string())?;
+    crate::extensions::register(&mut runtime).map_err(|e| e.to_string())?;
     let state = Rc::new(RefCell::new(assertions::State::default()));
     assertions::register(&mut runtime, state.clone(), directory.join("tmp"))?;
     let mut output = std::io::stdout();

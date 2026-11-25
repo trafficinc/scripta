@@ -7,6 +7,8 @@ license.workspace = true
 default-run = "scripta"
 
 [dependencies]
+scr-db = { path = "../scr-db" }
+scr-ext-mysql = { path = "../scr-ext-mysql", optional = true }
 scr-web = { path = "../scr-web" }
 scr-ext-sqlite = { path = "../scr-ext-sqlite", optional = true }
 scr-diagnostics.workspace = true
@@ -27,6 +29,7 @@ process-wrap = { version = "8.2.2", features = ["std"] }
 [features]
 default = ["sqlite"]
 sqlite = ["dep:scr-ext-sqlite"]
+mysql = ["dep:scr-ext-mysql"]
 
 [[bin]]
 name = "scripta"

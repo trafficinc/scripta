@@ -8,6 +8,11 @@ fn unknown() -> Failure {
     Failure {
         error: NativeError::new("DbError", "cannot establish MySQL transaction state"),
         fatal: true,
+        details: Some(scr_db::ErrorDetails {
+            category: scr_db::ErrorCategory::Connection,
+            sql_state: None,
+            driver_code: None,
+        }),
     }
 }
 #[derive(Default)]
@@ -78,6 +83,7 @@ impl Tracker {
                     },
                 ),
                 fatal: false,
+                details: None,
             });
         }
         let sql = match operation {
@@ -86,16 +92,16 @@ impl Tracker {
             TransactionOperation::RollBack => "ROLLBACK",
             TransactionOperation::Inspect => unreachable!(),
         };
-        if connection.query_drop(sql).is_err() {
-            // A failed control request must never be retried. In particular a
-            // missing commit acknowledgement cannot establish whether it committed.
-            return Err(Failure {
-                error: NativeError::new(
-                    "DbError",
-                    "MySQL transaction control failed; outcome is unknown",
-                ),
-                fatal: true,
-            });
+        if let Err(error) = connection.query_drop(sql) {
+            // Preserve safe codes, but never imply that failed acknowledgement
+            // establishes whether the control operation took effect.
+            let mut failure = crate::protocol::backend(error);
+            failure.error = NativeError::new(
+                "DbError",
+                "MySQL transaction control failed; outcome is unknown",
+            );
+            failure.fatal = true;
+            return Err(failure);
         }
         self.refresh(connection)?;
         if self.active != (operation == TransactionOperation::Begin) {

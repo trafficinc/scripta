@@ -3023,3 +3023,47 @@ fn tag_free_web_entry_and_include_execute_in_persistent_workers() {
         assert_eq!(body, format!("tag free {path}").as_bytes());
     }
 }
+
+#[test]
+fn database_extensions_are_registered_in_persistent_web_workers() {
+    let source = if cfg!(feature = "mysql") {
+        "try { Db::connect('mysql:host=;dbname=unused','fixture','secret'); } catch (TypeError $e) { echo 'mysql enabled'; }"
+    } else {
+        "try { Db::connect('mysql:host=;dbname=unused','fixture','secret'); } catch (DbUnsupportedError $e) { echo 'mysql disabled'; }"
+    };
+    let server = Server::start(source, &[]);
+    for _ in 0..2 {
+        let (status, _, body) = server.request("GET", "/", b"", "text/plain");
+        assert_eq!(status, 200);
+        assert_eq!(
+            body,
+            if cfg!(feature = "mysql") {
+                b"mysql enabled".as_slice()
+            } else {
+                b"mysql disabled".as_slice()
+            }
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "mysql")]
+#[ignore = "requires disposable verified-TLS MySQL fixture"]
+fn mysql_live_connections_work_in_persistent_web_workers() {
+    assert!(
+        std::env::var_os("SCR_MYSQL_FIXTURE_CA").is_some(),
+        "run mysql_fixture.py"
+    );
+    let server = Server::start(
+        r#"
+$db=Db::connect(Env::get("SCR_MYSQL_FIXTURE_DSN"),Env::get("SCR_MYSQL_FIXTURE_USER"),Env::get("SCR_MYSQL_FIXTURE_PASSWORD"),["tlsCaFile"=>Env::get("SCR_MYSQL_FIXTURE_CA")]);
+try { $s=Db::prepare($db,"SELECT ? AS n"); Db::execute($s,[42]); echo str(Db::fetchColumn($s)); } finally { Db::close($db); }
+"#,
+        &[],
+    );
+    for _ in 0..2 {
+        let (status, _, body) = server.request("GET", "/", b"", "text/plain");
+        assert_eq!(status, 200);
+        assert_eq!(body, b"42");
+    }
+}

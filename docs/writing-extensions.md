@@ -9,11 +9,14 @@ The default-enabled [SQLite extension](sqlite.md), implemented in `crates/scr-ex
 provides a complete stateful example with runtime-owned handles and resource limits.
 
 For shared APIs with multiple backend drivers, see the experimental
-[database connector foundation](database-connectors.md). Its MySQL crate provides a
+[database connector foundation](database-connectors.md). Its MySQL crate provides
 verified-TLS connections, native prepared statements, typed result fetching,
-execution metadata and transactions for embedding hosts; CLI wiring remains under
-development. Backends implement the shared TransactionOperation controls with
-server-derived state and invalidate handles on uncertain outcomes.
+execution metadata and transactions for embedding hosts and the opt-in CLI mysql
+feature. Backends implement the shared TransactionOperation controls with
+server-derived state and invalidate handles on uncertain outcomes. Return sanitized
+ErrorDetails through Connection::take_error_details for shared post-close
+Db::errorInfo snapshots; never supply raw server messages or credentials. The shared
+layer owns snapshot limits and reset semantics.
 
 This guide adds a small optional `Greeting::hello(name)` extension in a source
 checkout. The crate, feature, and function below are tutorial additions; they
@@ -133,20 +136,24 @@ default = ["sqlite"]
 greeting = ["dep:scr-ext-greeting"]
 ```
 
-In `crates/scr-cli/src/pipeline.rs`, inside `run_with_options`, insert the following
-immediately after `scr_stdlib::register(...)` succeeds and before
-`runtime.execute_source(source, output)`:
+In `crates/scr-cli/src/extensions.rs`, add registration to `register` before its
+final `scr_db::register(...)` call:
 
 ```rust
     #[cfg(feature = "greeting")]
-    scr_ext_greeting::register(&mut runtime)
-        .map_err(|error| Diagnostic::new(error.to_string(), Default::default()))?;
+    scr_ext_greeting::register(runtime)?;
 ```
 
-`Runtime::with_options` creates a fresh runtime for each pipeline invocation;
-register the extension once for each new runtime. This location covers execution
-through both the CLI and `scr_cli::pipeline`. Syntax-only `scripta check` does not
-execute startup registration or resolve whether a native function exists.
+This common registrar runs once for every fresh runtime used by the CLI pipeline,
+embedding pipeline, static checking, native script-test workers and web workers.
+Do not also register the extension in each caller. Checking registers signatures
+but performs no script execution or connector I/O; it does not prove driver
+availability, a valid DSN or working credentials.
+
+Expose version/capability constants from the extension and add its metadata to the
+feature-gated `compiled()` list in this same file so `version --verbose` describes
+what is registered. For Db drivers, return version/capabilities from Driver::info;
+the CLI reads that same descriptor for both discovery and registration.
 
 The feature is optional and disabled by default. To build this extension into
 every default CLI build, add `"greeting"` to the CLI's default feature list.
@@ -348,7 +355,9 @@ Users need that rebuilt `scripta` executable. Installing a script library with
 `scripta add` cannot enable a Cargo feature, compile a native extension, or replace
 the interpreter. Document which extensions each binary includes; the current CLI
 reports built-in extensions in `scripta version --verbose`. Scripts using an unavailable
-extension fail when they call its native functions.
+extension fail when they call its native functions. The shared Db namespace remains
+registered without drivers to report DbUnsupportedError and an actionable build
+or registration hint.
 
 Built-in extension crates can live in this repository or in separate repositories
 referenced through Cargo. Pin external sources in Cargo.lock and build against a
