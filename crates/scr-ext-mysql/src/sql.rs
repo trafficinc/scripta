@@ -33,7 +33,14 @@ impl Parameters {
         }
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Select,
+    Dml,
+    Ddl,
+}
 pub(crate) struct Parsed {
+    pub kind: Kind,
     pub sql: String,
     pub parameters: Parameters,
 }
@@ -57,6 +64,26 @@ pub(crate) fn parse(
     sql: &str,
     mode: Mode,
     max_params: usize,
+    checkpoint: impl FnMut() -> NativeResult<()>,
+) -> NativeResult<Parsed> {
+    scan(sql, mode, max_params, false, checkpoint)
+}
+pub(crate) fn parse_exec(
+    sql: &str,
+    mode: Mode,
+    checkpoint: impl FnMut() -> NativeResult<()>,
+) -> NativeResult<Parsed> {
+    let parsed = scan(sql, mode, 0, true, checkpoint)?;
+    if parsed.kind == Kind::Select {
+        return Err(unsupported("exec does not accept result-returning SQL"));
+    }
+    Ok(parsed)
+}
+fn scan(
+    sql: &str,
+    mode: Mode,
+    max_params: usize,
+    ddl: bool,
     mut checkpoint: impl FnMut() -> NativeResult<()>,
 ) -> NativeResult<Parsed> {
     if sql.contains('\0') {
@@ -67,6 +94,7 @@ pub(crate) fn parse(
     let mut copied = 0;
     let mut normalized = String::with_capacity(sql.len());
     let mut first = None;
+    let mut prefix = Vec::new();
     let mut terminated = false;
     let mut positional = 0;
     let mut names = Vec::new();
@@ -210,14 +238,18 @@ pub(crate) fn parse(
                 }
             }
             let token = &sql[start..i];
+            if prefix.len() < 3 {
+                prefix.push(token.to_ascii_uppercase());
+            }
             if first.is_none() {
                 let upper = token.to_ascii_uppercase();
                 if !matches!(
                     upper.as_str(),
                     "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "REPLACE"
-                ) {
+                ) && !(ddl && matches!(upper.as_str(), "CREATE" | "ALTER" | "DROP"))
+                {
                     return Err(unsupported(
-                        "statement kind is not supported by prepared execution",
+                        "statement kind is not supported by this operation",
                     ));
                 }
                 first = Some(upper);
@@ -237,6 +269,22 @@ pub(crate) fn parse(
     if first.is_none() {
         return Err(invalid("SQL statement is empty"));
     }
+    let kind = match first.as_deref() {
+        Some("SELECT") => Kind::Select,
+        Some("INSERT" | "UPDATE" | "DELETE" | "REPLACE") => Kind::Dml,
+        _ => {
+            let supported = prefix.get(1).is_some_and(|s| s == "TABLE")
+                || (matches!(first.as_deref(), Some("CREATE" | "DROP"))
+                    && prefix.get(1).is_some_and(|s| s == "INDEX"))
+                || (first.as_deref() == Some("CREATE")
+                    && prefix.get(1).is_some_and(|s| s == "UNIQUE")
+                    && prefix.get(2).is_some_and(|s| s == "INDEX"));
+            if !supported {
+                return Err(unsupported("only table and index DDL is supported"));
+            }
+            Kind::Ddl
+        }
+    };
     normalized.push_str(&sql[copied..]);
     // mysql's own named-parameter pass is not SQL-mode aware. Never allow it to
     // rewrite a literal/comment or change the SQL we have just validated.
@@ -251,6 +299,7 @@ pub(crate) fn parse(
     }
     checkpoint()?;
     Ok(Parsed {
+        kind,
         sql: normalized,
         parameters: if names.is_empty() {
             Parameters::Positional(positional)
@@ -445,6 +494,55 @@ mod tests {
         // The driver's legacy parser misunderstands this valid mode-dependent
         // quoting. Reject it before allowing that parser to rewrite a literal.
         assert!(parse("SELECT 'a\\', ':literal'", no_backslash, 1, || Ok(())).is_err());
+    }
+    #[test]
+    fn exec_accepts_only_parameterless_dml_and_recognized_ddl() {
+        for newline in ["\n", "\r\n"] {
+            for statement in [
+                "CREATE TABLE t (n INT)",
+                "ALTER TABLE t ADD COLUMN v TEXT",
+                "DROP TABLE t",
+                "CREATE INDEX i ON t(n)",
+                "CREATE UNIQUE INDEX i ON t(n)",
+                "DROP INDEX i ON t",
+                "INSERT INTO t VALUES ('? :literal')",
+                "UPDATE t SET n=2",
+                "DELETE FROM t",
+                "REPLACE INTO t VALUES (1)",
+            ] {
+                assert!(
+                    parse_exec(
+                        &format!("/* leading */ {statement}; -- trailing{newline}"),
+                        Mode::default(),
+                        || Ok(())
+                    )
+                    .is_ok(),
+                    "{statement}"
+                );
+            }
+        }
+        for statement in [
+            "SELECT 1",
+            "INSERT INTO t VALUES (?)",
+            "DELETE FROM t WHERE n=:n",
+            "CREATE USER x",
+            "CREATE DATABASE x",
+            "CREATE VIEW v AS SELECT 1",
+            "BEGIN",
+            "COMMIT",
+            "ROLLBACK",
+            "SET autocommit=0",
+            "LOCK TABLES t WRITE",
+            "CALL p()",
+            "DELETE FROM t RETURNING n",
+            "INSERT INTO t VALUES (1); DELETE FROM t",
+            "CREATE TABLE t (n INT) /*!; COMMIT */",
+        ] {
+            assert!(
+                parse_exec(statement, Mode::default(), || Ok(())).is_err(),
+                "{statement}"
+            );
+        }
     }
     #[test]
     fn scanning_checks_cancellation_inside_long_literals() {

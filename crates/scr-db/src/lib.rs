@@ -2,7 +2,7 @@
 //!
 //! Backends implement [`Driver`] and [`Connection`]. Registration never connects
 //! to a server. The shared interface supports typed connection, prepared execution,
-//! typed result fetching, and explicit cleanup.
+//! typed result fetching, execution metadata, transactions, and explicit cleanup.
 use scr_runtime::{
     NativeError, NativeFunction, NativeObject, NativeResult, NativeSignature, NativeType, Runtime,
     RuntimeContext, Value,
@@ -27,6 +27,15 @@ pub struct ConnectRequest<'a> {
     pub user: &'a str,
     pub password: &'a str,
     pub options: &'a Value,
+}
+
+/// Transaction control or server-state inspection, without raw SQL from scripts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransactionOperation {
+    Begin,
+    Commit,
+    RollBack,
+    Inspect,
 }
 
 /// Trusted host backend; implementations enforce their own TLS and I/O policies.
@@ -104,6 +113,34 @@ pub trait Connection: fmt::Debug {
         Err(NativeError::new(
             "DbUnsupportedError",
             "column fetching is not supported",
+        ))
+    }
+    fn exec(&mut self, _context: &mut RuntimeContext<'_>, _sql: &str) -> NativeResult<i64> {
+        Err(NativeError::new(
+            "DbUnsupportedError",
+            "exec is not supported",
+        ))
+    }
+    fn row_count(&self, _id: u64) -> NativeResult<i64> {
+        Err(NativeError::new(
+            "DbUnsupportedError",
+            "row counts are not supported",
+        ))
+    }
+    fn last_insert_id(&self, _sequence: Option<&str>) -> NativeResult {
+        Err(NativeError::new(
+            "DbUnsupportedError",
+            "insert IDs are not supported",
+        ))
+    }
+    fn transaction(
+        &mut self,
+        _context: &mut RuntimeContext<'_>,
+        _operation: TransactionOperation,
+    ) -> NativeResult<bool> {
+        Err(NativeError::new(
+            "DbUnsupportedError",
+            "transactions are not supported",
         ))
     }
     /// Pure preflight; rejection must leave the statement and connection intact.
@@ -467,6 +504,105 @@ pub fn register_with_options(
             },
         ),
     )?;
+    let registered = registration.clone();
+    runtime.register(
+        "Db::exec",
+        NativeFunction::new(
+            NativeSignature::new(
+                vec![NativeType::Object("DbConnection"), NativeType::String],
+                NativeType::Int,
+            ),
+            move |context, args| {
+                require_owner(context, &registered)?;
+                let connection = session(&args[0], &registered)?;
+                context.check_cancelled()?;
+                context.permissions.require("network.connect")?;
+                let Value::String(sql) = &args[1] else {
+                    return Err(NativeError::type_error("SQL must be a string"));
+                };
+                if sql.len() > registered.options.max_sql_bytes {
+                    return Err(limit("database SQL byte limit exceeded"));
+                }
+                connection
+                    .call(|backend| backend.exec(context, sql))
+                    .map(Value::Int)
+            },
+        ),
+    )?;
+    let registered = registration.clone();
+    runtime.register(
+        "Db::rowCount",
+        NativeFunction::new(
+            NativeSignature::new(vec![NativeType::Object("DbStatement")], NativeType::Int),
+            move |context, args| {
+                require_owner(context, &registered)?;
+                let stmt = statement(&args[0], &registered)?;
+                if stmt.closed.get() {
+                    return Err(state("database statement is closed"));
+                }
+                stmt.session
+                    .call(|backend| backend.row_count(stmt.id))
+                    .map(Value::Int)
+            },
+        ),
+    )?;
+    let registered = registration.clone();
+    runtime.register(
+        "Db::lastInsertId",
+        NativeFunction::new(
+            NativeSignature::new(
+                vec![NativeType::Object("DbConnection")],
+                NativeType::OneOf(vec![NativeType::String, NativeType::Null]),
+            )
+            .with_optional(vec![NativeType::OneOf(vec![
+                NativeType::String,
+                NativeType::Null,
+            ])]),
+            move |context, args| {
+                require_owner(context, &registered)?;
+                let connection = session(&args[0], &registered)?;
+                let sequence = match args.get(1) {
+                    Some(Value::String(s)) => Some(s.as_str()),
+                    _ => None,
+                };
+                connection.call(|backend| backend.last_insert_id(sequence))
+            },
+        ),
+    )?;
+    for (name, operation) in [
+        ("Db::beginTransaction", TransactionOperation::Begin),
+        ("Db::commit", TransactionOperation::Commit),
+        ("Db::rollBack", TransactionOperation::RollBack),
+        ("Db::inTransaction", TransactionOperation::Inspect),
+    ] {
+        let registered = registration.clone();
+        runtime.register(
+            name,
+            NativeFunction::new(
+                NativeSignature::new(
+                    vec![NativeType::Object("DbConnection")],
+                    if operation == TransactionOperation::Inspect {
+                        NativeType::Bool
+                    } else {
+                        NativeType::Null
+                    },
+                ),
+                move |context, args| {
+                    require_owner(context, &registered)?;
+                    let connection = session(&args[0], &registered)?;
+                    context.check_cancelled()?;
+                    context.permissions.require("network.connect")?;
+                    let active =
+                        connection.call(|backend| backend.transaction(context, operation))?;
+                    Ok(if operation == TransactionOperation::Inspect {
+                        Value::Bool(active)
+                    } else {
+                        Value::Null
+                    })
+                },
+            ),
+        )?;
+    }
     let registered = registration.clone();
     runtime.register(
         "Db::prepare",

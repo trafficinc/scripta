@@ -51,14 +51,20 @@ fn int(value: Value) -> i64 {
 }
 
 #[test]
-fn dates_use_unix_milliseconds_utc_and_explicit_offsets() {
+fn dates_use_unix_seconds_utc_and_explicit_offsets() {
     let mut runtime = runtime();
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
     run(
         &mut runtime,
         r#"
         $epoch = Date::parse("1970-01-01T00:00:00Z");
         $offset = Date::parse("1970-01-01T01:00:00+01:00");
         $before = Date::parse("1969-12-31T23:59:59.999Z");
+        $negativeFraction = Date::parse("1969-12-31T23:59:58.999999999Z");
+        $positiveFraction = Date::parse("1970-01-01T00:00:01.999999999Z");
         $leap = Date::parse("2024-02-29T12:34:56.123456Z");
         $formatted = Date::format($leap, "%Y-%m-%dT%H:%M:%S%.3f%:z");
         $now = Date::now(); Date::sleep(0);
@@ -69,10 +75,22 @@ fn dates_use_unix_milliseconds_utc_and_explicit_offsets() {
     assert_eq!(runtime.get_global("offset"), Some(&Value::Int(0)));
     assert_eq!(runtime.get_global("before"), Some(&Value::Int(-1)));
     assert_eq!(
-        runtime.get_global("formatted"),
-        Some(&Value::String("2024-02-29T12:34:56.123+00:00".into()))
+        runtime.get_global("negativeFraction"),
+        Some(&Value::Int(-2))
     );
-    assert!(matches!(runtime.get_global("now"), Some(Value::Int(n)) if *n > 0));
+    assert_eq!(runtime.get_global("positiveFraction"), Some(&Value::Int(1)));
+    assert_eq!(runtime.get_global("leap"), Some(&Value::Int(1709210096)));
+    assert_eq!(
+        runtime.get_global("formatted"),
+        Some(&Value::String("2024-02-29T12:34:56.000+00:00".into()))
+    );
+    let after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    assert!(
+        matches!(runtime.get_global("now"), Some(Value::Int(n)) if (before..=after).contains(n))
+    );
     for source in [
         r#"Date::parse("2023-02-29T00:00:00Z");"#,
         r#"Date::parse("2024-01-01");"#,
@@ -94,6 +112,48 @@ fn dates_use_unix_milliseconds_utc_and_explicit_offsets() {
         "Date::parse(0);",
     ] {
         error(&mut runtime, source, "TypeError");
+    }
+}
+
+#[test]
+fn filesystem_timestamps_compose_directly_with_dates() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("report.json");
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_times(
+        std::fs::FileTimes::new()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1709210096)),
+    )
+    .unwrap();
+    let mut runtime = runtime();
+    runtime
+        .set_global(
+            "directory",
+            Value::String(directory.path().to_str().unwrap().into()),
+        )
+        .unwrap();
+    run(
+        &mut runtime,
+        r#"
+        $path = Path::join($directory, "report.json");
+        $modified = File::modified($path);
+        $formatted = Date::format($modified, "%Y-%m-%dT%H:%M:%SZ");
+        $entries = Dir::files($directory);
+        $entryFormatted = Date::format($entries[0]->modified, "%Y-%m-%dT%H:%M:%SZ");
+        $parsed = Date::parse($formatted);
+        "#,
+    )
+    .unwrap();
+    assert_eq!(
+        runtime.get_global("modified"),
+        Some(&Value::Int(1709210096))
+    );
+    assert_eq!(runtime.get_global("parsed"), runtime.get_global("modified"));
+    for name in ["formatted", "entryFormatted"] {
+        assert_eq!(
+            runtime.get_global(name),
+            Some(&Value::String("2024-02-29T12:34:56Z".into()))
+        );
     }
 }
 
@@ -337,12 +397,12 @@ fn timezone_formatting_uses_historical_and_dst_offsets_without_changing_the_inst
         (
             "2024-01-15T12:34:56.123Z",
             "America/New_York",
-            "2024-01-15 07:34:56.123 -05:00 EST",
+            "2024-01-15 07:34:56.000 -05:00 EST",
         ),
         (
             "2024-07-15T12:34:56.123Z",
             "America/New_York",
-            "2024-07-15 08:34:56.123 -04:00 EDT",
+            "2024-07-15 08:34:56.000 -04:00 EDT",
         ),
         (
             "2024-03-10T06:59:59Z",
@@ -377,7 +437,7 @@ fn timezone_formatting_uses_historical_and_dst_offsets_without_changing_the_inst
         (
             "1969-12-31T23:59:59.999Z",
             "Asia/Tokyo",
-            "1970-01-01 08:59:59.999 +09:00 JST",
+            "1970-01-01 08:59:59.000 +09:00 JST",
         ),
         (
             "1900-01-01T00:00:00Z",
@@ -439,13 +499,13 @@ fn utc_formatting_remains_compatible_and_timezone_errors_preserve_assignments() 
         "%s %f %.3f %z %:z %::z %:::z %Z %%",
         "世界 %Y",
     ];
-    for value in [-1, 0, 1705322096123, 253402300800000] {
+    for value in [-1, 0, 1705322096, 253402300800] {
         for format in formats {
             runtime
                 .set_global("format", Value::String(format.into()))
                 .unwrap();
             run(&mut runtime, &format!(r#"$default = Date::format({value}, $format); $explicit = Date::format({value}, $format, "UTC");"#)).unwrap();
-            let expected = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(value)
+            let expected = chrono::DateTime::<chrono::Utc>::from_timestamp(value, 0)
                 .unwrap()
                 .format(format)
                 .to_string();
@@ -495,7 +555,7 @@ fn utc_formatting_remains_compatible_and_timezone_errors_preserve_assignments() 
     }
     error(
         &mut runtime,
-        r#"Date::format(253402300800000, "%Y", "Asia/Tokyo");"#,
+        r#"Date::format(253402300800, "%Y", "Asia/Tokyo");"#,
         "RangeError",
     );
     error(

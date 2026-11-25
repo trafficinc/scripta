@@ -12,7 +12,7 @@ if ($value !== null) {
 if ($days < 0) {
     throw "days must be nonnegative";
 }
-$cutoff = Date::now() / 1000 - $days * 86400;
+$cutoff = Date::now() - $days * 86400;
 $apply = Cli::has("apply");
 foreach (Dir::files($directory) as $file) {
     if ($file->extension === "log" && $file->modified < $cutoff) {

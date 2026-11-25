@@ -30,6 +30,7 @@ pub(crate) struct Worker {
     plans: BTreeMap<u64, Plan>,
     active: Option<u64>,
     result_bytes: usize,
+    last_insert_id: Option<u64>,
     pub attributes: Attributes,
     pub policy: Arc<MysqlOptions>,
     pub retained_bytes: usize,
@@ -49,6 +50,8 @@ struct Plan {
     state: ResultState,
     columns: usize,
     result_limit: usize,
+    kind: sql::Kind,
+    affected: Option<u64>,
 }
 impl Drop for Worker {
     fn drop(&mut self) {
@@ -289,14 +292,17 @@ impl Worker {
                     .stmt_cache_size(0)
                     .max_allowed_packet(Some(packet_bytes))
                     .enable_cleartext_plugin(false)
-                    .additional_capabilities(flags)
+                    .additional_capabilities(flags | CapabilityFlags::CLIENT_SESSION_TRACK)
                     .local_infile_handler(Some(LocalInfileHandler::new(|_, _| {
                         Err(io::Error::new(
                             io::ErrorKind::PermissionDenied,
                             "local infile is disabled",
                         ))
                     })))
-                    .init(vec!["SET NAMES utf8mb4"]);
+                    .init(vec![
+                        "SET NAMES utf8mb4",
+                        "SET SESSION autocommit=1, completion_type=0",
+                    ]);
                 let opened = connect_addresses(opts, &host).and_then(|mut connection| {
                     if worker_stop.load(Ordering::Acquire) {
                         return Err(Error::IoError(io::Error::new(
@@ -304,6 +310,9 @@ impl Worker {
                             "connection abandoned",
                         )));
                     }
+                    crate::transactions::Tracker::initialize(&mut connection).map_err(
+                        |failure| Error::IoError(io::Error::other(failure.error.message)),
+                    )?;
                     let mode = protocol::mode(&mut connection)?;
                     Ok((connection, mode))
                 });
@@ -346,6 +355,7 @@ impl Worker {
             plans: BTreeMap::new(),
             active: None,
             result_bytes: 0,
+            last_insert_id: None,
         })
     }
     fn break_connection(&mut self) {
@@ -457,6 +467,8 @@ impl Worker {
             id,
             Plan {
                 parameters: parsed.parameters,
+                kind: parsed.kind,
+                affected: None,
                 bytes,
                 state: ResultState::Prepared,
                 columns: 0,
@@ -494,8 +506,10 @@ impl Worker {
                 .ok_or_else(|| NativeError::type_error("MySQL timeout is too large"))?,
         };
         self.result_bytes = 0;
+        self.last_insert_id = None;
         if let Some(plan) = self.plans.get_mut(&id) {
             plan.state = ResultState::Failed;
+            plan.affected = None;
             plan.columns = 0;
             plan.result_limit = self.attributes.max_result_bytes;
         }
@@ -504,6 +518,8 @@ impl Worker {
             result,
             bytes,
             columns,
+            affected,
+            insert_id,
         } = reply
         else {
             self.break_connection();
@@ -512,6 +528,7 @@ impl Worker {
                 "unexpected execute response",
             ));
         };
+        self.last_insert_id = insert_id;
         self.active = result.then_some(id);
         self.result_bytes = bytes;
         if let Some(plan) = self.plans.get_mut(&id) {
@@ -521,8 +538,75 @@ impl Worker {
                 ResultState::Command
             };
             plan.columns = columns;
+            plan.affected = Some(affected);
         }
         Ok(())
+    }
+    pub fn exec(&mut self, context: &RuntimeContext<'_>, sql: &str) -> NativeResult<i64> {
+        self.available()?;
+        let parsed = sql::parse_exec(sql, self.mode, || context.check_cancelled())?;
+        self.last_insert_id = None;
+        let Reply::Command {
+            affected,
+            insert_id,
+        } = self.rpc(context, Request::Exec(parsed.sql))?
+        else {
+            self.break_connection();
+            return Err(NativeError::new("DbStateError", "unexpected exec response"));
+        };
+        self.last_insert_id = insert_id;
+        count(if parsed.kind == sql::Kind::Ddl {
+            0
+        } else {
+            affected
+        })
+    }
+    pub fn row_count(&self, id: u64) -> NativeResult<i64> {
+        let plan = self
+            .plans
+            .get(&id)
+            .ok_or_else(|| NativeError::new("DbStateError", "MySQL statement is closed"))?;
+        let affected = plan.affected.ok_or_else(|| {
+            NativeError::new("DbStateError", "statement has no successful execution")
+        })?;
+        if plan.kind == sql::Kind::Select {
+            return Err(NativeError::new(
+                "DbUnsupportedError",
+                "rowCount is unavailable for SELECT; use COUNT(*)",
+            ));
+        }
+        count(affected)
+    }
+    pub fn last_insert_id(&self, sequence: Option<&str>) -> NativeResult<scr_runtime::Value> {
+        if sequence.is_some() {
+            return Err(NativeError::new(
+                "DbUnsupportedError",
+                "MySQL does not support insert-ID sequence names",
+            ));
+        }
+        Ok(self.last_insert_id.map_or(scr_runtime::Value::Null, |id| {
+            scr_runtime::Value::String(id.to_string())
+        }))
+    }
+    pub fn transaction(
+        &mut self,
+        context: &RuntimeContext<'_>,
+        operation: scr_db::TransactionOperation,
+    ) -> NativeResult<bool> {
+        if operation != scr_db::TransactionOperation::Inspect {
+            self.available()?;
+        }
+        let Reply::Transaction(active) = self.rpc(context, Request::Transaction(operation))? else {
+            self.break_connection();
+            return Err(NativeError::new(
+                "DbStateError",
+                "unexpected transaction response",
+            ));
+        };
+        if operation == scr_db::TransactionOperation::RollBack {
+            self.last_insert_id = None;
+        }
+        Ok(active)
     }
     pub fn validate_fetch(&self, id: u64) -> NativeResult<()> {
         let plan = self
@@ -676,5 +760,21 @@ impl Worker {
             self.sender.take();
         }
         Ok(())
+    }
+}
+
+fn count(value: u64) -> NativeResult<i64> {
+    i64::try_from(value)
+        .map_err(|_| NativeError::new("DbLimitError", "MySQL affected-row count exceeds int range"))
+}
+
+#[cfg(test)]
+mod count_tests {
+    use super::count;
+    #[test]
+    fn affected_counts_reject_overflow_without_lossy_conversion() {
+        assert_eq!(count(i64::MAX as u64).unwrap(), i64::MAX);
+        assert_eq!(count(i64::MAX as u64 + 1).unwrap_err().kind, "DbLimitError");
+        assert_eq!(count(u64::MAX).unwrap_err().kind, "DbLimitError");
     }
 }

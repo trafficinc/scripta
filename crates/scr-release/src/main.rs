@@ -726,7 +726,7 @@ fn smoke(path: &Path) -> Result<()> {
     // New packages always collect the example from the source tree.
     let timezone_smoke = if directory.join("examples/timezones.scripta").is_file() {
         let output = execute(&["run", "examples/timezones.scripta"])?;
-        if output.stdout != b"UTC: 2024-07-15 12:34:56.123 +00:00\nAmerica/New_York: 2024-07-15 08:34:56.123 -04:00\nAsia/Kathmandu: 2024-07-15 18:19:56.123 +05:45\n" {
+        if output.stdout != b"UTC: 2024-07-15 12:34:56 +00:00\nAmerica/New_York: 2024-07-15 08:34:56 -04:00\nAsia/Kathmandu: 2024-07-15 18:19:56 +05:45\n" {
             return Err(fail("packaged timezone example output differs"));
         }
         "passed with bundled timezone data"

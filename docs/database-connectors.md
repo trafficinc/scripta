@@ -2,8 +2,9 @@
 
 The shared database interface is under development. Embedding hosts can open and
 close verified-TLS MySQL connections, inspect/configure attributes, and execute
-native prepared statements with positional or named values, and fetch typed results.
-Transactions, execution metadata, and CLI feature wiring remain later stages. The standard CLI still exposes only the
+native prepared statements with positional or named values, fetch typed results,
+inspect execution metadata, and control transactions. CLI feature wiring remains
+a later stage. The standard CLI still exposes only the
 existing [SQLite API](sqlite.md); it does not register `Db::` or a MySQL feature.
 Installing a script package cannot enable a compiled-out native driver.
 
@@ -42,6 +43,13 @@ partially initialized runtime.
 | `Db::setAttribute(db, name, value)` | Apply a supported mutable setting; return null |
 | `Db::prepare(db, sql)` | Prepare one supported SQL statement immediately on the server; return a DbStatement |
 | `Db::execute(stmt, params = [])` | Bind a fresh list/map and execute; return null or throw |
+| `Db::exec(db, sql)` | Execute one parameterless non-result DML or supported DDL statement; return affected rows as int |
+| `Db::rowCount(stmt)` | Return affected rows from the latest successful DML execution; unsupported for SELECT |
+| `Db::lastInsertId(db, sequence = null)` | Return this connection's latest accepted execute/exec generated ID as an exact string, or null; MySQL rejects sequence names |
+| `Db::beginTransaction(db)` | Begin an explicit transaction; nesting raises DbStateError |
+| `Db::commit(db)` | Commit an active transaction; an idle connection raises DbStateError |
+| `Db::rollBack(db)` | Roll back an active transaction; an idle connection raises DbStateError |
+| `Db::inTransaction(db)` | Query server-derived transaction state as bool |
 | `Db::fetch(stmt)` | Consume the next associative row; return null at exhaustion |
 | `Db::fetchAll(stmt)` | Consume all remaining rows into a list; return an empty list at exhaustion |
 | `Db::fetchColumn(stmt, column = 0)` | Consume the next row and return its zero-based column; throw DbEndOfResultsError at exhaustion |
@@ -49,8 +57,9 @@ partially initialized runtime.
 | `Db::closeStatement(stmt)` | Release a statement and cursor; repeated calls succeed |
 | `Db::close(db)` | Disconnect, invalidate dependent handles, and return null; repeated close succeeds |
 
-Exec, rowCount, lastInsertId, and transaction operations are not registered yet. Names in a DSN select an explicitly registered driver;
-there is no dynamic loading. Missing drivers raise DbUnsupportedError.
+Names in a DSN select an explicitly registered driver; there is no dynamic loading.
+Missing drivers raise DbUnsupportedError. Structured Db::errorInfo inspection
+remains planned; existing native error kinds and sanitized messages are available.
 
 A MySQL DSN uses `mysql:host=localhost;port=3306;dbname=app;charset=utf8mb4`.
 Host and dbname are required; port defaults to 3306 and charset to utf8mb4.
@@ -115,7 +124,10 @@ apply. Collections, native objects, callables, and non-finite numbers cannot be
 bound. Identifiers and SQL syntax cannot be supplied through value markers.
 
 The initial prepared subset is SELECT, INSERT, UPDATE, DELETE, and REPLACE.
-Parameterless DDL through exec remains a later stage. Reject stacked statements,
+Exec accepts parameterless INSERT, UPDATE, DELETE and REPLACE, plus CREATE/ALTER/DROP
+TABLE, CREATE [UNIQUE] INDEX and DROP INDEX. Exec rejects SELECT and parameter
+markers before reaching the server. Always bind untrusted values through prepared
+statements; exec does not interpolate or escape values for callers. Reject stacked statements,
 session variables/control, SELECT INTO, stored procedure calls, RETURNING, executable
 comments, nested comments, and optimizer hints. Ordinary comments, trailing whitespace
 and one trailing semicolon are accepted. Other valid MySQL forms are not promised
@@ -147,7 +159,9 @@ are not a process heap cap.
 A successful SELECT owns the connection's one active logical cursor, even though
 its server result has been read. Close/exhaust it before preparing or executing
 another statement or changing attributes. Closing another statement while it is
-active raises DbStateError without destroying either handle. CloseCursor discards
+active raises DbStateError without destroying either handle. Exec and transaction
+control also require closing/exhausting the cursor; metadata and inTransaction
+inspection can run while it is active. CloseCursor discards
 that buffer and keeps the prepared statement. CloseStatement can also release its
 own cursor. Result-producing operations on different connections are independent.
 
@@ -209,6 +223,64 @@ never assigns a partial list. Fetch errors do not rewind rows or undo committed
 writes; future drivers supporting write statements with RETURNING must preserve
 this distinction too.
 
+### Execution metadata and transactions
+
+RowCount reads the latest successful DML execution, even after closeCursor.
+Before execution, after an accepted failed execution, or after statement closure,
+it raises DbStateError. For a successful SELECT it raises DbUnsupportedError;
+use SELECT COUNT(*) and fetchColumn instead. Busy/type/parameter preflight errors
+preserve existing execution metadata. Counts are ints; an affected count outside
+signed 64-bit range raises DbLimitError rather than wrapping or converting to float.
+A count-conversion failure does not undo an already completed command.
+
+MySQL counts changed UPDATE rows by default; mysqlFoundRows=true requests matched
+rows instead, for both execute and exec. Preserve native REPLACE and duplicate-key
+update counts. Multi-row insert counts are totals; supported DDL through exec
+returns zero (including DDL that also copies data).
+
+LastInsertId captures nonzero generated-ID response metadata, rather than querying
+a stale session LAST_INSERT_ID(). It returns the first server-generated ID for a
+multi-row INSERT as an exact string, including values above signed int range.
+Every accepted execute/exec clears the previous ID first; failures, SELECT, and
+commands generating no ID leave null. Preflight errors preserve the previous ID.
+Capture an ID immediately after insertion. Begin, commit, inspection and cleanup
+do not clear a captured ID; a successful rollBack does. An ID is not proof that a
+row committed. MySQL does not accept a non-null sequence argument.
+
+Autocommit is explicitly on outside transactions; the connector sets session
+completion_type=0 to prevent server defaults from chaining or releasing a session
+on COMMIT/ROLLBACK. Begin rejects nesting, and commit/rollBack reject idle state.
+Raw transaction/session-control SQL remains unavailable through prepare and exec.
+Use InnoDB tables for transactional writes; nontransactional tables cannot provide
+rollback guarantees. DDL may implicitly commit even if the DDL later fails; perform
+schema changes before transactional writes. See the
+[MySQL implicit-commit reference](https://dev.mysql.com/doc/refman/8.0/en/implicit-commit.html).
+
+The connector enables and verifies MySQL's session transaction-state tracker before
+publishing a connection. It reads public client session-state notifications and
+uses an internal DO 0 probe to collect pending changes after errors or legacy EOF
+packets. A deadlock rollback and a failed DDL implicit commit therefore update the
+state reported by inTransaction. Failure to establish trustworthy state breaks the
+connection. Servers without working transaction-state tracking are rejected during
+connection setup; other server versions and MariaDB require separate validation.
+See [MySQL session tracking](https://dev.mysql.com/doc/refman/8.0/en/session-state-tracking.html).
+
+State refresh adds a server round trip after execution and around transaction
+control; inTransaction also performs network I/O. It uses the same permissions,
+deadlines, cancellation and worker quarantine as other network operations.
+RowCount and lastInsertId are local metadata reads requiring owned open handles;
+they do not perform I/O or require a new network grant.
+
+A failed control acknowledgement cannot establish whether the transaction committed.
+Report DbError with an unknown-outcome message and invalidate every dependent
+handle. Local deadlines still raise DbTimeoutError; cancellation still raises
+Interrupted. Neither proves rollback. There is no automatic retry, including after
+a successful server COMMIT whose acknowledgement is lost. Explicit close attempts
+ROLLBACK before disconnecting and invalidates handles even if cleanup fails. Dropped
+connections close their sockets through Rust ownership; the server rolls back open
+transactional work when it observes disconnection, which can happen after the
+caller's timeout. Do not report an unconfirmed rollback as confirmed.
+
 ### Blocking I/O and worker lifecycle
 
 Each MySQL connection has one dedicated worker owning the blocking client session.
@@ -230,7 +302,8 @@ Explicit close waits for worker acknowledgement within operationTimeoutMs. On
 failure the shared layer still invalidates the handle and releases its connection
 slot; an unfinished worker continues occupying its separate worker slot. The
 client's normal disconnect releases server sessions. Interrupted SQL is quarantined
-and its handles invalidated; transaction APIs remain a later implementation stage.
+and its handles invalidated; interrupted transactional work is rolled back by
+server disconnect. A disconnected or timed-out commit has an uncertain outcome.
 
 The client uses its source-family bind path to work around mysql 26's first-address
 failure behavior. DNS hostname identity stays unchanged for TLS verification.
@@ -301,19 +374,26 @@ install native mysqld/mysql (MySQL 8.x), OpenSSL and Python 3.9+, then invoke fr
 the workspace root on macOS ARM64:
 
 ```sh
-MACOSX_DEPLOYMENT_TARGET=15.0 python3 crates/scr-ext-mysql/tests/support/mysql_fixture.py -- cargo test -p scr-ext-mysql --test mysql_lifecycle --test mysql_statements --test mysql_fetching --locked --offline --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1
+MACOSX_DEPLOYMENT_TARGET=15.0 python3 crates/scr-ext-mysql/tests/support/mysql_fixture.py -- cargo test -p scr-ext-mysql --test mysql_lifecycle --test mysql_statements --test mysql_fetching --test mysql_transactions --locked --offline --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1
 ```
 
 The helper creates its own temporary data directory, test users/database, and
 CA/server certificates, binds only loopback, and shuts down/removes its server
 when the command finishes. It does not modify an existing database installation.
+It also starts a loopback TLS proxy using the disposable certificates. The dedicated
+uncertain-commit test routes through it; it forwards COMMIT once and drops the real
+server's successful acknowledgement. No production credentials or SQL are logged.
+The proxy has a 1 MiB packet ceiling for its small fault-test workload.
 The test verifies secure connection, CA/hostname rejection, authentication failure,
 attributes, connection/CA boundaries, retained handles, and actual server session
 cleanup. Statement tests additionally verify real bound data, hostile strings and
 bytes, reuse after errors, preflight preservation, exact/default limits, cancellation,
 and timed-out writes. Fetching tests cover mixed cursor consumption, empty and
 exhausted results, strict type mapping, duplicate labels, recovery after decoding
-errors, and exact/default decoded cell limits. Decoder unit tests cover invalid
+errors, and exact/default decoded cell limits. Transaction tests cover affected counts, first/large IDs, found-row
+settings, commit/rollback, successful/failed DDL commits, deadlock rollback,
+connection/runtime cleanup, interrupted/timed-out writes, killed sessions and a
+lost successful COMMIT acknowledgement. Decoder unit tests cover invalid
 UTF-8, non-finite values, cancellation, and exact aggregate output sizes. Generated fixture credentials are public demo values, never production
 credentials. A default run with this test ignored does not establish live-server
 success. Use the equivalent native target and deployment settings on other hosts;

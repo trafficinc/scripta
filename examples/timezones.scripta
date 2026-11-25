@@ -1,6 +1,6 @@
 // One instant, displayed with bundled timezone rules. No network is used.
-$instant = Date::parse("2024-07-15T12:34:56.123Z");
-$format = "%Y-%m-%d %H:%M:%S%.3f %:z";
+$instant = Date::parse("2024-07-15T12:34:56Z");
+$format = "%Y-%m-%d %H:%M:%S %:z";
 foreach (["UTC", "America/New_York", "Asia/Kathmandu"] as $zone) {
     echo $zone . ": " . Date::format($instant, $format, $zone) . "\n";
 }

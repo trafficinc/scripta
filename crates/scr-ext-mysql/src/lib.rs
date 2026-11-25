@@ -1,9 +1,10 @@
 //! Verified-TLS MySQL connections for the shared Db API.
-//! Native prepared execution and typed fetching are available; CLI wiring follows later.
+//! Native execution, typed fetching and transactions are available; CLI wiring follows later.
 mod decode;
 mod protocol;
 mod settings;
 mod sql;
+mod transactions;
 mod worker;
 use scr_db::{ConnectRequest, Connection, Driver, DriverInfo};
 use scr_runtime::{NativeResult, RuntimeContext, Value};
@@ -42,6 +43,22 @@ impl Driver for MysqlDriver {
     }
 }
 impl Connection for worker::Worker {
+    fn exec(&mut self, context: &mut RuntimeContext<'_>, sql: &str) -> NativeResult<i64> {
+        self.exec(context, sql)
+    }
+    fn row_count(&self, id: u64) -> NativeResult<i64> {
+        self.row_count(id)
+    }
+    fn last_insert_id(&self, sequence: Option<&str>) -> NativeResult {
+        self.last_insert_id(sequence)
+    }
+    fn transaction(
+        &mut self,
+        context: &mut RuntimeContext<'_>,
+        operation: scr_db::TransactionOperation,
+    ) -> NativeResult<bool> {
+        self.transaction(context, operation)
+    }
     fn payload_bytes(&self) -> usize {
         self.payload()
     }

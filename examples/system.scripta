@@ -8,5 +8,5 @@ if ($disk->percentUsed > 85.0)
 $memory = System::memoryUsage();
 echo "System RAM available: " . str($memory->availableBytes) . " bytes\n";
 echo "CPU sample: " . str(System::cpuUsage()) . "%\n";
-echo "UTC: " . Date::format(Date::now(), "%Y-%m-%dT%H:%M:%S%.3fZ") . "\n";
+echo "UTC: " . Date::format(Date::now(), "%Y-%m-%dT%H:%M:%SZ") . "\n";
 Log::info("Host check complete");

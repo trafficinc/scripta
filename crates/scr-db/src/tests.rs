@@ -18,6 +18,9 @@ struct Observed {
     reuse_ids: Cell<bool>,
     executes: Cell<usize>,
     fetches: Cell<usize>,
+    execs: Cell<usize>,
+    transactions: Cell<usize>,
+    break_transaction: Cell<bool>,
     break_execute: Cell<bool>,
     broken: Cell<bool>,
     deny_statement_close: Cell<bool>,
@@ -50,6 +53,32 @@ impl Driver for TestDriver {
 #[derive(Debug)]
 struct TestConnection(Rc<Observed>);
 impl Connection for TestConnection {
+    fn exec(&mut self, _: &mut RuntimeContext<'_>, _: &str) -> NativeResult<i64> {
+        self.0.execs.set(self.0.execs.get() + 1);
+        Ok(2)
+    }
+    fn row_count(&self, _: u64) -> NativeResult<i64> {
+        Ok(7)
+    }
+    fn last_insert_id(&self, _: Option<&str>) -> NativeResult {
+        Ok(Value::String("123".into()))
+    }
+    fn transaction(
+        &mut self,
+        _: &mut RuntimeContext<'_>,
+        operation: TransactionOperation,
+    ) -> NativeResult<bool> {
+        self.0.transactions.set(self.0.transactions.get() + 1);
+        if self.0.break_transaction.get() {
+            self.0.broken.set(true);
+            return Err(NativeError::new(
+                "DbError",
+                "fixture transaction outcome unknown",
+            ));
+        }
+        Ok(operation == TransactionOperation::Begin)
+    }
+
     fn fetch_column(&mut self, _: &mut RuntimeContext<'_>, _: u64, column: i64) -> NativeResult {
         self.0.fetches.set(self.0.fetches.get() + 1);
         match column {
@@ -542,4 +571,85 @@ fn statement_cleanup_preflight_failure_preserves_handles_and_slots() {
         &mut runtime,
         "Db::closeStatement($stmt);$second=Db::prepare($db,'SELECT 2');",
     );
+}
+
+#[test]
+fn metadata_and_transaction_dispatch_validate_signatures_ownership_and_utf8_sql_limits() {
+    let (mut runtime, observed) = setup(DatabaseOptions {
+        max_sql_bytes: 2,
+        ..Default::default()
+    });
+    run(&mut runtime, CONNECT);
+    run(
+        &mut runtime,
+        "$s=Db::prepare($db,'é');$n=Db::exec($db,'é');$count=Db::rowCount($s);$id=Db::lastInsertId($db);Db::beginTransaction($db);$active=Db::inTransaction($db);Db::commit($db);Db::rollBack($db);",
+    );
+    assert_eq!(runtime.get_global("n"), Some(&Value::Int(2)));
+    assert_eq!(runtime.get_global("count"), Some(&Value::Int(7)));
+    assert_eq!(runtime.get_global("id"), Some(&Value::String("123".into())));
+    assert_eq!(observed.transactions.get(), 4);
+    fails(&mut runtime, "Db::exec($db,'éa');", "DbLimitError");
+    for source in [
+        "Db::exec($db,1);",
+        "Db::rowCount($db);",
+        "Db::lastInsertId($db,1);",
+        "Db::beginTransaction($s);",
+        "Db::commit($db,1);",
+        "Db::rollBack();",
+        "Db::inTransaction($s);",
+    ] {
+        fails(&mut runtime, source, "TypeError");
+    }
+    let (mut other, _) = setup(DatabaseOptions::default());
+    for name in ["db", "s"] {
+        other
+            .set_global(name, runtime.get_global(name).unwrap().clone())
+            .unwrap();
+    }
+    for source in [
+        "Db::exec($db,'é');",
+        "Db::rowCount($s);",
+        "Db::lastInsertId($db);",
+        "Db::beginTransaction($db);",
+        "Db::commit($db);",
+        "Db::rollBack($db);",
+        "Db::inTransaction($db);",
+    ] {
+        fails(&mut other, source, "TypeError");
+    }
+    assert_eq!(observed.execs.get(), 1);
+    assert_eq!(observed.transactions.get(), 4);
+    run(&mut runtime, "Db::close($db);");
+    for source in [
+        "Db::exec($db,'é');",
+        "Db::rowCount($s);",
+        "Db::lastInsertId($db);",
+        "Db::beginTransaction($db);",
+        "Db::commit($db);",
+        "Db::rollBack($db);",
+        "Db::inTransaction($db);",
+    ] {
+        fails(&mut runtime, source, "DbStateError");
+    }
+}
+
+#[test]
+fn uncertain_commit_invalidates_every_handle_preserves_destination_and_is_never_retried() {
+    let (mut runtime, observed) = setup(DatabaseOptions::default());
+    run(&mut runtime, CONNECT);
+    run(
+        &mut runtime,
+        "$s=Db::prepare($db,'SELECT 1');$destination='preserved';",
+    );
+    observed.break_transaction.set(true);
+    fails(&mut runtime, "$destination=Db::commit($db);", "DbError");
+    assert_eq!(
+        runtime.get_global("destination"),
+        Some(&Value::String("preserved".into()))
+    );
+    run(&mut runtime, "$closed=$db->closed && $s->closed;");
+    assert_eq!(runtime.get_global("closed"), Some(&Value::Bool(true)));
+    fails(&mut runtime, "Db::commit($db);", "DbStateError");
+    assert_eq!(observed.transactions.get(), 1);
+    assert_eq!(observed.drops.get(), 1);
 }

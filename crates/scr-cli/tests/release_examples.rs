@@ -1014,7 +1014,7 @@ fn timezone_example_runs_with_only_bundled_data_and_no_external_programs() {
         }
         assert_eq!(
             success(command.output().unwrap()),
-            "UTC: 2024-07-15 12:34:56.123 +00:00\nAmerica/New_York: 2024-07-15 08:34:56.123 -04:00\nAsia/Kathmandu: 2024-07-15 18:19:56.123 +05:45\n"
+            "UTC: 2024-07-15 12:34:56 +00:00\nAmerica/New_York: 2024-07-15 08:34:56 -04:00\nAsia/Kathmandu: 2024-07-15 18:19:56 +05:45\n"
         );
     }
 }

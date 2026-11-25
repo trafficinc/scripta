@@ -10,8 +10,10 @@ provides a complete stateful example with runtime-owned handles and resource lim
 
 For shared APIs with multiple backend drivers, see the experimental
 [database connector foundation](database-connectors.md). Its MySQL crate provides a
-verified-TLS connection, native prepared-statement and typed result-fetching
-implementation for embedding hosts; CLI wiring remains under development.
+verified-TLS connections, native prepared statements, typed result fetching,
+execution metadata and transactions for embedding hosts; CLI wiring remains under
+development. Backends implement the shared TransactionOperation controls with
+server-derived state and invalidate handles on uncertain outcomes.
 
 This guide adds a small optional `Greeting::hello(name)` extension in a source
 checkout. The crate, feature, and function below are tutorial additions; they

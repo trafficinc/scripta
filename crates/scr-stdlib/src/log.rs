@@ -99,7 +99,7 @@ pub(crate) fn register(
                     .filter(|(key, _)| sensitive_name(&key.to_string_lossy()))
                     .filter_map(|(_, value)| value.to_str().map(str::to_owned));
                 let message = redact(message, redacted_values.iter().cloned().chain(environment_secrets));
-                let timestamp = date::timestamp(date::now()?)?.to_rfc3339_opts(SecondsFormat::Millis, true);
+                let timestamp = date::timestamp_millis(date::now_millis()?)?.to_rfc3339_opts(SecondsFormat::Millis, true);
                 let mut record = serde_json::json!({"timestamp": timestamp, "level": level, "message": message}).to_string();
                 record.push('\n');
                 if let Some(path) = destination.borrow().as_ref() {

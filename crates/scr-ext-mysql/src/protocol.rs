@@ -1,6 +1,7 @@
 //! Worker-owned statements and bounded, unread result buffers.
-use crate::sql::Mode;
+use crate::{sql::Mode, transactions::Tracker};
 use mysql::{Conn, Statement, prelude::Queryable};
+use scr_db::TransactionOperation;
 use scr_runtime::{NativeError, Value};
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -27,7 +28,14 @@ pub(crate) enum Reply {
         result: bool,
         bytes: usize,
         columns: usize,
+        affected: u64,
+        insert_id: Option<u64>,
     },
+    Command {
+        affected: u64,
+        insert_id: Option<u64>,
+    },
+    Transaction(bool),
     Fetched {
         rows: Vec<mysql::Row>,
         columns: Arc<[mysql::Column]>,
@@ -48,6 +56,8 @@ pub(crate) enum Request {
         all: bool,
         deadline: Instant,
     },
+    Exec(String),
+    Transaction(TransactionOperation),
     CloseCursor(u64),
     CloseStatement(u64),
     Close,
@@ -61,6 +71,11 @@ pub(crate) struct Limits {
     pub bytes: usize,
     pub cell: usize,
     pub deadline: Instant,
+}
+#[derive(Default)]
+struct SessionState {
+    active: Option<(u64, Buffer)>,
+    tracker: Tracker,
 }
 struct Buffer {
     rows: VecDeque<(mysql::Row, usize)>,
@@ -139,18 +154,26 @@ fn execute(
     limits: Limits,
     stop: &AtomicBool,
     response: SyncSender<Result<Reply, Failure>>,
-    active: &mut Option<(u64, Buffer)>,
+    state: &mut SessionState,
 ) -> bool {
+    let SessionState { active, tracker } = state;
     *active = None;
-    let mut result = match connection.exec_iter(statement, mysql::Params::Positional(params)) {
-        Ok(result) => result,
-        Err(error) => {
-            let error = backend(error);
-            let reusable = !error.fatal;
-            let _ = response.send(Err(error));
-            return reusable;
+    let attempt = connection.exec_iter(statement, mysql::Params::Positional(params));
+    if attempt.is_err() {
+        let mut error = backend(attempt.expect_err("checked error"));
+        if !error.fatal {
+            if let Err(state) = tracker.refresh(connection) {
+                error = state;
+            }
         }
-    };
+        let reusable = !error.fatal;
+        let _ = response.send(Err(error));
+        return reusable;
+    }
+    let mut result = attempt.expect("checked successful execution");
+    // QueryResult clears its current-set metadata when next() exhausts it.
+    let affected = result.affected_rows();
+    let insert_id = result.last_insert_id().filter(|id| *id != 0);
     let has_columns = !result.columns().as_ref().is_empty();
     let columns = result.columns();
     let key_bytes = columns
@@ -266,6 +289,10 @@ fn execute(
         }
     }
     drop(result); // the single supported result is already consumed
+    if let Err(error) = tracker.refresh(connection) {
+        let _ = response.send(Err(error));
+        return false;
+    }
     if has_columns {
         *active = Some((
             u64::from(statement.id()),
@@ -281,8 +308,46 @@ fn execute(
             result: has_columns,
             bytes: if has_columns { bytes } else { 0 },
             columns: column_count,
+            affected,
+            insert_id,
         }))
         .is_ok()
+}
+
+fn command(connection: &mut Conn, sql: &str, tracker: &mut Tracker) -> Result<Reply, Failure> {
+    let attempt = connection.query_iter(sql);
+    if attempt.is_err() {
+        let error = backend(attempt.expect_err("checked error"));
+        if !error.fatal {
+            tracker.refresh(connection)?;
+        }
+        return Err(error);
+    }
+    let mut result = attempt.expect("checked successful command");
+    if !result.columns().as_ref().is_empty() {
+        // This should have been rejected by the scanner. Quarantine rather than
+        // treating an unexpected result as a successful parameterless command.
+        return Err(failure(
+            "DbUnsupportedError",
+            "exec does not accept result columns",
+            true,
+        ));
+    }
+    let affected = result.affected_rows();
+    let insert_id = result.last_insert_id().filter(|id| *id != 0);
+    // Complete the single result before refreshing state, preserving metadata.
+    if let Some(row) = result.next() {
+        return Err(match row {
+            Err(error) => backend(error),
+            Ok(_) => failure("DbStateError", "unexpected command row", true),
+        });
+    }
+    drop(result);
+    tracker.refresh(connection)?;
+    Ok(Reply::Command {
+        affected,
+        insert_id,
+    })
 }
 
 fn fetch(
@@ -341,7 +406,7 @@ pub(crate) fn serve(
     stop: Arc<AtomicBool>,
 ) -> Option<SyncSender<Result<Reply, Failure>>> {
     let mut statements = BTreeMap::<u64, Statement>::new();
-    let mut active: Option<(u64, Buffer)> = None;
+    let mut state = SessionState::default();
     while let Ok(message) = commands.recv() {
         if stop.load(Ordering::Acquire) {
             return None;
@@ -376,22 +441,37 @@ pub(crate) fn serve(
                     limits,
                     &stop,
                     message.response,
-                    &mut active,
+                    &mut state,
                 ) {
                     return None;
                 }
                 continue;
             }
-            Request::Fetch { id, all, deadline } => fetch(&mut active, id, all, deadline, &stop),
+            Request::Exec(sql) => command(connection, &sql, &mut state.tracker),
+            Request::Transaction(operation) => state
+                .tracker
+                .operation(connection, operation)
+                .map(Reply::Transaction),
+            Request::Fetch { id, all, deadline } => {
+                fetch(&mut state.active, id, all, deadline, &stop)
+            }
             Request::CloseCursor(id) => {
-                if active.as_ref().is_some_and(|(active, _)| *active == id) {
-                    active = None;
+                if state
+                    .active
+                    .as_ref()
+                    .is_some_and(|(active, _)| *active == id)
+                {
+                    state.active = None;
                 }
                 Ok(Reply::Done)
             }
             Request::CloseStatement(id) => {
-                if active.as_ref().is_some_and(|(active, _)| *active == id) {
-                    active = None;
+                if state
+                    .active
+                    .as_ref()
+                    .is_some_and(|(active, _)| *active == id)
+                {
+                    state.active = None;
                 }
                 match statements.remove(&id) {
                     Some(statement) => connection
@@ -401,7 +481,15 @@ pub(crate) fn serve(
                     None => Err(failure("DbStateError", "MySQL statement is closed", false)),
                 }
             }
-            Request::Close => return Some(message.response),
+            Request::Close => {
+                if let Err(error) = connection.query_drop("ROLLBACK") {
+                    let mut error = backend(error);
+                    error.fatal = true;
+                    let _ = message.response.send(Err(error));
+                    return None;
+                }
+                return Some(message.response);
+            }
         };
         let fatal = result.as_ref().err().is_some_and(|e| e.fatal);
         if message.response.send(result).is_err() || fatal {

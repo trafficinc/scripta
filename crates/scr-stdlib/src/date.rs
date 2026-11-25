@@ -1,4 +1,4 @@
-//! Unix milliseconds with UTC-compatible formatting and bundled timezone rules.
+//! Unix seconds with UTC-compatible formatting and bundled timezone rules.
 use chrono::{
     DateTime, FixedOffset, Utc,
     format::{Fixed, Item, StrftimeItems},
@@ -17,7 +17,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub(crate) fn now() -> NativeResult<i64> {
+// Internal logging retains subsecond precision; public Date timestamps use seconds.
+pub(crate) fn now_millis() -> NativeResult<i64> {
     let milliseconds = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => i128::try_from(duration.as_millis()).map_err(|_| range())?,
         Err(error) => {
@@ -29,7 +30,7 @@ pub(crate) fn now() -> NativeResult<i64> {
 fn range() -> NativeError {
     NativeError::new("RangeError", "timestamp is outside the supported range")
 }
-pub(crate) fn timestamp(value: i64) -> NativeResult<DateTime<Utc>> {
+pub(crate) fn timestamp_millis(value: i64) -> NativeResult<DateTime<Utc>> {
     DateTime::from_timestamp_millis(value).ok_or_else(range)
 }
 fn date_error(message: &str) -> NativeError {
@@ -68,7 +69,7 @@ fn format_date(
     timezone: Option<&str>,
 ) -> NativeResult<Value> {
     context.check_cancelled()?;
-    let utc = timestamp(value)?;
+    let utc = DateTime::from_timestamp(value, 0).ok_or_else(range)?;
     for (index, item) in StrftimeItems::new(format).enumerate() {
         if index % 1024 == 0 {
             context.check_cancelled()?;
@@ -99,7 +100,7 @@ fn format_date(
         if zone.is_unknown() {
             return Err(date_error("could not determine the timezone"));
         }
-        let instant = Timestamp::from_millisecond(value).map_err(|_| range())?;
+        let instant = Timestamp::from_second(value).map_err(|_| range())?;
         info = zone.to_offset_info(instant);
         (
             FixedOffset::east_opt(info.offset().seconds()).ok_or_else(range)?,
@@ -148,7 +149,7 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
     runtime.register(
         "Date::now",
         NativeFunction::new(NativeSignature::new(vec![], NativeType::Int), |_, _| {
-            now().map(Value::Int)
+            now_millis().map(|milliseconds| Value::Int(milliseconds.div_euclid(1000)))
         }),
     )?;
     runtime.register(
@@ -191,7 +192,7 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
                         "leap seconds are not supported",
                     ));
                 }
-                Ok(Value::Int(date.timestamp_millis()))
+                Ok(Value::Int(date.timestamp()))
             },
         ),
     )?;

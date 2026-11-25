@@ -11,7 +11,7 @@ function test_platform_architecture_and_native_directories() {
     $uptime = System::uptime();
     Assert::isTrue($uptime > 0);
     // A denied native boot-time query must not masquerade as uptime since 1970.
-    Assert::isTrue(Date::now() / 1000 - $uptime > Date::parse("2000-01-01T00:00:00Z") / 1000);
+    Assert::isTrue(Date::now() - $uptime > Date::parse("2000-01-01T00:00:00Z"));
     echo Json::encode(["platform" => System::platform(), "architecture" => System::architecture(), "uptimeSeconds" => $uptime]) . "\n";
 }
 function test_system_memory_accounting() {

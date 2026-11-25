@@ -8,6 +8,7 @@ import socket
 import subprocess
 import tempfile
 import time
+from mysql_commit_proxy import CommitAckProxy
 
 
 def main():
@@ -68,8 +69,13 @@ def main():
                 env = os.environ.copy()
                 env.update(SCR_MYSQL_FIXTURE_DSN="mysql:host=localhost;port=" + str(port) + ";dbname=scripta_fixture", SCR_MYSQL_FIXTURE_USER="scripta_fixture", SCR_MYSQL_FIXTURE_PASSWORD=password, SCR_MYSQL_FIXTURE_CA=str(root / "ca.crt"), SCR_MYSQL_FIXTURE_PORT=str(port))
                 print("Disposable MySQL TLS fixture ready on loopback", flush=True)
-                result = subprocess.run(command, env=env)
-                return result.returncode
+                proxy = CommitAckProxy(root, port)
+                try:
+                    env["SCR_MYSQL_FIXTURE_COMMIT_PROXY_PORT"] = str(proxy.port)
+                    result = subprocess.run(command, env=env)
+                    return result.returncode
+                finally:
+                    proxy.close()
             except Exception:
                 output.flush()
                 print(log.read_text(errors="replace"))

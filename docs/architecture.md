@@ -15,7 +15,7 @@ Scripta is a synchronous AST interpreter written in safe Rust:
 | `scr-stdlib` | Automation APIs and host policies |
 | `scr-db` | Shared database registration, runtime-owned handles, and driver boundaries |
 | `scr-ext-sqlite` | SQLite backend and database handles |
-| `scr-ext-mysql` | Verified-TLS MySQL connections, native prepared execution and typed fetching; CLI wiring remains under development |
+| `scr-ext-mysql` | Verified-TLS MySQL connections, native prepared execution, typed fetching and transactions; CLI wiring remains under development |
 | `scr-web` | HTTP supervision and interpreter workers |
 | `scr-cli` | Commands, formatting, packages and worker entry points |
 | `scr-release` | Distribution packaging and verification |

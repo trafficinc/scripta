@@ -571,7 +571,9 @@ Native hosts can prepare a shared `FilesystemPolicy` using `policy.prepare()`
 and call `policy.open_read(context, path)` to open regular files with the
 standard path, capability, root, and symlink checks. Extensions must bound their
 reads and check cancellation. The developing [database connector API](database-connectors.md)
-uses this interface for MySQL CA files; it is not registered by the CLI yet.
+uses this interface for MySQL CA files. Embedding hosts can register its prepared
+statements, typed fetching, execution metadata and transaction controls; the CLI
+does not register this API yet.
 
 For a complete extension crate with optional Cargo features, CLI startup wiring,
 tests, and distribution instructions, see [Writing built-in extensions](writing-extensions.md).
@@ -1290,16 +1292,30 @@ $elapsedMs = Clock::monotonicMs() - $started;
 PHP mapping: this serves the elapsed-time role of
 [`hrtime()`](https://www.php.net/manual/en/function.hrtime.php), using floating-point
 milliseconds rather than PHP's nanosecond number or seconds/nanoseconds array.
-`Date::now()` remains the wall-clock Unix-millisecond API for dates.
+`Date::now()` remains the wall-clock Unix-second API for dates.
 
 ## Dates
 
 | API | Behavior |
 | --- | --- |
-| `Date::now(): int` | Current wall-clock Unix **milliseconds**; may move backward when the system clock changes. Timezone selection changes display, not this instant. |
-| `Date::format(timestamp: int, format: string, timezone: string optional): string` | Formats signed Unix milliseconds using [Chrono strftime directives](https://docs.rs/chrono/latest/chrono/format/strftime/). Omitted timezone means UTC; pass `"local"`, `"UTC"`, or an IANA name such as `"America/New_York"`. |
-| `Date::parse(value): int` | Parses RFC 3339 with an explicit `Z` or numeric offset, returning UTC Unix milliseconds. Submillisecond precision is floored, including dates before 1970. |
+| `Date::now(): int` | Current wall-clock Unix **seconds**; may move backward when the system clock changes. Timezone selection changes display, not this instant. |
+| `Date::format(timestamp: int, format: string, timezone: string optional): string` | Formats signed Unix seconds using [Chrono strftime directives](https://docs.rs/chrono/latest/chrono/format/strftime/). Omitted timezone means UTC; pass `"local"`, `"UTC"`, or an IANA name such as `"America/New_York"`. |
+| `Date::parse(value): int` | Parses RFC 3339 with an explicit `Z` or numeric offset, returning UTC Unix seconds. Subsecond precision is floored, including dates before 1970. |
 | `Date::sleep(milliseconds): null` | Same nonnegative int duration, `sleep` permission, and cooperative cancellation as global `sleep`. Uses monotonic elapsed time. |
+
+Calendar timestamps use signed integer Unix seconds throughout `Date`,
+`File::modified`, and `DirEntry->modified`. For example,
+`Date::format(File::modified("report.json"), "%Y-%m-%dT%H:%M:%SZ")`
+formats a file modification time directly. Fractional format directives emit
+zeros because Date timestamps have whole-second precision.
+
+**Migration:** earlier beta versions used milliseconds for `Date::now`,
+`Date::parse`, and `Date::format`. Remove `/ 1000` when comparing Date results
+with filesystem times. Convert stored millisecond timestamps to whole seconds
+before passing them to `Date::format` (floor toward negative infinity for
+pre-epoch values). `sleep`, `Date::sleep`, and `Clock::monotonicMs` retain their
+millisecond duration units; structured Log timestamps retain RFC 3339
+millisecond precision.
 
 Timezone names and aliases are looked up case-insensitively in the bundled IANA
 database. `"local"` is a case-sensitive selector for the host timezone. There is
@@ -1337,7 +1353,7 @@ preflights its exact output against the logical value budget before allocating.
 
 ```scr
 $now = Date::now();
-echo Date::format($now, "%Y-%m-%dT%H:%M:%S%.3fZ") . "\n";
+echo Date::format($now, "%Y-%m-%dT%H:%M:%SZ") . "\n";
 echo Date::format($now, "%Y-%m-%d %H:%M:%S %:z", "local") . "\n";
 echo Date::format($now, "%Y-%m-%d %H:%M:%S %:z", "America/New_York") . "\n";
 ```

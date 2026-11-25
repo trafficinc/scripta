@@ -564,6 +564,10 @@ invalid inputs or arities raise `TypeError`. `type` returns stable type names,
 nonnegative integer milliseconds and checks host cancellation. See
 [standard library](standard-library.md) for the conversion matrix and native API.
 
+Calendar timestamps returned by `Date::now`, `Date::parse`, `File::modified`,
+and `DirEntry->modified` use signed integer Unix seconds. `Date::format` accepts
+the same unit. Duration APIs retain their documented units independently.
+
 The `String` namespace supplies pure text helpers for trimming, literal
 split/join, search, replacement, Unicode scalar substrings, and Unicode case
 conversion. Explicit grapheme length and substring helpers preserve emoji sequences
