@@ -133,6 +133,8 @@ const MAX_ARGUMENT_CAPACITY: usize = 16;
 
 #[derive(Default)]
 pub struct Runtime {
+    // Drop host resources before globals, including host-retained aliases.
+    execution_cleanups: ExecutionCleanups,
     #[cfg(test)]
     disable_method_plans: bool,
     #[cfg(test)]
@@ -225,6 +227,16 @@ pub struct Runtime {
     module_resolver: Option<Rc<modules::ModuleResolver>>,
 }
 
+#[derive(Default)]
+struct ExecutionCleanups(Vec<Rc<dyn Fn() -> NativeResult<()>>>);
+impl Drop for ExecutionCleanups {
+    fn drop(&mut self) {
+        for cleanup in self.0.iter().rev() {
+            let _ = cleanup();
+        }
+    }
+}
+
 /// A resolved assignment target. Index expressions and object receivers are
 /// evaluated once, before the RHS, even for compound assignment.
 enum Root<'a> {
@@ -245,6 +257,16 @@ struct Place<'a> {
 }
 
 impl Runtime {
+    /// Register host cleanup after each top-level execution, including explicit
+    /// exits, cancellation, fatal limits, and output failures. Callbacks run in
+    /// reverse registration order and must not invoke script code. Every callback
+    /// runs even if another fails. Also runs best effort before globals are
+    /// dropped at runtime teardown. Callbacks must be idempotent and must not
+    /// panic. Keep backend state in the registering crate.
+    pub fn add_execution_cleanup(&mut self, cleanup: impl Fn() -> NativeResult<()> + 'static) {
+        self.execution_cleanups.0.push(Rc::new(cleanup));
+    }
+
     /// Opaque identity shared with native call contexts; contains no backend state.
     pub fn native_identity(&self) -> Rc<()> {
         self.identity.clone()
@@ -446,11 +468,21 @@ impl Runtime {
         output: &mut impl Write,
     ) -> std::result::Result<ExecutionOutcome, RuntimeError> {
         let mut output = output::ExecutionOutput::new(output, &self.options);
-        let result = self.execute_inner(program, &mut output);
+        let mut result = self.execute_inner(program, &mut output);
         if result.is_ok() {
-            output
-                .finish()
-                .map_err(|e| *self.error(e.to_string(), Span::default()))?;
+            if let Err(error) = output.finish() {
+                result = Err(*self.error(error.to_string(), Span::default()));
+            }
+        }
+        for cleanup in self.execution_cleanups.0.iter().rev() {
+            if let Err(error) = cleanup() {
+                match &mut result {
+                    Ok(_) => result = Err(*self.error(error.to_string(), Span::default())),
+                    Err(original) => original
+                        .message
+                        .push_str(&format!("; native cleanup failed: {error}")),
+                }
+            }
         }
         result
     }

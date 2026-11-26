@@ -58,3 +58,6 @@ id_ed25519.*
 
 # Temporary database connector implementation checklist.
 /docs/temporary-database-connectors-plan.md
+
+# Temporary standard-library expansion checklist.
+/docs/temporary-stdlib-plan.md

@@ -46,7 +46,7 @@ registered by default.
 ## Export index
 
 This reference covers 210 core functions and four default CLI SQLite functions
-(214 in total), plus 19 request-context Web/Session functions, native response/entry
+(222 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -63,9 +63,10 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Math | `Math::abs`, `Math::min`, `Math::max`, `Math::floor`, `Math::ceil`, `Math::round` | [Math](#math) |
 | List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort`, end operations, generation, search, aggregation, comparisons, `List::column` | [Collections](#collections) |
 | Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove`, merge/replace, combine/flip, search/reverse, comparisons, `Map::column` | [Collections](#collections) |
-| File | `File::exists`, `File::read`, `File::readBytes`, `File::writeBytes`, `File::appendBytes`, `File::write`, `File::writeAtomic`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close` | [Filesystem](#filesystem-and-paths) |
-| Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::entries`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
-| Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute`, `Path::canonical` | [Paths](#filesystem-and-paths) |
+| File | `File::exists`, `File::read`, `File::readBytes`, `File::writeBytes`, `File::appendBytes`, `File::write`, `File::writeAtomic`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close`, `File::lock`, `File::unlock` | [Filesystem](#filesystem-and-paths) |
+| Temp | `Temp::file`, `Temp::directory`, `Temp::close` | [Temporary resources and locks](#temporary-resources-and-file-locks) |
+| Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::entries`, `Dir::walk`, `Dir::glob`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
+| Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute`, `Path::canonical`, `Path::matchesGlob` | [Paths](#filesystem-and-paths) |
 | Process | `Process::run`, `Process::spawn`, `Process::shell`, `Process::wait`, `Process::poll`, `Process::kill`, `Process::exists`, `Process::currentId` | [Processes](#processes) |
 | Env | `Env::get`, `Env::set`, `Env::has`, `Env::remove`, `Env::all` | [Environment](#environment) |
 | Cli | `Cli::args`, `Cli::arg`, `Cli::has`, `Cli::option`, `Cli::isTerminal`, `Cli::prompt`, `Cli::readLine` | [CLI](#script-arguments-and-prompts) |
@@ -1006,12 +1007,60 @@ Try [atomic-report.scripta](../examples/atomic-report.scripta): preview with
 | `Dir::files(path): list` | Shallow list of regular-file `DirEntry` snapshots, sorted by UTF-8 name in case-sensitive lexical order. |
 | `Dir::directories(path): list` | Shallow list of directory snapshots in the same order. |
 | `Dir::entries(path): list` | Shallow, sorted list of maps with `name`, absolute `path`, `isDirectory`, `isFile`, and `isSymlink`. Includes dangling links and special files without resolving targets. Uses the execution value-byte limit before growing the result. |
+| `Dir::walk(path: string, options: map optional): list` | Recursive snapshots with the `Dir::entries` fields plus portable `relativePath`. See discovery below. |
+| `Dir::glob(path: string, pattern: string, options: map optional): list` | Same traversal, returning only matching relative paths. |
 | `Dir::remove(path): null` | Removes only an empty directory. Rejects root, current directory, and its ancestors. There is no recursive-delete argument or API. |
 | `Dir::current(): string` | Canonical absolute runtime working directory. |
 | `Dir::change(path): null` | Requires an existing directory and saves its canonical absolute path in this runtime. |
 
-`Dir::files` and `Dir::directories` exclude symlinks and special files; no listing
-recurses. `Dir::entries` explicitly exposes links (including Windows junctions)
+Directory discovery (`Dir::walk` and `Dir::glob`) excludes the starting directory
+and returns maps sorted by `relativePath` in case-sensitive UTF-8 lexical order.
+`path` is absolute and retains the supplied root spelling (including `.`/`..`);
+`relativePath` uses `/` separators on every platform. `name` is the final native
+filename. `isDirectory`, `isFile`, and `isSymlink` describe the entry itself;
+links, including dangling links and cycles, are included but never traversed.
+Special files are included with all three flags false. The starting directory
+must not be a final symlink. Ancestor links retain the existing root-policy rules.
+
+Options are strictly typed; unknown or non-string keys raise `TypeError`:
+
+| Option | Default | Behavior |
+| --- | --- | --- |
+| `maxDepth: int` | 64 | Range 0–256. Immediate children have depth 1; deeper entries are omitted without error. Zero returns an empty list after validating the root. |
+| `maxEntries: int` | 10000 | Range 0–1000000. Counts every enumerated entry, including hidden and nonmatching entries; exceeding it raises `ResourceLimitError`. Zero permits only an empty traversal. |
+| `includeHidden: bool` | true | False skips dot-prefixed entries and their subtrees. This is a filename rule, independent of Windows hidden attributes. |
+
+Traversal checks `filesystem.read`, host read/root policy, and cancellation between
+entries and directory opens. It uses at most one open directory iterator per depth.
+Results are bounded before growth by the smaller of 64 MiB and the runtime's
+value-byte limit, accounting for strings, map keys, and collection slots. These
+are logical result limits, not a process heap cap. Nonmatching subtrees are still
+visited: patterns do not prune traversal. No partial list is returned on I/O,
+encoding, permission, cancellation, or limit failure; a failed assignment preserves
+its destination. Open iterators close through host RAII. Entries can change during
+traversal; results are observations, not an atomic filesystem snapshot. Missing or
+inaccessible descendants propagate the existing filesystem error kinds. Policies
+have the same concurrent path-replacement limitations as other filesystem APIs.
+
+`Path::matchesGlob(candidate: string, pattern: string): bool` is a pure, anchored,
+case-sensitive match over slash-separated text, without filesystem access or
+normalization. Use discovery's `relativePath` for portable matches; native Windows
+backslashes must be converted explicitly. Backslashes are literal characters,
+not escapes. `*` matches zero or more Unicode scalars within one component; `?`
+matches one scalar; a whole-component `**` matches zero or more components.
+For example, `**/*.txt` matches both `note.txt` and `reports/note.txt`, and
+`reports/**` also matches `reports`. Dot names match normally. Newlines are ordinary
+filename characters. All other accepted characters are literal. The pattern must
+be relative, with no empty, `.` or `..` components, brackets, braces, NUL, or embedded
+`**` such as `a**b`; these raise `GlobError`. Patterns are limited to 4096 UTF-8
+bytes and a 1 MiB compiled regex budget. NUL in the candidate raises `PathError`.
+`Dir::glob` applies the same matcher to each `relativePath` and compiles once.
+
+Run `scripta examples/file-discovery.scripta examples '**/*.scripta'` from the
+repository root for a read-only discovery example.
+
+`Dir::files` and `Dir::directories` exclude symlinks and special files; these two listings do not
+recurse. `Dir::entries` explicitly exposes links (including Windows junctions)
 as link snapshots; type flags describe the link itself, not its target.
 Existing file/directory operations continue to reject final symlinks except
 existence checks (false) and lexical extension extraction. Intermediate symlink directories use OS resolution; the
@@ -1162,6 +1211,98 @@ foreach (Dir::files($source) as $file) {
 echo "Finished organizing files.\n";
 ```
 
+
+## Temporary resources and file locks
+
+| Method | Behavior |
+| --- | --- |
+| `Temp::file(parent: string): TempFile` | Exclusively create an empty, randomly named regular file in an existing explicit parent. |
+| `Temp::directory(parent: string): TempDirectory` | Exclusively create a randomly named directory in an existing explicit parent. |
+| `Temp::close(resource: TempFile or TempDirectory): null` | Remove the owned file or directory tree. Idempotent after successful cleanup. |
+| `File::lock(path: string, mode: string, timeoutMs: int optional): FileLock or null` | Lock an existing regular file in `shared` or `exclusive` mode. Zero timeout (default) makes one attempt and returns null if busy. |
+| `File::unlock(lock: FileLock): null` | Release the lock and its descriptor. Idempotent after successful unlock. |
+
+Temporary parents follow the usual native path rules, runtime working directory,
+`filesystem.write` capability, and host write/root policies. There is no implicit
+system-temp fallback. Final parent symlinks are rejected. Names use the `scripta-`
+prefix and 16 random characters; creation is exclusive and never overwrites an
+existing path. Unix file/directory modes are 0600/0700, subject to umask. Windows
+uses inherited ACLs. Scripts can use the read-only `path` property with the ordinary
+File/Dir/Stream APIs, which still require their own capabilities. Creation does
+not grant filesystem read access. A failed creation attempts cleanup of its unpublished path.
+
+These resources are **execution-scoped**. Explicit close/unlock acts immediately;
+otherwise the runtime closes them at top-level execution completion, explicit
+exit, unhandled failure, cancellation, fatal limits, or output failure. Caught
+exceptions do not end execution. Modules and functions share the caller's scope.
+The scope retains resources even if script references are discarded. Embedding
+hosts cannot keep them open across execute calls by retaining a Value: aliases
+become closed together. Runtime teardown also performs best-effort cleanup.
+This lifecycle is distinct from existing FileStream and ByteStream lifetimes.
+If `Dir::change` points inside a temporary directory, restore a persistent working
+directory before closing it or returning: cleanup does not restore runtime cwd.
+Use explicit close for predictable release and to handle cleanup errors in script.
+
+All three handle types expose read-only `path: string` and `closed: bool`;
+FileLock also exposes `mode: string`. Paths remain descriptive snapshots after
+close. Handles are shared by identity, cannot be serialized as JSON, and must
+belong to the calling runtime and filesystem registration. Foreign or forged
+handles raise `TypeError`, including on close/unlock. Close/unlock needs no
+ambient filesystem capability; explicit native calls still check cancellation.
+There is one shared limit of 64 open temporary/lock resources per filesystem
+registration. Closed slots can be reused within the execution. Creation and lock
+acquisition preflight logical native-state and UTF-8 path payloads against the
+runtime value-byte limit. Existing destinations remain unchanged on failed
+creation/acquisition. Limits do not cap filesystem bytes written by other APIs.
+
+End-of-execution cleanup releases all FileLocks before removing temporary resources in reverse
+creation order. Directory removal deletes owned contents, including ordinary
+script-created files and subdirectories, without following contained symlinks or
+junctions to their targets. This does not add recursive deletion for arbitrary
+paths. Retained filesystem identities are checked before removal; replacing a
+file or root with a different file, directory, or link is refused. Do not rename
+or atomically replace temporary roots/files: a missing original path closes the
+handle but may leave a moved resource for manual cleanup. A retained identity
+keeps the original object distinguishable from a replacement. Cleanup also
+rechecks the registration's root/write policy without requiring ambient script
+capabilities. It retains the existing non-adversarial filesystem race limitations;
+identity checks and deletion are separate OS operations. Windows identity checks
+use the filesystem's volume/file indices, with the underlying same-file library's
+limitations on filesystems such as ReFS.
+
+Explicit cleanup failures propagate filesystem error kinds or `TempError` for
+replacement/identity mismatches; the handle remains open for a retry. Cleanup can
+remove part of an owned tree before an I/O failure. End-of-execution cleanup
+attempts every resource; failure turns a successful outcome into an error or adds
+cleanup details to the original error while preserving its span and trace. It
+keeps failed resources for a later retry. Drop cleanup is best effort and cannot
+report errors. Permissions, open external handles, or filesystem failures can
+leave residue. Cleanup after cancellation bypasses the cancelled flag so it can
+release resources: recursive OS removal is synchronous and cannot be interrupted
+once begun. Normal explicit calls check cancellation before cleanup starts.
+
+Lock acquisition requires `filesystem.read` and host read/root access; exclusive
+mode also requires `filesystem.write` and host write access. Locking never creates
+or truncates a path, and rejects final symlinks, directories and special files.
+Each lock uses a fresh descriptor, with no upgrade, downgrade, or reentrant
+special case. `timeoutMs` must be an int from 0 through 30000 (`RangeError`
+otherwise). Positive timeouts poll nonblocking OS locks at most every 10 ms,
+check cancellation between attempts, and raise `TimeoutError` on contention at
+the deadline. The bound covers lock waiting, not a blocked filesystem open or
+scheduler delay. Unsupported locking and other OS failures propagate filesystem
+errors instead of being reported as contention. Cancellation never publishes a
+partly acquired handle; a descriptor's RAII release unlocks it.
+
+Treat locks as advisory coordination between cooperating programs. Locking
+semantics depend on the OS/filesystem; network mounts may not provide dependable
+coordination. Unix uses flock; Windows uses byte-range locks and can also reject
+conflicting I/O through other descriptors. For portable coordination, lock an
+existing separate lock file and access data files separately. Rename/replacement
+can make the same path refer to a different file that is not covered by an old
+lock. Closing, execution completion, or runtime teardown releases the descriptor;
+locks are never persistent after the owning process exits.
+
+Run `scripta examples/temporary-resources.scripta .` for a self-cleaning example.
 
 ## Processes
 

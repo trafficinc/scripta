@@ -1,0 +1,16 @@
+// Usage: scripta examples/file-discovery.scripta <directory> [pattern]
+$root = Cli::arg(0);
+if ($root === null) {
+    echo "Usage: scripta examples/file-discovery.scripta <directory> [pattern]\n";
+    exit 2;
+}
+$pattern = Cli::arg(1);
+if ($pattern === null) {
+    $pattern = "**/*.scripta";
+}
+$options = ["includeHidden" => false, "maxDepth" => 64, "maxEntries" => 10000];
+foreach (Dir::glob($root, $pattern, $options) as $entry) {
+    if ($entry["isFile"]) {
+        echo $entry["relativePath"] . "\n";
+    }
+}

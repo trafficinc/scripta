@@ -488,6 +488,12 @@ fn non_utf8_names_raise_encoding_errors_instead_of_lossy_names() {
     }
     let mut runtime = temp.runtime();
     error(&mut runtime, r#"Dir::files(".");"#, "EncodingError");
+    error(&mut runtime, r#"Dir::walk(".");"#, "EncodingError");
+    error(
+        &mut runtime,
+        r#"Dir::glob(".", "no-match");"#,
+        "EncodingError",
+    );
 }
 
 #[cfg(unix)]
@@ -691,6 +697,7 @@ fn all_entries_enforces_exact_logical_output_budget() {
 fn directory_junctions_are_visible_and_resolve_to_their_target() {
     let temp = Temp::new();
     fs::create_dir(temp.0.join("target")).unwrap();
+    fs::write(temp.0.join("target/file"), "data").unwrap();
     let status = std::process::Command::new("cmd")
         .args(["/C", "mklink", "/J"])
         .arg(temp.0.join("junction"))
@@ -701,6 +708,13 @@ fn directory_junctions_are_visible_and_resolve_to_their_target() {
     let mut runtime = temp.runtime();
     run(&mut runtime, "$rows = Dir::entries('.'); $link = $rows[0]['isSymlink']; $target = Path::canonical('junction');").unwrap();
     assert_eq!(runtime.get_global("link"), Some(&Value::Bool(true)));
+    run(
+        &mut runtime,
+        "$walk = Dir::walk('.'); $count = len($walk); $walkLink = $walk[0]['isSymlink'];",
+    )
+    .unwrap();
+    assert_eq!(runtime.get_global("count"), Some(&Value::Int(3)));
+    assert_eq!(runtime.get_global("walkLink"), Some(&Value::Bool(true)));
     assert_eq!(
         string(&runtime, "target"),
         fs::canonicalize(temp.0.join("target"))

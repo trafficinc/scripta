@@ -62,6 +62,18 @@ test after building those variants. It uses disposable local projects, not a
 running database. Never count that test as passed merely because a normal run
 ignored it. See [package requirements](packages.md#native-extension-requirements).
 
+Execution-scoped native resource coverage lives in
+`crates/scr-runtime/tests/native_cleanup.rs` and
+`crates/scr-stdlib/tests/temporary.rs`. The latter spawns its own Rust test
+executable as a lock fixture, with pipe handshakes for cross-process shared and
+exclusive contention; no public server or Python installation is needed. Tests
+cover fatal/ordinary cleanup, retained and foreign aliases, filesystem replacement
+refusal, permission failures with retry, cancellation while waiting, and the
+64-resource boundary. Logical handle byte boundaries are unit-tested in
+`crates/scr-stdlib/src/temporary.rs`. Execute
+`examples/temporary-resources.scripta` with a controlled existing parent directory
+when reviewing this API.
+
 ## Local disk cleanup
 
 From the workspace root, preview removable build outputs and Python caches:

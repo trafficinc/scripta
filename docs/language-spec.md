@@ -486,6 +486,10 @@ no additional budget. Forced process termination can prevent all cleanup.
 Native file streams release on explicit close or last-reference drop, including
 runtime teardown when the host has not retained aliases. See
 [bounded file streams](standard-library.md#bounded-file-streams).
+Temporary resources and FileLocks instead have an execution scope: native host
+cleanup closes them when top-level execution ends, including on cancellation or
+fatal limits. Host-retained aliases become closed. This does not run script
+finally blocks or callbacks. See [temporary resources and locks](standard-library.md#temporary-resources-and-file-locks).
 
 The parser reports unexpected tokens, missing semicolons, unmatched braces and
 parentheses, and invalid control-flow contexts with source spans. An unclosed

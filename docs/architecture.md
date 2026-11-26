@@ -107,6 +107,11 @@ resource release. See [resource behavior](standard-library.md#distribution-and-r
 Typed native registration validates arguments and results. Runtime contexts
 supply streams, permissions, cancellation and host state. Reentrant invocation
 shares script scopes, budgets and error signals without terminating the host.
+Backend-free execution-cleanup callbacks run after top-level outcomes and before
+runtime teardown. Standard-library temporary resources and file locks opt into
+this lifecycle through a bounded native registry, so cancellation does not leave
+host-retained aliases open. Backend state, filesystem identity checks, removal,
+and lock polling remain in scr-stdlib; existing resource lifetimes are unchanged.
 
 OS, network and database backends belong in standard-library or extension crates.
 They enforce capabilities, resource ownership and operation-specific limits.

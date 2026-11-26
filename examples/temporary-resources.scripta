@@ -1,0 +1,17 @@
+// Usage: scripta examples/temporary-resources.scripta <existing-parent>
+$parent = Cli::arg(0);
+if ($parent === null) {
+    echo "Usage: scripta examples/temporary-resources.scripta <existing-parent>\n";
+    exit 2;
+}
+$directory = Temp::directory($parent);
+$file = Temp::file($directory->path);
+File::write($file->path, "temporary work");
+$lock = File::lock($file->path, "exclusive", 1000);
+echo "Lock: " . $lock->mode . "\n";
+File::unlock($lock);
+echo "Content: " . File::read($file->path) . "\n";
+$path = $directory->path;
+Temp::close($file);
+Temp::close($directory);
+echo "Cleaned: " . str(!Dir::exists($path)) . "\n";

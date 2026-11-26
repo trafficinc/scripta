@@ -346,6 +346,22 @@ unwinding, but cancellation and fatal execution limits bypass script cleanup.
 Rust owners must still release resources when the host drops the runtime and
 any other references it holds.
 
+Execution-scoped native resources can register
+`Runtime::add_execution_cleanup(|| -> NativeResult<()> { ... })`. Callbacks run
+after each top-level execution (completion, exit, failure, cancellation, fatal
+limits, and output failures), in reverse registration order, and best effort
+before globals are dropped at runtime teardown. Parsing without execution does
+not enter this lifecycle. Module/function calls do not end it. Callbacks must be
+idempotent, must not panic or execute script code, and should release through
+host state without consulting a cancelled script flag. Every callback runs even
+when another fails. Cleanup failures turn successful execution into an error or
+append details to an existing failure while preserving its source span and
+trace; Drop cannot report errors. Retain strong references in a bounded registry
+when release ordering matters, and invalidate host-retained aliases together.
+`crates/scr-stdlib/src/temporary.rs` demonstrates this pattern with temporary
+resources and file locks. Existing native resources retain their own lifetimes
+unless they explicitly opt in.
+
 ## Distribute an extension-enabled interpreter
 
 Build and package the selected CLI variant:

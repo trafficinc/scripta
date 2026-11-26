@@ -594,16 +594,17 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
     let modules = [
         (
             "File",
-            "exists read readBytes writeBytes appendBytes write writeAtomic append copy move delete size modified extension openLines readLine close",
+            "exists read readBytes writeBytes appendBytes write writeAtomic append copy move delete size modified extension openLines readLine close lock unlock",
         ),
         (
             "Dir",
-            "exists create createAll files directories entries remove current change",
+            "exists create createAll files directories entries walk glob remove current change",
         ),
         (
             "Path",
-            "join filename extension parent normalize absolute canonical",
+            "join filename extension parent normalize absolute canonical matchesGlob",
         ),
+        ("Temp", "file directory close"),
         ("Process", "run spawn shell wait poll kill exists currentId"),
         ("Env", "get set has remove all"),
         ("Cli", "args arg has option isTerminal prompt readLine"),
@@ -670,7 +671,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 214);
+    assert_eq!(count, 222);
     for name in [
         "start",
         "id",
@@ -1108,4 +1109,52 @@ fn timezone_example_runs_with_only_bundled_data_and_no_external_programs() {
             "UTC: 2024-07-15 12:34:56 +00:00\nAmerica/New_York: 2024-07-15 08:34:56 -04:00\nAsia/Kathmandu: 2024-07-15 18:19:56 +05:45\n"
         );
     }
+}
+
+#[test]
+fn discovery_example_filters_files_and_skips_hidden_subtrees() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir(dir.path().join("nested")).unwrap();
+    fs::create_dir(dir.path().join(".private")).unwrap();
+    for name in [
+        "a.scripta",
+        "nested/é.scripta",
+        "nested/other.txt",
+        ".private/hidden.scripta",
+    ] {
+        fs::write(dir.path().join(name), "").unwrap();
+    }
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/file-discovery.scripta");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    let formatted = scr_cli::formatter::format(&source).unwrap();
+    assert_eq!(formatted, source);
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg("run")
+        .arg(path)
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(success(output), "a.scripta\nnested/é.scripta\n");
+}
+
+#[test]
+fn temporary_resource_example_locks_reads_and_cleans_its_owned_paths() {
+    let directory = tempfile::tempdir().unwrap();
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/temporary-resources.scripta");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg("run")
+        .arg(path)
+        .arg(directory.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        success(output),
+        "Lock: exclusive\nContent: temporary work\nCleaned: true\n"
+    );
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
 }

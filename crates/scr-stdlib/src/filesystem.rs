@@ -2,8 +2,12 @@
 use crate::paths;
 #[path = "atomic_writes.rs"]
 mod atomic_writes;
+#[path = "discovery.rs"]
+mod discovery;
 #[path = "file_streams.rs"]
 mod streams;
+#[path = "temporary.rs"]
+mod temporary;
 use scr_runtime::{
     MapKey, NativeError, NativeFunction, NativeObject, NativeResult, NativeSignature, NativeType,
     Runtime, RuntimeContext, Value,
@@ -485,9 +489,11 @@ enum Operation {
     Change,
 }
 
-/// Register only File and Dir, with an optional root/read/write policy.
+/// Register File, Dir, and filesystem-related Path helpers with an optional policy.
 pub fn register(runtime: &mut Runtime, policy: FilesystemPolicy) -> NativeResult<()> {
     let policy = Rc::new(policy.prepare()?);
+    discovery::register(runtime, policy.clone())?;
+    temporary::register(runtime, policy.clone())?;
     use NativeType::{Bool, Int, List, Null, String as Text};
     use Operation::*;
     for (name, operation, count, returns) in [
