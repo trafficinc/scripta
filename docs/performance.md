@@ -97,3 +97,8 @@ Candidate acceptance is separate from these measurements.
 The [callback-setup experiment](../benchmarks/callbacks/callback-setup.md) measures
 the next candidate incrementally against accepted step 1. Scope/value quotas and
 unsupported callback forms keep their existing execution path.
+
+The [argument-validation experiment](../benchmarks/callbacks/argument-validation.md)
+measures the next candidate against accepted step 2. It reuses structural checks
+only for small immutable borrowed data during repeated comparisons; mutable
+objects, callable descendants and byte-budgeted invocations retain full checks.

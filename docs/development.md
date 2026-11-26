@@ -157,6 +157,9 @@ alternates frozen builds and also checks startup and existing CLI workloads.
 The [callback-setup experiment](../benchmarks/callbacks/callback-setup.md) uses
 the same driver against the accepted owned-argument baseline and records the
 additional changed runtime source files with --source.
+The [argument-validation experiment](../benchmarks/callbacks/argument-validation.md)
+adds differential checks of immutable borrows, mutable native payload observations,
+byte-quota changes and comparator preflight checkpoint/error equivalence.
 
 ## Local disk cleanup
 

@@ -60,7 +60,7 @@ patch are retained. Optional --source affects evidence only, not the timers.
 ## Results
 
 Final candidate: **accepted by the user on 2026-11-26**. Step 1 is accepted;
-steps 3–5 and standard-library section 10 remain unstarted. Starting revision
+step 3 is authorized; steps 4–5 and standard-library section 10 remain unstarted. Starting revision
 `c165f68ecfd0385659f0134cdf98b73107bf3116` was clean before this experiment.
 
 Native host: macOS 27.0.1 ARM64 build 26A434; rustc 1.99.1 (58cf8f9c3,

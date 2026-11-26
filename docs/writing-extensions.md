@@ -448,6 +448,22 @@ again. The array is consumed on success or failure; clone values first when the
 caller needs to retain a snapshot. Callable/argument validation, ownership checks,
 limits, cancellation and exception propagation are the same as for `invoke`.
 The borrowed-slice `invoke` interface remains available for dynamic argument lists.
+
+For repeated use of the same borrowed data, retain an
+`InvocationArgument::new(&value)` and call
+`context.invoke_arguments(callback, [&argument])`. Each call still clones
+independent argument snapshots, checks its callable and budgets, and executes the
+callback normally. After the first successful structural validation, holders can
+reuse that fact for immutable trees of at most 64 Value nodes, including lists,
+maps, strings and immutable bytes. A holder keeps its source immutably borrowed;
+no address-based global cache or caller-supplied validity flag is used.
+Any object/callable descendant or larger tree is revalidated on every call.
+Byte-budgeted invocations always use full current-limit validation, even if the
+holder previously succeeded without a quota. Constructors do not validate or
+charge checkpoints. Argument cloning precedes the usual invocation checkpoint,
+matching owned invocation; callback annotations/results and output checks are
+never memoized. Holders themselves are native work storage, so bound any growing
+holder collection and preserve cooperative checkpoints while building it.
 Use `context.error(NativeError::new(kind, message))` for a new catchable exception
 and `context.require_permission(capability)` before effects. `context.checkpoint()`
 checks cancellation and instruction limits during iterative work.

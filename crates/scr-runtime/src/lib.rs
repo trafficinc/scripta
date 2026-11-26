@@ -40,7 +40,9 @@ mod method_cache_tests;
 mod method_plan;
 mod modules;
 mod objects;
-pub use invocation::{ExecutionOutcome, InvocationContext, InvocationError, InvocationResult};
+pub use invocation::{
+    ExecutionOutcome, InvocationArgument, InvocationContext, InvocationError, InvocationResult,
+};
 mod native;
 mod numeric_call;
 mod numeric_call_loop;
@@ -157,6 +159,10 @@ pub struct Runtime {
         std::cell::RefCell<std::collections::HashMap<String, Rc<objects::ScriptClass>>>,
     stack: Vec<error::ActiveFrame>,
     argument_buffers: Vec<Vec<Value>>,
+    #[cfg(test)]
+    disable_argument_validation_reuse: bool,
+    #[cfg(test)]
+    argument_validations_reused: usize,
     prepared_stack: Option<Box<prepared_call::Stack>>,
     compact_stack: Option<Box<compact_call::Stack>>,
     #[cfg(test)]

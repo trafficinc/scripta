@@ -33,6 +33,16 @@ argument slice. Both paths share validation and ordinary callable execution.
 Collection backends stay in scr-stdlib and retain input snapshots before moving
 callback arguments; this does not change script collection value semantics.
 
+Repeated comparator inputs may use borrowed invocation argument holders. Only a
+successful check of a small immutable data tree can be reused; mutable objects,
+callables and byte-budgeted calls retain full validation. Rust borrows keep the
+snapshot structure fixed, and callbacks still receive independent cloned values.
+Holder state is local to that borrow, not keyed by recyclable addresses.
+Comparator holders grow during the existing cooperative preflight walk, retaining
+its checkpoint/prefix-limit order; quota-enabled, key-sort and scalar-first paths
+keep their ordinary preflight. Callback results and retained-output measurements
+remain fully checked.
+
 The [database connector foundation](database-connectors.md) composes backend
 descriptors through `scr-db`. The CLI always registers the shared Db namespace
 and enables MySQL/PostgreSQL with its optional mysql/postgres features. One scr-cli extension

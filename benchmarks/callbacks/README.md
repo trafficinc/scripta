@@ -261,3 +261,6 @@ baseline/candidate measurements are separate from the cross-language table.
 The accepted owned-argument step is followed by the separate
 [callback-setup experiment](callback-setup.md), measured incrementally against
 the accepted step-1 binaries. Each optimization requires its own review.
+
+The [argument-validation experiment](argument-validation.md) measures step 3
+against accepted step 2, retaining mutable/opaque and quota-enabled checks.

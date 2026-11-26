@@ -1,7 +1,7 @@
 //! Eager transforms and stable key/comparison sorting over collection snapshots.
 use scr_runtime::{
-    InvocationContext, InvocationError, InvocationResult, MapKey, NativeError, NativeFunction,
-    NativeResult, NativeSignature, NativeType, Runtime, Value,
+    InvocationArgument, InvocationContext, InvocationError, InvocationResult, MapKey, NativeError,
+    NativeFunction, NativeResult, NativeSignature, NativeType, Runtime, Value,
 };
 use std::{cmp::Ordering, mem::size_of};
 
@@ -224,6 +224,39 @@ fn scalar_compare(left: &Value, right: &Value) -> Ordering {
         _ => unreachable!("validated homogeneous keys"),
     }
 }
+
+// Match measure's list-root checkpoint and prefix-budget order. Prepare holders
+// during that same cooperative walk, without adding logical instruction ticks.
+fn prepare_sort_arguments<'a>(
+    context: &mut InvocationContext<'_>,
+    items: &'a [Value],
+    comparison: bool,
+) -> Result<Vec<InvocationArgument<'a>>> {
+    context.checkpoint()?;
+    let mut arguments = Vec::new();
+    let mut cache = comparison
+        && context.max_value_bytes().is_none()
+        && items
+            .first()
+            .is_some_and(|item| matches!(item, Value::List(_) | Value::Map(_)));
+    let mut size = size_of::<Value>();
+    for item in items {
+        let cost = measure(context, item, 1)?;
+        size = budget(context, add(context, size, cost)?)?;
+        if cache {
+            // Grow only after the corresponding input was traversed, so an
+            // early limit/cancellation failure cannot reserve the entire cache.
+            if arguments.try_reserve(1).is_ok() {
+                arguments.push(InvocationArgument::new(item));
+            } else {
+                arguments = Vec::new();
+                cache = false;
+            }
+        }
+    }
+    budget(context, size)?;
+    Ok(arguments)
+}
 // Merge indexes, keeping fallible script calls outside Rust's infallible sort
 // interface. Every pass is bounded even if a comparator is inconsistent.
 fn sorted_indexes(
@@ -276,7 +309,17 @@ fn sort(context: &mut InvocationContext<'_>, args: &[Value], by_key: bool) -> In
         unreachable!()
     };
     let descending = matches!(args.get(2), Some(Value::Bool(true)));
-    measure(context, &args[0], 0)?;
+    let arguments = if !by_key
+        && context.max_value_bytes().is_none()
+        && items
+            .first()
+            .is_some_and(|item| matches!(item, Value::List(_) | Value::Map(_)))
+    {
+        prepare_sort_arguments(context, items, true)?
+    } else {
+        measure(context, &args[0], 0)?;
+        Vec::new()
+    };
     // Preflight scratch before invoking any key/comparison callback.
     let scratch = items
         .len()
@@ -318,10 +361,14 @@ fn sort(context: &mut InvocationContext<'_>, args: &[Value], by_key: bool) -> In
         })?
     } else {
         sorted_indexes(context, items.len(), |context, left, right| {
-            let value = context.invoke_owned(
-                callback.clone(),
-                [items[left].clone(), items[right].clone()],
-            )?;
+            let value = if arguments.is_empty() {
+                context.invoke_owned(
+                    callback.clone(),
+                    [items[left].clone(), items[right].clone()],
+                )?
+            } else {
+                context.invoke_arguments(callback.clone(), [&arguments[left], &arguments[right]])?
+            };
             let Value::Int(value) = value else {
                 return Err(type_error(context, "sortWith comparator must return int"));
             };
@@ -329,6 +376,7 @@ fn sort(context: &mut InvocationContext<'_>, args: &[Value], by_key: bool) -> In
             Ok(if descending { order.reverse() } else { order })
         })?
     };
+    drop(arguments);
     let mut size = size_of::<Value>();
     for &index in &order {
         let cost = measure(context, &items[index], 1)?;
@@ -375,3 +423,6 @@ pub(super) fn register(runtime: &mut Runtime) -> NativeResult<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

@@ -2,6 +2,66 @@
 use super::*;
 
 pub type InvocationResult = std::result::Result<Value, InvocationError>;
+const MAX_CACHEABLE_ARGUMENT_NODES: usize = 64;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArgumentState {
+    Unknown,
+    Immutable,
+    Opaque,
+}
+
+/// A borrowed callback argument whose successful structural validation can be
+/// reused for an immutable data tree of at most 64 Value nodes. Objects and
+/// callables are never cached; byte-budgeted invocations always perform their
+/// ordinary value checks.
+///
+/// Keeping the argument alive prevents mutation of its owned collection data:
+/// ```compile_fail
+/// use scr_runtime::{InvocationArgument, Value};
+/// let mut value = Value::List(vec![Value::Int(1)]);
+/// let argument = InvocationArgument::new(&value);
+/// value = Value::Null;
+/// drop(argument);
+/// ```
+pub struct InvocationArgument<'a> {
+    value: &'a Value,
+    state: std::cell::Cell<ArgumentState>,
+}
+
+impl<'a> InvocationArgument<'a> {
+    /// Borrow without validating or charging a checkpoint. The first actual
+    /// invocation validates normally, before any result can be reused.
+    #[inline]
+    pub fn new(value: &'a Value) -> Self {
+        Self {
+            value,
+            state: std::cell::Cell::new(ArgumentState::Unknown),
+        }
+    }
+}
+
+// Limit additional classification work. This only inspects enum variants, never
+// native hooks, and only runs after ordinary validation has succeeded.
+fn immutable_argument(value: &Value, remaining: &mut usize) -> bool {
+    if *remaining == 0 {
+        return false;
+    }
+    *remaining -= 1;
+    match value {
+        Value::List(items) => items.iter().all(|item| immutable_argument(item, remaining)),
+        Value::Map(items) => items
+            .iter()
+            .all(|(_, item)| immutable_argument(item, remaining)),
+        Value::NativeObject(_) | Value::Callable(_) => false,
+        Value::Null
+        | Value::Bool(_)
+        | Value::Int(_)
+        | Value::Float(_)
+        | Value::String(_)
+        | Value::Bytes(_) => true,
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExecutionOutcome {
@@ -117,6 +177,61 @@ impl InvocationContext<'_> {
             .map_err(|signal| InvocationError { signal })
     }
 
+    /// Invoke with borrowed argument holders. Values are cloned into independent
+    /// callback snapshots as in invoke_owned. Only successful checks of small
+    /// immutable data are reused, and only while the byte quota is unset.
+    pub fn invoke_arguments<const N: usize>(
+        &mut self,
+        callee: Value,
+        arguments: [&InvocationArgument<'_>; N],
+    ) -> InvocationResult {
+        // Preserve owned invocation's clone/checkpoint/validation ordering,
+        // including native-handle alias counts during payload observations.
+        let values = arguments.map(|argument| argument.value.clone());
+        #[cfg(not(test))]
+        let reuse = true;
+        #[cfg(test)]
+        let reuse = !self.runtime.disable_argument_validation_reuse;
+        if !reuse || self.max_value_bytes().is_some() {
+            return self.invoke_owned(callee, values);
+        }
+        self.checkpoint()?;
+        let Value::Callable(callable) = callee else {
+            return Err(self.error(NativeError::type_error("invocation requires a callable")));
+        };
+        for (argument, value) in arguments.iter().zip(&values) {
+            if argument.state.get() == ArgumentState::Immutable {
+                #[cfg(test)]
+                {
+                    self.runtime.argument_validations_reused += 1;
+                }
+                continue;
+            }
+            self.runtime
+                .validate_value(value, 0, self.span)
+                .map_err(|signal| InvocationError { signal })?;
+            if argument.state.get() == ArgumentState::Unknown {
+                let mut remaining = MAX_CACHEABLE_ARGUMENT_NODES;
+                argument
+                    .state
+                    .set(if immutable_argument(value, &mut remaining) {
+                        ArgumentState::Immutable
+                    } else {
+                        ArgumentState::Opaque
+                    });
+            }
+        }
+        let mut buffer = if N == 0 {
+            Vec::new()
+        } else {
+            self.runtime.take_argument_buffer()
+        };
+        buffer.extend(values);
+        self.runtime
+            .call_callable(callable, buffer, self.span, self.output)
+            .map_err(|signal| InvocationError { signal })
+    }
+
     #[inline]
     fn validate_invocation(
         &mut self,
@@ -153,6 +268,9 @@ impl InvocationContext<'_> {
             .map_err(|signal| InvocationError { signal })
     }
 }
+
+#[cfg(test)]
+mod argument_tests;
 
 impl Runtime {
     /// Look up a global script/native function without evaluating source.
