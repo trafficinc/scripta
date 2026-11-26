@@ -25,6 +25,14 @@ The runtime depends on syntax crates, not the standard library or its backends.
 Extensions register through public native interfaces. The `scripta` and legacy
 `scr` commands share one CLI entry point; SQLite is enabled by default.
 
+Reentrant native callbacks use the runtime-owned invocation bridge, preserving
+the active output, lexical ownership, stack and execution budgets. Its
+`InvocationContext::invoke_owned` accepts owned argument arrays and moves their
+values into the existing reusable argument buffer; borrowed `invoke` copies its
+argument slice. Both paths share validation and ordinary callable execution.
+Collection backends stay in scr-stdlib and retain input snapshots before moving
+callback arguments; this does not change script collection value semantics.
+
 The [database connector foundation](database-connectors.md) composes backend
 descriptors through `scr-db`. The CLI always registers the shared Db namespace
 and enables MySQL/PostgreSQL with its optional mysql/postgres features. One scr-cli extension

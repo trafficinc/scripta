@@ -441,6 +441,13 @@ Use `NativeFunction::reentrant(signature, callback)` when a native implementatio
 must call a script callable. The callback receives `InvocationContext` and its
 validated arguments. Call `context.invoke(value, arguments)` and return its
 `InvocationResult` to propagate the original exception, exit, or fatal signal.
+When argument values are already owned, use
+`context.invoke_owned(value, [accumulator, item.clone()])` to move the fixed-size
+array's values into the reusable call buffer. This avoids cloning their payloads
+again. The array is consumed on success or failure; clone values first when the
+caller needs to retain a snapshot. Callable/argument validation, ownership checks,
+limits, cancellation and exception propagation are the same as for `invoke`.
+The borrowed-slice `invoke` interface remains available for dynamic argument lists.
 Use `context.error(NativeError::new(kind, message))` for a new catchable exception
 and `context.require_permission(capability)` before effects. `context.checkpoint()`
 checks cancellation and instruction limits during iterative work.

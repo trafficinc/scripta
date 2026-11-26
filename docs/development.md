@@ -147,6 +147,14 @@ outside timing. These observations have no test timing thresholds and do not
 establish startup or cross-platform performance. The full pre-expansion matched
 release comparison remains the final expansion-plan section's work.
 
+For matched Node/PHP/Python callback workloads and separate startup timing, see the
+[callback comparison](../benchmarks/callbacks/README.md). Its driver retains raw
+repeated samples and verifies complete outputs, including stable ties and typed
+map keys.
+For optimization review, preserve before/after optimized binaries and use the
+[owned-argument comparison](../benchmarks/callbacks/owned-arguments.md), which
+alternates frozen builds and also checks startup and existing CLI workloads.
+
 ## Local disk cleanup
 
 From the workspace root, preview removable build outputs and Python caches:

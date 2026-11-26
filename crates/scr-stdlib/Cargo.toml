@@ -52,3 +52,7 @@ workspace = true
 [[bench]]
 name = "collections"
 harness = false
+
+[[bench]]
+name = "callback_comparison"
+harness = false

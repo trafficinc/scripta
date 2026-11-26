@@ -84,15 +84,7 @@ impl InvocationContext<'_> {
     }
 
     pub fn invoke(&mut self, callee: Value, arguments: &[Value]) -> InvocationResult {
-        self.checkpoint()?;
-        let Value::Callable(callable) = callee else {
-            return Err(self.error(NativeError::type_error("invocation requires a callable")));
-        };
-        for value in arguments {
-            self.runtime
-                .validate_value(value, 0, self.span)
-                .map_err(|signal| InvocationError { signal })?;
-        }
+        let callable = self.validate_invocation(callee, arguments)?;
         let mut values = if arguments.is_empty() {
             Vec::new()
         } else {
@@ -102,6 +94,45 @@ impl InvocationContext<'_> {
         self.runtime
             .call_callable(callable, values, self.span, self.output)
             .map_err(|signal| InvocationError { signal })
+    }
+
+    /// Invoke with an owned, fixed-size argument array, moving its values into
+    /// the reusable call buffer instead of cloning their collection payloads.
+    /// Validation and control-flow propagation match `invoke`; callers must
+    /// still clone any input whose snapshot they need to retain.
+    pub fn invoke_owned<const N: usize>(
+        &mut self,
+        callee: Value,
+        arguments: [Value; N],
+    ) -> InvocationResult {
+        let callable = self.validate_invocation(callee, &arguments)?;
+        let mut values = if N == 0 {
+            Vec::new()
+        } else {
+            self.runtime.take_argument_buffer()
+        };
+        values.extend(arguments);
+        self.runtime
+            .call_callable(callable, values, self.span, self.output)
+            .map_err(|signal| InvocationError { signal })
+    }
+
+    #[inline]
+    fn validate_invocation(
+        &mut self,
+        callee: Value,
+        arguments: &[Value],
+    ) -> std::result::Result<Callable, InvocationError> {
+        self.checkpoint()?;
+        let Value::Callable(callable) = callee else {
+            return Err(self.error(NativeError::type_error("invocation requires a callable")));
+        };
+        for value in arguments {
+            self.runtime
+                .validate_value(value, 0, self.span)
+                .map_err(|signal| InvocationError { signal })?;
+        }
+        Ok(callable)
     }
     pub fn error(&self, error: NativeError) -> InvocationError {
         InvocationError {

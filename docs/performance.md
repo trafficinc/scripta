@@ -48,3 +48,48 @@ resource checkpoints; other cases retain general evaluation and validation.
 
 The recursion path retains an accepted increase in execution-only empty-script
 overhead. The table above measures whole-process CLI time, including startup.
+
+## Callback workloads across runtimes
+
+A separate execution-only comparison on native macOS ARM64 uses optimized
+Scripta, Node 22.22.2 with default V8/JIT behavior, PHP 8.4.20 CLI without
+OPcache/JIT, and CPython 3.13.18 in isolated mode. Four fresh process rounds
+rotate engine order; each measures 11 warmed batches at 128, 2,048 and 8,192
+elements. Complete results are checked against a shared reference. Selected
+2,048-element medians, in milliseconds:
+
+| Operation | Scripta | Node | PHP | Python |
+| --- | ---: | ---: | ---: | ---: |
+| List map | 0.240946 | 0.012139 | 0.051679 | 0.076068 |
+| Captured-closure map | 0.409225 | 0.012522 | 0.061004 | 0.076723 |
+| List filter | 0.342554 | 0.012636 | 0.071711 | 0.074241 |
+| List reduce | 0.238423 | 0.009484 | 0.058449 | 0.069393 |
+| Record map | 1.241767 | 0.013051 | 0.063999 | 0.074420 |
+| Record key sort | 2.103108 | 0.204262 | 1.250070 | 0.139196 |
+| Record comparator sort | 24.803083 | 0.186807 | 1.183623 | 1.886208 |
+| Growing-copy reduce | 25.846459 | 2.456292 | 2.764135 | 2.597073 |
+
+PHP and Python were faster than Scripta in every common case in this run. For
+scalar list map/filter/reduce at this size, Scripta took about 4.1–4.8 times PHP
+and 3.2–4.6 times Python. Scripta key sorting was about 11.8 times faster than
+its comparator sorting. Python's native key sort was fastest among key-sort
+alternatives; PHP and Node use explicit key-decoration adapters.
+
+JavaScript/Python share record references, PHP uses copy-on-write arrays, and
+Scripta copies nested collection values and includes execution-boundary and
+safety checks. Map transformations also use explicit adapters with different
+representations. Timings do not isolate the cost of any one implementation choice.
+Growing-collection reduction is expensive in all copying variants; additional
+Node/Python mutating baselines have different semantics.
+
+Separate empty-process startup medians were Scripta 6.402 ms, Node 28.855 ms,
+PHP 35.933 ms and Python 17.956 ms. Startup is never subtracted from execution.
+See the [complete results and methodology](../benchmarks/callbacks/README.md)
+for all sizes, repeated-process ranges, runtime settings, reproduction and local
+evidence. This run does not establish old/new-revision regressions or validate
+other native platforms.
+
+The cross-runtime table above records the pre-optimization reference. The
+[owned-argument experiment](../benchmarks/callbacks/owned-arguments.md) measures
+the first optimization candidate against a preserved build of that reference.
+Candidate acceptance is separate from these measurements.

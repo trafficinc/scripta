@@ -153,7 +153,7 @@ fn map_transform(
             MapKey::Int(value) => Value::Int(*value),
             MapKey::String(value) => Value::String(value.clone()),
         };
-        let value = context.invoke(callback.clone(), &[item.clone(), key_value])?;
+        let value = context.invoke_owned(callback.clone(), [item.clone(), key_value])?;
         let output = if filter {
             match value {
                 Value::Bool(false) => continue,
@@ -187,7 +187,8 @@ fn reduce(context: &mut InvocationContext<'_>, args: &[Value]) -> InvocationResu
         Value::List(items) => {
             for item in items {
                 context.checkpoint()?;
-                accumulator = context.invoke(callback.clone(), &[accumulator, item.clone()])?;
+                accumulator =
+                    context.invoke_owned(callback.clone(), [accumulator, item.clone()])?;
                 measure(context, &accumulator, 0)?;
             }
         }
@@ -199,7 +200,7 @@ fn reduce(context: &mut InvocationContext<'_>, args: &[Value]) -> InvocationResu
                     MapKey::String(key) => Value::String(key.clone()),
                 };
                 accumulator =
-                    context.invoke(callback.clone(), &[accumulator, item.clone(), key])?;
+                    context.invoke_owned(callback.clone(), [accumulator, item.clone(), key])?;
                 measure(context, &accumulator, 0)?;
             }
         }
@@ -317,9 +318,9 @@ fn sort(context: &mut InvocationContext<'_>, args: &[Value], by_key: bool) -> In
         })?
     } else {
         sorted_indexes(context, items.len(), |context, left, right| {
-            let value = context.invoke(
+            let value = context.invoke_owned(
                 callback.clone(),
-                &[items[left].clone(), items[right].clone()],
+                [items[left].clone(), items[right].clone()],
             )?;
             let Value::Int(value) = value else {
                 return Err(type_error(context, "sortWith comparator must return int"));

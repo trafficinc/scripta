@@ -545,4 +545,71 @@ fn partial_outputs_release_owned_native_values_after_callback_failure() {
     rt.set_global("resource", callback).unwrap();
     failure(&mut rt, "List::map([1,2],$resource)", "TestError");
     assert_eq!(live.load(Ordering::Relaxed), 0);
+    for expression in [
+        "Map::map(['a'=>1,'b'=>2],function($v,$key){return Test::resource($v);})",
+        "List::reduce([1,2],function($acc,$v){return Test::resource($v);},null)",
+        "Map::reduce(['a'=>1,'b'=>2],function($acc,$v,$key){return Test::resource($v);},null)",
+    ] {
+        failure(&mut rt, expression, "TestError");
+        assert_eq!(live.load(Ordering::Relaxed), 0, "{expression}");
+    }
+}
+
+#[test]
+fn owned_callback_arguments_keep_nested_snapshots_and_seed_values() {
+    let mut rt = runtime(Default::default());
+    run(
+        &mut rt,
+        r#"
+        $input=["a"=>["rank"=>2,"nested"=>[1]],7=>["rank"=>1,"nested"=>[2]]];
+        $mapped=Map::map($input,function($row,$key){$row["nested"][]=9;return $row;});
+        $filtered=Map::filter($input,function($row,$key){$row["nested"][]=8;return true;});
+        $sorted=List::sortWith([$input["a"],$input[7]],function($a,$b){
+            $a["nested"][]=8;$b["nested"][]=9;return $a["rank"]-$b["rank"];
+        });
+        $seed=["values"=>[]];
+        $reduced=List::reduce([1,2],function($acc,$v){$acc["values"][]=$v;return $acc;},$seed);
+        $mapReduced=Map::reduce(["a"=>1,7=>2],function($acc,$v,$key){$acc["values"][]=$v;return $acc;},$seed);
+        $recorded=[$input["a"]["nested"],$input[7]["nested"],
+            $mapped["a"]["nested"],$mapped[7]["nested"],
+            $filtered["a"]["nested"],$filtered[7]["nested"],
+            $sorted[0]["nested"],$sorted[1]["nested"],
+            $seed["values"],$reduced["values"],$mapReduced["values"]];
+    "#,
+    );
+    assert_eq!(
+        rt.get_global("recorded"),
+        Some(&Value::List(vec![
+            ints(&[1]),
+            ints(&[2]),
+            ints(&[1, 9]),
+            ints(&[2, 9]),
+            ints(&[1]),
+            ints(&[2]),
+            ints(&[2]),
+            ints(&[1]),
+            ints(&[]),
+            ints(&[1, 2]),
+            ints(&[1, 2]),
+        ]))
+    );
+    rt.set_global("many", ints(&(0..64).collect::<Vec<_>>()))
+        .unwrap();
+    run(
+        &mut rt,
+        r#"
+        $closureAccumulator=List::reduce($many,function($acc,$value){
+            $acc[]=function(){return $value;};return $acc;
+        },[]);
+        $mappedClosures=Map::map(["a"=>1,7=>2],function($value,$key){
+            return function(){return $value;};
+        });
+    "#,
+    );
+    rt.collect_garbage();
+    run(
+        &mut rt,
+        "$closureResults=[$closureAccumulator[0](),$closureAccumulator[63](),$mappedClosures['a'](),$mappedClosures[7]()];",
+    );
+    assert_eq!(rt.get_global("closureResults"), Some(&ints(&[0, 63, 1, 2])));
 }
