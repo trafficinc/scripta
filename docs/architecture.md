@@ -88,6 +88,12 @@ Their inner calls omit lexical environments when scope budgets are unset;
 budgeted calls preserve scope accounting. Ordinary evaluation handles unsupported
 cases, including captures and arbitrary native callbacks.
 
+Numeric leaf plans also cover single-return comparisons over numeric parameters
+and arithmetic operands. They retain strict comparison rules, left-to-right
+evaluation, annotations and statement checkpoints. Warm scope reuse has the same
+scope/value-quota guards as numeric arithmetic calls; comparison results never
+qualify as integer-return proofs for caller-loop plans.
+
 Eligible self-recursion plans can prove integer arguments and returns and omit
 redundant inner annotation checks. Outer arguments, checked arithmetic, and
 execution limits retain their existing validation.

@@ -49,15 +49,3 @@ id_ed25519.*
 # Local logs and OS metadata.
 *.log
 .DS_Store
-
-# Local class dispatch experiment plan.
-/docs/temporary-class-dispatch-plan.md
-
-# Temporary runtime experiment journal; append future experiments here.
-/docs/temporary-runtime-experiments.md
-
-# Temporary database connector implementation checklist.
-/docs/temporary-database-connectors-plan.md
-
-# Temporary standard-library expansion checklist.
-/docs/temporary-stdlib-plan.md

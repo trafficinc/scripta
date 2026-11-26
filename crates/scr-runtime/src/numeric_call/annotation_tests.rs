@@ -26,6 +26,9 @@ fn cached_primitive_types_preserve_values_mismatches_and_general_resolution() {
         "class Thing{$value=7;}function f($x:Thing):Thing{return$x;}$obj=f(new Thing());$seen=$obj->value;",
         "function f($x:Int):int{return$x;}$seen=f(1);",
         "function f($x:bool):int{return$x;}$seen=f(1);",
+        "function f($x:int):bool{return$x>0;}$seen=f(1);$seen=f(-1);",
+        "function f($x:bool):bool{return$x>0;}$seen=f(1);",
+        "function f($x):bool{return$x;}$seen=f(1);",
     ] {
         compare(source, RuntimeOptions::default());
     }
@@ -67,8 +70,7 @@ fn cached_type_checks_keep_budget_error_order_and_recovery() {
 }
 #[test]
 fn primitive_class_names_remain_reserved_for_script_and_host_declarations() {
-    for name in ["int", "float"] {
-        let value = if name == "int" { "1" } else { "1.0" };
+    for (name, value) in [("int", "1"), ("float", "1.0"), ("bool", "true")] {
         compare(
             &format!(
                 "function f($x:{name}):{name}{{return$x;}}$seen=f({value});$seen=f({value});class {name}{{}}"

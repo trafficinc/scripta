@@ -232,35 +232,3 @@ configuration costs, are not API execution times, and are never subtracted.
 This run does not show whether adding helpers slowed unrelated code; that needs
 matched old/new-revision measurements. Profiling is needed before deciding which
 runtime changes would close the observed gaps.
-
-### Evidence and checks
-
-Raw four-runtime evidence is locally retained under
-`benchmarks/callbacks/evidence/four-runtimes-2026-11-26/`: shared fixture, all 16
-process reports and aggregate `evidence.json`, including all samples and hashes.
-Prior Node-only evidence in `local-2026-11-26-final/` is retained separately and
-is not mixed into these medians.
-
-New PHP/Python adapters passed syntax checks and explicit LF/CRLF fixtures at
-1, 2 and 7 elements. Rust/Node readers already had LF/CRLF validation, and all
-four engines passed the full three-size output matrix in this run. Source and
-optimized Scripta/Node binary hashes match the measured code; no Rust rebuild
-was needed. The existing Rust benchmark and CLI were previously built optimized
-and linted; no language implementation or dependencies changed in this follow-up.
-Full workspace tests and Clippy were not repeated for the PHP/Python tooling
-changes. Other native platforms and release packaging remain unvalidated.
-
-Final evidence audit passed: 6,072 finite positive measured batch samples, 60
-startup samples, balanced process order, source/fixture/binary hashes, all
-aggregate medians, 19 local documentation paths and diff/whitespace checks.
-
-For the first runtime optimization candidate, see the separate
-[owned-argument before/after experiment](owned-arguments.md). Its frozen
-baseline/candidate measurements are separate from the cross-language table.
-
-The accepted owned-argument step is followed by the separate
-[callback-setup experiment](callback-setup.md), measured incrementally against
-the accepted step-1 binaries. Each optimization requires its own review.
-
-The [argument-validation experiment](argument-validation.md) measures step 3
-against accepted step 2, retaining mutable/opaque and quota-enabled checks.

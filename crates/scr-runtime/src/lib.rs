@@ -213,6 +213,8 @@ pub struct Runtime {
     #[cfg(test)]
     numeric_calls_executed: usize,
     #[cfg(test)]
+    numeric_predicates_executed: usize,
+    #[cfg(test)]
     disable_prepared_calls: bool,
     #[cfg(test)]
     prepared_calls_executed: usize,

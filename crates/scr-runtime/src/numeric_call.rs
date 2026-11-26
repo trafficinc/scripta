@@ -1,4 +1,4 @@
-//! Bounded, declaration-owned plans for pure numeric leaf returns.
+//! Bounded, declaration-owned plans for numeric leaf returns and comparisons.
 use crate::{Result, Runtime, Value, float_loop::Number, value::UserDeclaration};
 use scr_ast::{BinaryOp, Expr, ExprKind, Literal, StatementKind, TypeAnnotation, UnaryOp};
 use scr_diagnostics::Span;
@@ -12,6 +12,7 @@ enum Annotation {
     None,
     Int,
     Float,
+    Bool,
     General,
 }
 
@@ -21,6 +22,7 @@ impl Annotation {
             None => Self::None,
             Some("int") => Self::Int,
             Some("float") => Self::Float,
+            Some("bool") => Self::Bool,
             _ => Self::General,
         }
     }
@@ -43,7 +45,10 @@ impl Annotation {
         // names/qualified types and all mismatches retain normal resolution and
         // diagnostics; no successful value-type check is omitted.
         match (self, value) {
-            (Self::None, _) | (Self::Int, Value::Int(_)) | (Self::Float, Value::Float(_)) => Ok(()),
+            (Self::None, _)
+            | (Self::Int, Value::Int(_))
+            | (Self::Float, Value::Float(_))
+            | (Self::Bool, Value::Bool(_)) => Ok(()),
             _ => runtime.annotation(annotation, value, span, returning),
         }
     }
@@ -56,8 +61,18 @@ enum Numeric {
     Binary(Box<Numeric>, BinaryOp, Box<Numeric>, Span),
 }
 
+enum Leaf {
+    Numeric(Numeric),
+    Comparison {
+        left: Numeric,
+        op: BinaryOp,
+        right: Numeric,
+        span: Span,
+    },
+}
+
 pub(super) struct Plan {
-    expression: Numeric,
+    expression: Leaf,
     integer: bool,
     parameter_count: u8,
     checkpoint: Span,
@@ -86,12 +101,13 @@ impl Plan {
         let StatementKind::Return(Some(expression)) = &statement.kind else {
             return None;
         };
-        let expression = Self::expression(declaration, expression, &mut 0, 0)?;
+        let expression = Self::leaf(declaration, expression, &mut 0, 0)?;
         let mut parameters = [Annotation::None; MAX_PARAMETERS];
         for (slot, parameter) in parameters.iter_mut().zip(&declaration.parameters) {
             *slot = Annotation::compile(&parameter.annotation);
         }
-        let integer = expression.integer_only();
+        // Caller-loop plans require an integer return, not just integer inputs.
+        let integer = matches!(&expression, Leaf::Numeric(value) if value.integer_only());
         let returning = Annotation::compile(&declaration.return_type);
         let scope_independent = parameters
             .iter()
@@ -106,6 +122,50 @@ impl Plan {
             returning,
             scope_independent,
         }))
+    }
+
+    fn leaf(
+        declaration: &UserDeclaration,
+        expr: &Expr,
+        nodes: &mut usize,
+        depth: usize,
+    ) -> Option<Leaf> {
+        match &expr.kind {
+            ExprKind::Grouped(inner) => {
+                *nodes += 1;
+                if *nodes > MAX_NODES || depth > MAX_DEPTH {
+                    return None;
+                }
+                Self::leaf(declaration, inner, nodes, depth + 1)
+            }
+            ExprKind::Binary(
+                left,
+                op @ (BinaryOp::Equal
+                | BinaryOp::NotEqual
+                | BinaryOp::Less
+                | BinaryOp::LessEqual
+                | BinaryOp::Greater
+                | BinaryOp::GreaterEqual),
+                right,
+            ) => {
+                *nodes += 1;
+                if *nodes > MAX_NODES || depth > MAX_DEPTH {
+                    return None;
+                }
+                Some(Leaf::Comparison {
+                    left: Self::expression(declaration, left, nodes, depth + 1)?,
+                    op: *op,
+                    right: Self::expression(declaration, right, nodes, depth + 1)?,
+                    span: expr.span,
+                })
+            }
+            _ => Some(Leaf::Numeric(Self::expression(
+                declaration,
+                expr,
+                nodes,
+                depth,
+            )?)),
+        }
     }
 
     fn expression(
@@ -223,7 +283,26 @@ impl Plan {
         &self,
         arguments: &[Number; MAX_PARAMETERS],
         runtime: &mut Runtime,
-    ) -> Result<Number> {
+    ) -> Result<Value> {
+        let expression = match &self.expression {
+            Leaf::Numeric(expression) => expression,
+            Leaf::Comparison {
+                left,
+                op,
+                right,
+                span,
+            } => {
+                #[cfg(test)]
+                {
+                    runtime.numeric_predicates_executed += 1;
+                }
+                // Evaluate operands left-to-right and use ordinary comparison
+                // semantics, including strict equality and mixed-type errors.
+                let left = left.evaluate(arguments, runtime)?.into_value();
+                let right = right.evaluate(arguments, runtime)?.into_value();
+                return runtime.operation(crate::ops::binary(*op, left, right), *span);
+            }
+        };
         let integer = self.integer
             && arguments[..usize::from(self.parameter_count)]
                 .iter()
@@ -235,11 +314,13 @@ impl Plan {
             {
                 runtime.integer_numeric_calls_executed += 1;
             }
-            self.expression
+            expression
                 .evaluate_integer(arguments, runtime)
-                .map(Number::Int)
+                .map(Value::Int)
         } else {
-            self.expression.evaluate(arguments, runtime)
+            expression
+                .evaluate(arguments, runtime)
+                .map(Number::into_value)
         }
     }
 
@@ -373,7 +454,7 @@ impl Plan {
             if let Some(previous) = previous {
                 runtime.environments.leave_empty(previous);
             }
-            let value = result?.into_value();
+            let value = result?;
             self.returning.check(
                 runtime,
                 &declaration.return_type,
@@ -392,6 +473,8 @@ mod annotation_tests;
 mod integer_tests;
 #[cfg(test)]
 mod parameter_scope_tests;
+#[cfg(test)]
+mod predicate_tests;
 #[cfg(test)]
 mod setup_tests;
 #[cfg(test)]

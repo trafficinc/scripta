@@ -89,16 +89,12 @@ for all sizes, repeated-process ranges, runtime settings, reproduction and local
 evidence. This run does not establish old/new-revision regressions or validate
 other native platforms.
 
-The cross-runtime table above records the pre-optimization reference. The
-[owned-argument experiment](../benchmarks/callbacks/owned-arguments.md) measures
-the first optimization candidate against a preserved build of that reference.
-Candidate acceptance is separate from these measurements.
-
-The [callback-setup experiment](../benchmarks/callbacks/callback-setup.md) measures
-the next candidate incrementally against accepted step 1. Scope/value quotas and
-unsupported callback forms keep their existing execution path.
-
-The [argument-validation experiment](../benchmarks/callbacks/argument-validation.md)
-measures the next candidate against accepted step 2. It reuses structural checks
-only for small immutable borrowed data during repeated comparisons; mutable
-objects, callable descendants and byte-budgeted invocations retain full checks.
+The cross-runtime table above predates the current callback optimizations.
+Callbacks can move owned arguments into reusable call buffers. Warm numeric leaf
+plans cover arithmetic and single comparisons, preserving strict types and
+operand order; eligible calls omit empty scopes when scope/value quotas are
+unset. Comparator sorting can reuse structural checks for small immutable
+borrowed inputs. Mutable objects, callable descendants and byte-budgeted
+invocations retain full value checks. See the
+[runtime design](architecture.md#execution-hot-paths-and-limits) for execution
+guards and fallback behavior.

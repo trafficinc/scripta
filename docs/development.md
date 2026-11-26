@@ -144,22 +144,16 @@ are outside timers; argument copies, execution checks, calls, result assignment
 and normal execute cleanup remain inside. Callback cases alternate traversal
 order, use two warmups/nine measured samples, and assert complete result equality
 outside timing. These observations have no test timing thresholds and do not
-establish startup or cross-platform performance. The full pre-expansion matched
-release comparison remains the final expansion-plan section's work.
+establish startup or cross-platform performance.
 
 For matched Node/PHP/Python callback workloads and separate startup timing, see the
 [callback comparison](../benchmarks/callbacks/README.md). Its driver retains raw
 repeated samples and verifies complete outputs, including stable ties and typed
 map keys.
 For optimization review, preserve before/after optimized binaries and use the
-[owned-argument comparison](../benchmarks/callbacks/owned-arguments.md), which
+[before/after benchmark driver](../benchmarks/callbacks/owned_arguments.py), which
 alternates frozen builds and also checks startup and existing CLI workloads.
-The [callback-setup experiment](../benchmarks/callbacks/callback-setup.md) uses
-the same driver against the accepted owned-argument baseline and records the
-additional changed runtime source files with --source.
-The [argument-validation experiment](../benchmarks/callbacks/argument-validation.md)
-adds differential checks of immutable borrows, mutable native payload observations,
-byte-quota changes and comparator preflight checkpoint/error equivalence.
+Use --source to include additional implementation files in its source hashes.
 
 ## Local disk cleanup
 
