@@ -315,7 +315,7 @@ fn values(context: &RuntimeContext<'_>, entries: Vec<Entry>) -> NativeResult<Val
         .map_err(|_| limit("archive result allocation failed"))?;
     for entry in entries {
         context.check_cancelled()?;
-        result.push(Value::Map(vec![
+        result.push(Value::map(vec![
             (MapKey::String("path".into()), Value::String(entry.path)),
             (
                 MapKey::String("data".into()),
@@ -788,7 +788,7 @@ mod tests {
     #[test]
     fn exact_logical_archive_and_gzip_results_include_bytes_keys_and_slots() {
         with_context(|context| {
-            let input = Value::list(vec![Value::Map(vec![
+            let input = Value::list(vec![Value::map(vec![
                 (MapKey::String("path".into()), Value::String("n".into())),
                 (
                     MapKey::String("data".into()),

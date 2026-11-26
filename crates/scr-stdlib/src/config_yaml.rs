@@ -124,7 +124,7 @@ fn node(
                 let value = node(parser, budget, event, mark, depth + 1)?;
                 items.push((MapKey::String(name), value));
             }
-            Ok(Value::Map(items))
+            Ok(Value::map(items))
         }
         Event::Alias(_) => Err(at(mark, "aliases are unsupported")),
         Event::Scalar(..) | Event::SequenceStart(..) | Event::MappingStart(..) => {

@@ -90,7 +90,7 @@ fn binding_fetching_and_cursor_contract() {
     value(
         &r,
         "row",
-        Value::Map(vec![
+        Value::map(vec![
             (
                 MapKey::String("name".into()),
                 Value::String("é' OR true --".into()),
@@ -156,7 +156,7 @@ fn dialect_literals_operators_and_explicit_types() {
     value(
         &r,
         "types",
-        Value::Map(vec![
+        Value::map(vec![
             (
                 MapKey::String("n".into()),
                 Value::String("12345678901234567890.123400".into()),

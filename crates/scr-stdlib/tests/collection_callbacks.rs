@@ -97,7 +97,7 @@ fn eager_list_helpers_reuse_named_native_and_captured_functions() {
     );
     assert_eq!(
         rt.get_global("empty"),
-        Some(&Value::Map(vec![(
+        Some(&Value::map(vec![(
             MapKey::String("seed".into()),
             Value::Null
         )]))
@@ -120,7 +120,7 @@ fn map_callbacks_keep_typed_keys_order_nulls_and_empty_map_identity() {
     );
     assert_eq!(
         rt.get_global("mapped"),
-        Some(&Value::Map(vec![
+        Some(&Value::map(vec![
             (MapKey::Int(1), Value::String("int".into())),
             (MapKey::String("1".into()), Value::String("string".into())),
             (
@@ -131,7 +131,7 @@ fn map_callbacks_keep_typed_keys_order_nulls_and_empty_map_identity() {
     );
     assert_eq!(
         rt.get_global("filtered"),
-        Some(&Value::Map(vec![
+        Some(&Value::map(vec![
             (MapKey::Int(1), Value::Null),
             (MapKey::String("last".into()), Value::Int(3))
         ]))
@@ -168,8 +168,8 @@ fn map_callbacks_keep_typed_keys_order_nulls_and_empty_map_identity() {
             Value::String("last".into())
         ]))
     );
-    assert_eq!(rt.get_global("none"), Some(&Value::Map(vec![])));
-    assert_eq!(rt.get_global("empty"), Some(&Value::Map(vec![])));
+    assert_eq!(rt.get_global("none"), Some(&Value::map(vec![])));
+    assert_eq!(rt.get_global("empty"), Some(&Value::map(vec![])));
 }
 
 #[test]

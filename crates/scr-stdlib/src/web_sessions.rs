@@ -659,7 +659,7 @@ pub fn register(
         config,
         cookie: cookie.filter(|id| valid_id(id)),
         leases: vec![],
-        data: Value::Map(vec![]),
+        data: Value::map(vec![]),
         encoded: vec![],
         started: false,
         destroyed: false,

@@ -180,7 +180,7 @@ fn specialized_prefix_matches_dynamic_payload_order_depth_and_error_precedence()
     let a = observed(1, events.clone(), None);
     let b = observed(2, events.clone(), None);
     check_measure(
-        Value::Map(vec![
+        Value::map(vec![
             (MapKey::Int(1), Value::NativeObject(a.clone())),
             (
                 MapKey::String("1".into()),
@@ -193,7 +193,7 @@ fn specialized_prefix_matches_dynamic_payload_order_depth_and_error_precedence()
         &events,
     );
     check_measure(
-        Value::Map(vec![
+        Value::map(vec![
             (MapKey::Int(1), Value::Float(f64::NAN)),
             (MapKey::Int(1), Value::Null),
         ]),

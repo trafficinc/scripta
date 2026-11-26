@@ -288,7 +288,7 @@ mod tests {
             ("Url::decodeComponent", text("%C3%A9"), slot + 2),
             (
                 "Url::buildQuery",
-                Value::Map(vec![(MapKey::String("&".into()), text("&"))]),
+                Value::map(vec![(MapKey::String("&".into()), text("&"))]),
                 slot + 7,
             ),
             (

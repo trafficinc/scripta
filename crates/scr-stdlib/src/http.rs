@@ -499,7 +499,7 @@ fn response_headers(context: &RuntimeContext<'_>, source: &http::HeaderMap) -> N
         }
         headers.push((MapKey::String(key.as_str().into()), Value::list(values)));
     }
-    Ok(Value::Map(headers))
+    Ok(Value::map(headers))
 }
 
 fn string(value: &Value) -> &str {
@@ -588,7 +588,7 @@ fn download(
             return Err(error);
         }
     };
-    let result = Value::Map(vec![
+    let result = Value::map(vec![
         (
             MapKey::String("status".into()),
             Value::Int(i64::from(status)),
@@ -731,7 +731,7 @@ pub(crate) fn open_stream(
     Ok(StreamResponse {
         reader: Box::new(body.into_with_config().limit(options.limit).reader()),
         status,
-        headers: Value::Map(headers),
+        headers: Value::map(headers),
         limit: options.limit,
         deadline,
     })

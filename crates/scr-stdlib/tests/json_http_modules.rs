@@ -75,7 +75,7 @@ fn json_roundtrips_structures_numbers_unicode_and_empty_objects() {
     "#).unwrap();
     assert_eq!(runtime.get_global("data"), runtime.get_global("decoded"));
     assert!(matches!(runtime.get_global("pretty"), Some(Value::String(s)) if s.contains('\n')));
-    assert_eq!(runtime.get_global("object"), Some(&Value::Map(vec![])));
+    assert_eq!(runtime.get_global("object"), Some(&Value::map(vec![])));
     assert_eq!(runtime.get_global("array"), Some(&Value::list(vec![])));
     assert_eq!(runtime.get_global("float"), Some(&Value::Float(1.0)));
     assert_eq!(runtime.get_global("before"), Some(&Value::Int(i64::MIN)));

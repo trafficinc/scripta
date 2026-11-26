@@ -475,7 +475,7 @@ mod tests {
             (NativeType::Float, Value::Float(0.0)),
             (NativeType::String, Value::String(String::new())),
             (NativeType::List, Value::list(vec![])),
-            (NativeType::Map, Value::Map(vec![])),
+            (NativeType::Map, Value::map(vec![])),
         ] {
             assert!(ty.accepts(&value));
             assert!(NativeType::Any.accepts(&value));
@@ -551,7 +551,7 @@ mod optional_tests {
                     &[
                         Value::String("exe".into()),
                         Value::list(vec![]),
-                        Value::Map(vec![])
+                        Value::map(vec![])
                     ]
                 )
                 .is_ok()
@@ -562,7 +562,7 @@ mod optional_tests {
             vec![
                 Value::String("exe".into()),
                 Value::list(vec![]),
-                Value::Map(vec![]),
+                Value::map(vec![]),
                 Value::Null,
             ],
         ] {

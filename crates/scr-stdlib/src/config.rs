@@ -146,7 +146,7 @@ fn toml_value(
                 let value = toml_value(budget, item, depth + 1)?;
                 values.push((MapKey::String(key), value));
             }
-            Value::Map(values)
+            Value::map(values)
         }
     })
 }
@@ -163,7 +163,7 @@ fn ini_parse(budget: &mut Budget<'_, '_>, text: &str) -> NativeResult<Value> {
     budget.value(0, 0)?;
     budget.key("")?;
     budget.value(1, 0)?;
-    let mut sections = vec![(MapKey::String(String::new()), Value::Map(Vec::new()))];
+    let mut sections = vec![(MapKey::String(String::new()), Value::map(Vec::new()))];
     let mut section_names = BTreeSet::new();
     let mut keys = BTreeSet::new();
     for (index, raw) in text.split_inclusive('\n').enumerate() {
@@ -200,7 +200,7 @@ fn ini_parse(budget: &mut Budget<'_, '_>, text: &str) -> NativeResult<Value> {
             }
             budget.key(name)?;
             budget.value(1, 0)?;
-            sections.push((MapKey::String(name.into()), Value::Map(Vec::new())));
+            sections.push((MapKey::String(name.into()), Value::map(Vec::new())));
             keys.clear();
         } else {
             let (key, value) = line
@@ -219,7 +219,7 @@ fn ini_parse(budget: &mut Budget<'_, '_>, text: &str) -> NativeResult<Value> {
             items.push((MapKey::String(key.into()), Value::String(value.into())));
         }
     }
-    Ok(Value::Map(sections))
+    Ok(Value::map(sections))
 }
 fn parse(
     context: &RuntimeContext<'_>,
@@ -324,7 +324,7 @@ mod tests {
                 ("Ini", "", 2 * size_of::<Value>() + size_of::<MapKey>()),
             ] {
                 let options = |n| {
-                    Value::Map(vec![(
+                    Value::map(vec![(
                         MapKey::String("maxOutputBytes".into()),
                         Value::Int(n as i64),
                     )])

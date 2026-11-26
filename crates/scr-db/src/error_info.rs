@@ -130,7 +130,7 @@ impl Record {
                 },
             ));
         }
-        Ok(Value::Map(entries))
+        Ok(Value::map(entries))
     }
 }
 fn limit() -> NativeError {

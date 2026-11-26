@@ -65,7 +65,7 @@ fn reused_arguments_keep_exact_limits_diagnostics_and_recovery() {
             ..Default::default()
         });
     }
-    let input = Value::Map(vec![(MapKey::String("rank".into()), Value::Int(3))]);
+    let input = Value::map(vec![(MapKey::String("rank".into()), Value::Int(3))]);
     let exact = input.measure(0, None).unwrap();
     for bytes in [0, exact - 1, exact, exact + 1, 1024] {
         options.push(RuntimeOptions {
@@ -150,7 +150,7 @@ fn opaque_payloads_are_rechecked_with_original_hook_order_and_alias_counts() {
             runtime
                 .set_global(
                     "input",
-                    Value::Map(vec![
+                    Value::map(vec![
                         (MapKey::String("rank".into()), Value::Int(3)),
                         (MapKey::String("object".into()), Value::NativeObject(object)),
                     ]),
@@ -201,7 +201,7 @@ fn invalid_arguments_are_not_cached_and_classification_work_is_bounded() {
     let cases = [
         (Value::Float(f64::NAN), false),
         (
-            Value::Map(vec![
+            Value::map(vec![
                 (MapKey::Int(1), Value::Null),
                 (MapKey::Int(1), Value::Int(2)),
             ]),
@@ -270,7 +270,7 @@ fn invalid_arguments_are_not_cached_and_classification_work_is_bounded() {
 fn a_later_byte_quota_cannot_reuse_an_unbudgeted_success() {
     for disabled in [false, true] {
         let mut runtime = runtime(disabled);
-        let value = Value::Map(vec![(MapKey::String("rank".into()), Value::Int(3))]);
+        let value = Value::map(vec![(MapKey::String("rank".into()), Value::Int(3))]);
         let limit = value.measure(0, None).unwrap() - 1;
         let callee = Value::native_function(
             "accept",

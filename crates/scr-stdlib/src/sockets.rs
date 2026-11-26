@@ -89,7 +89,7 @@ fn address(host: &str, port: i64, allow_zero: bool) -> NativeResult<SocketAddr> 
     Ok(SocketAddr::new(ip, port))
 }
 fn endpoint_value(address: SocketAddr) -> Value {
-    Value::Map(vec![
+    Value::map(vec![
         (
             MapKey::String("address".into()),
             Value::String(address.ip().to_string()),
@@ -153,7 +153,7 @@ fn open_options(value: Option<&Value>, config: &StreamConfig) -> NativeResult<Op
             }
         }
     }
-    result.common = options(Some(&Value::Map(common)), config)?;
+    result.common = options(Some(&Value::map(common)), config)?;
     Ok(result)
 }
 fn network<'a>(context: &RuntimeContext<'_>, value: &'a Value) -> NativeResult<&'a Resource> {
@@ -427,7 +427,7 @@ pub(super) fn register(
                                     timeout_specified: false,
                                     timeout: handle.timeout.get(),
                                     ceiling: handle.ceiling,
-                                    http: Value::Map(vec![]),
+                                    http: Value::map(vec![]),
                                 },
                                 Backend::Tcp(socket),
                                 (true, true),
@@ -653,7 +653,7 @@ fn poll_handles(
         }
         results.push(Value::list(result));
     }
-    Ok(Value::Map(vec![
+    Ok(Value::map(vec![
         (MapKey::String("readable".into()), results.remove(0)),
         (MapKey::String("writable".into()), results.remove(0)),
     ]))

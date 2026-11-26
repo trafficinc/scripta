@@ -444,6 +444,13 @@ preserves independent value semantics by detaching shared plain-data storage.
 Use `list.into_vec()` to recover an owned vector. Objects, callables and byte
 handles anywhere in the list tree retain element cloning and handle identity.
 
+Construct map results with `Value::map(entries)` or `Value::Map(entries.into())`
+from `Vec<(MapKey, Value)>`. Its `scr_runtime::Map` payload has the same vector
+access and copy-on-write behavior, preserving key types and entry order.
+Use `map.into_vec()` to recover owned entries. Runtime boundaries still reject
+duplicate keys and invalid values; the storage constructor does not normalize
+them.
+
 Use `NativeFunction::reentrant(signature, callback)` when a native implementation
 must call a script callable. The callback receives `InvocationContext` and its
 validated arguments. Call `context.invoke(value, arguments)` and return its

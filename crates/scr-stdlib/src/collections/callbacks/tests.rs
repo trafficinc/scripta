@@ -45,7 +45,7 @@ fn argument_preparation_preserves_root_measurement_checkpoints_limits_and_errors
     let inputs = [
         Value::list(vec![]),
         Value::list(vec![Value::Int(1), Value::Int(2)]),
-        Value::list(vec![Value::Map(vec![(
+        Value::list(vec![Value::map(vec![(
             MapKey::String("rank".into()),
             Value::String("世界".into()),
         )])]),
@@ -93,7 +93,7 @@ fn preparation_keeps_cancellation_after_native_payload_observation() {
     let mut errors = Vec::new();
     for prepared in [false, true] {
         let flag = Arc::new(AtomicBool::new(false));
-        let input = Value::list(vec![Value::Map(vec![(
+        let input = Value::list(vec![Value::map(vec![(
             MapKey::String("object".into()),
             Value::NativeObject(Rc::new(Cancel(flag.clone()))),
         )])]);

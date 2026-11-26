@@ -1,4 +1,4 @@
-//! Bounded hints for ordered-map positions; values remain in their public Vec.
+//! Bounded hints for verified positions in ordered map entry storage.
 use crate::{MapKey, Value};
 use std::collections::{HashMap, VecDeque};
 
@@ -189,7 +189,7 @@ mod tests {
             None
         );
         assert_eq!(
-            crate::ops::index(&Value::Map(replaced), &Value::Int(1000)).unwrap(),
+            crate::ops::index(&Value::map(replaced), &Value::Int(1000)).unwrap(),
             Value::Int(61)
         );
     }

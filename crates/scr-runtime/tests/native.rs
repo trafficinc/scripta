@@ -181,7 +181,7 @@ fn native_return_contracts_and_host_values_are_validated() {
         ),
         (
             NativeType::Map,
-            Value::Map(vec![
+            Value::map(vec![
                 (scr_runtime::MapKey::Int(1), Value::Null),
                 (scr_runtime::MapKey::Int(1), Value::Null),
             ]),

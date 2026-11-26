@@ -375,7 +375,7 @@ impl Runtime {
                                     SourcePosition::at(&source.text, frame.span.start),
                                 )
                             });
-                            Value::Map(vec![
+                            Value::map(vec![
                                 (
                                     MapKey::String("function".into()),
                                     Value::String(scr_diagnostics::redact_text(

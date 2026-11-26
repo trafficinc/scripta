@@ -80,7 +80,7 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
                             (MapKey::String(a), MapKey::String(b)) => a.cmp(b),
                             _ => std::cmp::Ordering::Equal,
                         });
-                        return Ok(Value::Map(entries));
+                        return Ok(Value::map(entries));
                     }
                     let Some(Value::String(variable)) = args.first() else {
                         return Err(NativeError::type_error("environment name must be a string"));

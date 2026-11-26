@@ -32,6 +32,8 @@ mod integer_loop;
 mod invocation;
 mod list;
 pub use list::List;
+mod map;
+pub use map::Map;
 mod map_builder;
 #[cfg(test)]
 mod map_builder_tests;

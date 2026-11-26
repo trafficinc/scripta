@@ -273,7 +273,7 @@ fn owned_invocation_keeps_validation_limits_and_foreign_owner_checks() {
     }
     cases.push((Value::Float(f64::NAN), None, false));
     cases.push((
-        Value::Map(vec![
+        Value::map(vec![
             (MapKey::Int(1), Value::Int(1)),
             (MapKey::Int(1), Value::Int(2)),
         ]),

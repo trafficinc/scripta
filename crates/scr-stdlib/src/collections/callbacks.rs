@@ -175,7 +175,7 @@ fn map_transform(
             result.push((key.clone(), value));
         }
     }
-    let result = Value::Map(result);
+    let result = Value::map(result);
     measure(context, &result, 0)?;
     Ok(result)
 }

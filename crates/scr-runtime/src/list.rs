@@ -58,14 +58,14 @@ impl List {
 // traversal replaces the traversal a deep clone previously needed. Depth is
 // bounded even for invalid host-built values; each list caches a conservative
 // result locally, with no address cache or runtime-owned roots.
-fn plain_value(value: &Value, depth: usize) -> bool {
+pub(crate) fn plain_value(value: &Value, depth: usize) -> bool {
     if depth > crate::MAX_VALUE_DEPTH {
         return false;
     }
     match value {
         Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_) => true,
         Value::List(items) => items.plain(depth),
-        Value::Map(items) => items.iter().all(|(_, value)| plain_value(value, depth + 1)),
+        Value::Map(items) => items.plain(depth),
         Value::Bytes(_) | Value::NativeObject(_) | Value::Callable(_) => false,
     }
 }

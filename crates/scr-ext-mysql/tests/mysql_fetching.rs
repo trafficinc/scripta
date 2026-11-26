@@ -51,7 +51,7 @@ impl Fixture {
         runtime
             .set_global(
                 "options",
-                Value::Map(vec![(
+                Value::map(vec![(
                     MapKey::String("tlsCaFile".into()),
                     Value::String(ca),
                 )]),
@@ -116,11 +116,11 @@ fn mixed_fetches_preserve_order_consume_remaining_rows_and_distinguish_exhaustio
     assert_eq!(
         f.runtime.get_global("rest"),
         Some(&Value::list(vec![
-            Value::Map(vec![
+            Value::map(vec![
                 (MapKey::String("z".into()), Value::Int(2)),
                 (MapKey::String("a".into()), Value::Int(22))
             ]),
-            Value::Map(vec![
+            Value::map(vec![
                 (MapKey::String("z".into()), Value::Int(3)),
                 (MapKey::String("a".into()), Value::Int(33))
             ])

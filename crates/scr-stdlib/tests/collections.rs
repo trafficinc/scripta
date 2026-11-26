@@ -123,7 +123,7 @@ fn membership_uses_strict_recursive_equality_and_callable_identity() {
 
 #[test]
 fn map_creation_lookup_and_removal_preserve_key_types_and_insertion_order() {
-    assert_eq!(evaluate("Map::create()"), Value::Map(vec![]));
+    assert_eq!(evaluate("Map::create()"), Value::map(vec![]));
     let mut runtime = runtime(None);
     execute(
         &mut runtime,
@@ -187,7 +187,7 @@ fn map_creation_lookup_and_removal_preserve_key_types_and_insertion_order() {
     }
     assert_eq!(
         evaluate(r#"Map::remove(Map::create(), "missing")"#),
-        Value::Map(vec![])
+        Value::map(vec![])
     );
 }
 
@@ -221,7 +221,7 @@ fn helper_results_deep_copy_collections_and_defaults_are_eager() {
     );
     assert_eq!(
         runtime.get_global("map"),
-        Some(&Value::Map(vec![(
+        Some(&Value::map(vec![(
             MapKey::String("nested".into()),
             Value::list(vec![ints(&[1])])
         )]))
@@ -644,10 +644,10 @@ fn indexed_maps_preserve_order_with_many_typed_keys_and_partial_overlap() {
         .collect();
     let mut runtime = runtime(None);
     runtime
-        .set_global("left", Value::Map(left.clone()))
+        .set_global("left", Value::map(left.clone()))
         .unwrap();
     runtime
-        .set_global("right", Value::Map(right.clone()))
+        .set_global("right", Value::map(right.clone()))
         .unwrap();
     for (function, expected) in [
         ("merge", merged),
@@ -664,8 +664,8 @@ fn indexed_maps_preserve_order_with_many_typed_keys_and_partial_overlap() {
         };
         assert_eq!(actual, &expected, "{function}");
     }
-    assert_eq!(runtime.get_global("left"), Some(&Value::Map(left)));
-    assert_eq!(runtime.get_global("right"), Some(&Value::Map(right)));
+    assert_eq!(runtime.get_global("left"), Some(&Value::map(left)));
+    assert_eq!(runtime.get_global("right"), Some(&Value::map(right)));
 }
 
 #[test]
@@ -690,7 +690,7 @@ fn indexed_construction_keeps_first_positions_and_last_values_after_many_duplica
         .iter()
         .zip(&values)
         .map(|(key, value)| {
-            Value::Map(vec![
+            Value::map(vec![
                 (MapKey::String("id".into()), key.clone()),
                 (MapKey::String("v".into()), value.clone()),
             ])
@@ -711,7 +711,7 @@ fn indexed_construction_keeps_first_positions_and_last_values_after_many_duplica
         ("keys", Value::list(keys)),
         ("values", Value::list(values)),
         ("rows", Value::list(rows)),
-        ("source", Value::Map(source)),
+        ("source", Value::map(source)),
     ] {
         runtime.set_global(name, value).unwrap();
     }

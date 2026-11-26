@@ -144,7 +144,7 @@ pub(crate) fn convert(
                 cell(raw, column, budget.cell)?,
             ));
         }
-        let row = Value::Map(map);
+        let row = Value::map(map);
         if matches!(selection, Selection::Row) {
             return Ok(row);
         }

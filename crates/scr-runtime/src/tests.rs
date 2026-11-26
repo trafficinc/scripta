@@ -115,7 +115,7 @@ fn list_growth_supports_empty_nested_and_indexed_targets_with_value_semantics() 
         runtime.get_global("groups"),
         Some(&Value::list(vec![
             Value::list(vec![Value::Int(7), Value::Int(9)]),
-            Value::Map(vec![(
+            Value::map(vec![(
                 MapKey::String("values".into()),
                 Value::list(vec![Value::Int(8)])
             )]),
@@ -673,7 +673,7 @@ fn host_values_are_validated_and_foreign_closures_are_rejected() {
         runtime
             .set_global(
                 "invalid",
-                Value::Map(vec![
+                Value::map(vec![
                     (MapKey::Int(1), Value::Null),
                     (MapKey::Int(1), Value::Null)
                 ])

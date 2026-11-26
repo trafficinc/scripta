@@ -346,7 +346,7 @@ pub(crate) fn convert(
             .value()?;
             entries.push((MapKey::String(copy_text(names[index])?), value));
         }
-        output.push(Value::Map(entries));
+        output.push(Value::map(entries));
     }
     Ok(match selection {
         Selection::All => Value::list(output),

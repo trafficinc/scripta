@@ -29,15 +29,15 @@ fn main() {
         let values = (0..size).map(Value::Int).collect();
         let rows = (0..size)
             .map(|i| {
-                Value::Map(vec![
+                Value::map(vec![
                     (MapKey::String("id".into()), Value::Int(i)),
                     (MapKey::String("v".into()), Value::Int(i)),
                 ])
             })
             .collect();
         for (name, value) in [
-            ("left", Value::Map(left)),
-            ("right", Value::Map(right)),
+            ("left", Value::map(left)),
+            ("right", Value::map(right)),
             ("keys", Value::List(keys)),
             ("values", Value::List(values)),
             ("rows", Value::List(rows)),
@@ -97,7 +97,7 @@ fn callback_timings() {
         let ranks = Value::List((0..size).rev().map(Value::Int).collect());
         let rows: Vec<_> = (0..size)
             .map(|index| {
-                Value::Map(vec![
+                Value::map(vec![
                     (MapKey::String("rank".into()), Value::Int(size - 1 - index)),
                     (
                         MapKey::String("payload".into()),

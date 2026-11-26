@@ -32,7 +32,8 @@ existing specialized execution path.
 
 This build uses the AST evaluator with bounded runtime-local regex caching,
 direct method calls, discarded string-buffer reuse, lexical lookup/scope-storage
-reuse, plain-data list copy-on-write, guarded list-copy validation,
+reuse, copy-on-write lists and maps containing plain data,
+guarded list-copy validation,
 bounded integer self-recursion plans,
 compact instruction plans and guarded heap-backed calls for eligible scalar
 functions, adaptive field-read hints,

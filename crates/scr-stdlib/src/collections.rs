@@ -109,7 +109,7 @@ fn map_result<'a>(
         context.check_cancelled()?;
         result.push(entry.clone());
     }
-    Ok(Value::Map(result))
+    Ok(Value::map(result))
 }
 
 fn key_matches(key: &MapKey, value: &Value) -> bool {
@@ -249,7 +249,7 @@ fn list_call(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> Native
 fn map_call(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> NativeResult {
     if name == "create" {
         budget(context, size_of::<Value>())?;
-        return Ok(Value::Map(Vec::new()));
+        return Ok(Value::map(Vec::new()));
     }
     let entries = map(&args[0]);
     match name {
@@ -392,7 +392,7 @@ impl Output<'_> {
                 for (key, value) in entries {
                     result.push((key.owned(), value.copy(context)?));
                 }
-                Value::Map(result)
+                Value::map(result)
             }
         })
     }
@@ -971,12 +971,12 @@ mod tests {
             ("List", "concat", vec![ints(&[]), ints(&[])], slot),
             ("List", "sort", vec![ints(&[3, 1, 2])], 4 * slot),
             ("Map", "create", vec![], slot),
-            ("Map", "get", vec![Value::Map(vec![]), Value::Int(1)], slot),
+            ("Map", "get", vec![Value::map(vec![]), Value::Int(1)], slot),
             (
                 "Map",
                 "get",
                 vec![
-                    Value::Map(vec![]),
+                    Value::map(vec![]),
                     Value::Int(1),
                     Value::String("abc".into()),
                 ],
@@ -985,7 +985,7 @@ mod tests {
             (
                 "Map",
                 "keys",
-                vec![Value::Map(vec![
+                vec![Value::map(vec![
                     (MapKey::Int(1), Value::Null),
                     (MapKey::String("é".into()), Value::Null),
                 ])],
@@ -994,7 +994,7 @@ mod tests {
             (
                 "Map",
                 "values",
-                vec![Value::Map(vec![
+                vec![Value::map(vec![
                     (MapKey::Int(1), ints(&[1])),
                     (MapKey::Int(2), Value::Int(2)),
                 ])],
@@ -1004,7 +1004,7 @@ mod tests {
                 "Map",
                 "remove",
                 vec![
-                    Value::Map(vec![
+                    Value::map(vec![
                         (MapKey::Int(1), Value::Null),
                         (MapKey::Int(2), Value::Int(2)),
                     ]),
@@ -1016,7 +1016,7 @@ mod tests {
                 "Map",
                 "remove",
                 vec![
-                    Value::Map(vec![(MapKey::String("é".into()), ints(&[1]))]),
+                    Value::map(vec![(MapKey::String("é".into()), ints(&[1]))]),
                     Value::Int(1),
                 ],
                 3 * slot + key + 2,
@@ -1042,11 +1042,11 @@ mod tests {
     #[test]
     fn new_helpers_enforce_exact_final_output_budgets_and_cancellation() {
         use std::sync::{Arc, atomic::AtomicBool};
-        let sample = Value::Map(vec![
+        let sample = Value::map(vec![
             (MapKey::Int(1), Value::String("é".into())),
             (MapKey::String("1".into()), Value::Null),
         ]);
-        let rows = Value::list(vec![Value::Map(vec![
+        let rows = Value::list(vec![Value::map(vec![
             (MapKey::String("id".into()), Value::String("é".into())),
             (MapKey::String("v".into()), ints(&[1, 2])),
         ])]);
@@ -1091,8 +1091,8 @@ mod tests {
             (false, "diff", vec![ints(&[1, 2]), ints(&[2])]),
             (false, "intersect", vec![ints(&[1, 2]), ints(&[2])]),
             (false, "column", vec![rows.clone(), text("v")]),
-            (true, "merge", vec![sample.clone(), Value::Map(vec![])]),
-            (true, "replace", vec![sample.clone(), Value::Map(vec![])]),
+            (true, "merge", vec![sample.clone(), Value::map(vec![])]),
+            (true, "replace", vec![sample.clone(), Value::map(vec![])]),
             (
                 true,
                 "combine",
@@ -1104,17 +1104,17 @@ mod tests {
             (
                 true,
                 "flip",
-                vec![Value::Map(vec![(
+                vec![Value::map(vec![(
                     MapKey::String("é".into()),
                     text("value"),
                 )])],
             ),
             (true, "search", vec![sample.clone(), Value::Null]),
-            (true, "search", vec![Value::Map(vec![]), Value::Null]),
+            (true, "search", vec![Value::map(vec![]), Value::Null]),
             (true, "reverse", vec![sample.clone()]),
-            (true, "diff", vec![sample.clone(), Value::Map(vec![])]),
+            (true, "diff", vec![sample.clone(), Value::map(vec![])]),
             (true, "intersect", vec![sample.clone(), sample.clone()]),
-            (true, "diffKeys", vec![sample.clone(), Value::Map(vec![])]),
+            (true, "diffKeys", vec![sample.clone(), Value::map(vec![])]),
             (true, "intersectKeys", vec![sample.clone(), sample]),
             (true, "column", vec![rows, text("v"), text("id")]),
         ];
@@ -1155,7 +1155,7 @@ mod tests {
             [large.clone(), Value::Null]
                 .into_iter()
                 .map(|value| {
-                    Value::Map(vec![
+                    Value::map(vec![
                         (MapKey::String("id".into()), integer.clone()),
                         (MapKey::String("v".into()), value),
                     ])
@@ -1172,24 +1172,24 @@ mod tests {
             (
                 "merge",
                 vec![
-                    Value::Map(vec![(MapKey::Int(1), large)]),
-                    Value::Map(vec![(MapKey::Int(1), Value::Null)]),
+                    Value::map(vec![(MapKey::Int(1), large)]),
+                    Value::map(vec![(MapKey::Int(1), Value::Null)]),
                 ],
             ),
         ] {
             assert_eq!(
                 with_context(Some(required), |c| map_extra(name, c, &args)).unwrap(),
-                Value::Map(vec![(MapKey::Int(1), Value::Null)]),
+                Value::map(vec![(MapKey::Int(1), Value::Null)]),
                 "{name}"
             );
         }
-        let args = [Value::Map(vec![
+        let args = [Value::map(vec![
             (MapKey::String("x".repeat(1024)), integer.clone()),
             (MapKey::String("x".into()), integer),
         ])];
         assert_eq!(
             with_context(Some(required + 1), |c| map_extra("flip", c, &args)).unwrap(),
-            Value::Map(vec![(MapKey::Int(1), Value::String("x".into()))])
+            Value::map(vec![(MapKey::Int(1), Value::String("x".into()))])
         );
     }
 
@@ -1327,14 +1327,14 @@ mod tests {
                 map_call(
                     "keys",
                     context,
-                    &[Value::Map(vec![(MapKey::Int(1), Value::Null)])],
+                    &[Value::map(vec![(MapKey::Int(1), Value::Null)])],
                 ),
-                map_call("get", context, &[Value::Map(vec![]), Value::Int(1)]),
+                map_call("get", context, &[Value::map(vec![]), Value::Int(1)]),
                 map_call(
                     "remove",
                     context,
                     &[
-                        Value::Map(vec![(MapKey::Int(1), Value::Null)]),
+                        Value::map(vec![(MapKey::Int(1), Value::Null)]),
                         Value::Int(2),
                     ],
                 ),

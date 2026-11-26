@@ -27,7 +27,7 @@ fn binary(data: &[u8]) -> Value {
     Value::Bytes(data.into())
 }
 fn entry(path: &str, data: Option<&[u8]>) -> Value {
-    Value::Map(vec![
+    Value::map(vec![
         (MapKey::String("path".into()), Value::String(path.into())),
         (
             MapKey::String("data".into()),

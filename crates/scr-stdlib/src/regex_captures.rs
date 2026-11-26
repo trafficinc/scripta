@@ -124,7 +124,7 @@ fn group(
         MapKey::String("end".into()),
         Value::Int(position(found.end())),
     ));
-    Ok(Value::Map(fields))
+    Ok(Value::map(fields))
 }
 fn record(
     input: &str,
@@ -181,8 +181,8 @@ fn record(
         .try_reserve_exact(2)
         .map_err(|_| resource("capture result allocation failed"))?;
     fields.push((MapKey::String("groups".into()), Value::list(groups)));
-    fields.push((MapKey::String("named".into()), Value::Map(named)));
-    Ok(Value::Map(fields))
+    fields.push((MapKey::String("named".into()), Value::map(named)));
+    Ok(Value::map(fields))
 }
 pub(super) fn collect(
     context: &RuntimeContext<'_>,

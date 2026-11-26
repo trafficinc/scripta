@@ -549,7 +549,7 @@ fn operation(
                 };
                 values.push((MapKey::String(name.clone()), value));
             }
-            result.push(Value::Map(values));
+            result.push(Value::map(values));
         }
         charge(&mut used, 0, budget)?;
         Ok(Value::list(result))

@@ -188,7 +188,7 @@ fn encode(
     }
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     context.check_cancelled()?;
-    Ok(Value::Map(vec![
+    Ok(Value::map(vec![
         (
             MapKey::String("contentType".into()),
             Value::String(content_type),
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn multipart_preflights_exact_result_budget_and_native_cancellation() {
         super::super::with_context(|context| {
-            let parts = Value::list(vec![Value::Map(vec![
+            let parts = Value::list(vec![Value::map(vec![
                 (MapKey::String("name".into()), Value::String("field".into())),
                 (
                     MapKey::String("data".into()),

@@ -340,7 +340,7 @@ fn options(value: Option<&Value>, config: &StreamConfig) -> NativeResult<Options
         timeout_specified: false,
         timeout: config.timeout,
         ceiling: config.max_transfer_bytes,
-        http: Value::Map(vec![]),
+        http: Value::map(vec![]),
     };
     let entries = match value {
         None => return Ok(result),
@@ -525,7 +525,7 @@ fn new_handle(
             cap
         },
         status: None,
-        headers: Value::Map(vec![]),
+        headers: Value::map(vec![]),
         request_guard: None,
         extra_payload: 0,
     }
@@ -1019,7 +1019,7 @@ fn datagram(
             state.used += n as u64;
             let truncated = n > size;
             buffer.truncate(n.min(size));
-            Ok(Value::Map(vec![
+            Ok(Value::map(vec![
                 (MapKey::String("data".into()), Value::Bytes(buffer.into())),
                 (
                     MapKey::String("address".into()),
@@ -1075,7 +1075,7 @@ pub(crate) fn request_input(
             timeout_specified: false,
             timeout: config.timeout,
             ceiling: size.min(config.max_transfer_bytes),
-            http: Value::Map(vec![]),
+            http: Value::map(vec![]),
         },
         Backend::Input(reader),
         (true, false),

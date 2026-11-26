@@ -460,7 +460,7 @@ fn invalid_host_configuration_and_duplicate_registration_fail_before_connecting(
     );
     assert_eq!(observed.connects.get(), 0);
     // A nonempty string-keyed options map is accepted without coercion.
-    let options = Value::Map(vec![(MapKey::String("mode".into()), Value::Bool(false))]);
+    let options = Value::map(vec![(MapKey::String("mode".into()), Value::Bool(false))]);
     runtime.set_global("options", options).unwrap();
     run(
         &mut runtime,

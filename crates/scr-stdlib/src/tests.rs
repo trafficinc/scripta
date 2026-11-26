@@ -101,7 +101,7 @@ fn invalid_conversions_do_not_coerce_or_truncate() {
         assert!(bool_value(&[input]).is_err());
     }
     assert!(str_value(&[Value::list(vec![])]).is_err());
-    assert!(str_value(&[Value::Map(vec![])]).is_err());
+    assert!(str_value(&[Value::map(vec![])]).is_err());
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn lengths_count_unicode_scalars_and_collection_entries() {
         (Value::String("é🦀e\u{301}".into()), 4),
         (Value::list(vec![Value::Null, Value::Int(1)]), 2),
         (
-            Value::Map(vec![(
+            Value::map(vec![(
                 scr_runtime::MapKey::String("x".into()),
                 Value::list(vec![Value::Null]),
             )]),

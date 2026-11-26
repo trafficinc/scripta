@@ -136,6 +136,9 @@ impl Callable {
 }
 
 #[derive(Debug, Clone)]
+// Keep the existing tagged slot size used by logical byte quotas. Without an
+// explicit tag, collection indirection lets enum niche packing shrink the slot.
+#[repr(u8)]
 pub enum Value {
     Null,
     Bool(bool),
@@ -146,7 +149,7 @@ pub enum Value {
     Bytes(Rc<[u8]>),
     List(crate::List),
     /// Ordered entries with unique, strictly typed keys.
-    Map(Vec<(MapKey, Value)>),
+    Map(crate::Map),
     NativeObject(Rc<dyn NativeObject>),
     Callable(Callable),
 }
@@ -181,6 +184,12 @@ impl Value {
     /// List payload preserves independent value semantics.
     pub fn list(values: Vec<Value>) -> Self {
         Self::List(values.into())
+    }
+
+    /// Construct an insertion-ordered map from owned entries. Runtime boundaries
+    /// still validate key uniqueness, nested values and logical resource limits.
+    pub fn map(entries: Vec<(MapKey, Value)>) -> Self {
+        Self::Map(entries.into())
     }
 
     /// Construct a native callable for object methods without a global registration.

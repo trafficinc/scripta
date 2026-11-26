@@ -38,7 +38,7 @@ fn plain_clones_share_until_host_mutation_and_keep_owned_vector_transfers() {
 
 #[test]
 fn nested_map_and_list_writes_detach_at_each_shared_list_boundary() {
-    let original = List::from(vec![Value::Map(vec![(
+    let original = List::from(vec![Value::map(vec![(
         MapKey::String("items".into()),
         Value::list(vec![Value::String("世界".into())]),
     )])]);
@@ -77,7 +77,7 @@ fn inserted_handles_disable_sharing_without_changing_native_or_byte_alias_counts
     let bytes: Rc<[u8]> = Rc::from(&b"bytes"[..]);
     let mut original = List::from(vec![Value::Int(1)]);
     let before = original.clone();
-    original.push(Value::Map(vec![(
+    original.push(Value::map(vec![(
         MapKey::Int(0),
         Value::list(vec![
             Value::NativeObject(object.clone()),

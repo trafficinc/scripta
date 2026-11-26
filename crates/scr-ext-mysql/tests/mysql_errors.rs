@@ -51,7 +51,7 @@ impl Fixture {
         runtime
             .set_global(
                 "options",
-                Value::Map(vec![(
+                Value::map(vec![(
                     MapKey::String("tlsCaFile".into()),
                     Value::String(ca),
                 )]),

@@ -1,4 +1,4 @@
-//! Transient positions for large literals; public map storage stays an ordered Vec.
+//! Transient positions for large literals; map entries retain insertion order.
 use crate::*;
 use std::collections::HashMap;
 
@@ -83,7 +83,7 @@ impl Runtime {
                 map.push((key, value));
             }
         }
-        let value = Value::Map(map);
+        let value = Value::map(map);
         self.validate_value(&value, 0, span)?;
         Ok(value)
     }
@@ -159,7 +159,7 @@ impl Runtime {
             }
             map.push((key, value));
         }
-        let value = Value::Map(map);
+        let value = Value::map(map);
         self.validate_value(&value, 0, span)?;
         Ok(value)
     }
