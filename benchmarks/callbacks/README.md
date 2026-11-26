@@ -257,3 +257,7 @@ aggregate medians, 19 local documentation paths and diff/whitespace checks.
 For the first runtime optimization candidate, see the separate
 [owned-argument before/after experiment](owned-arguments.md). Its frozen
 baseline/candidate measurements are separate from the cross-language table.
+
+The accepted owned-argument step is followed by the separate
+[callback-setup experiment](callback-setup.md), measured incrementally against
+the accepted step-1 binaries. Each optimization requires its own review.

@@ -63,6 +63,7 @@ pub(super) struct Plan {
     checkpoint: Span,
     parameters: [Annotation; MAX_PARAMETERS],
     returning: Annotation,
+    scope_independent: bool,
 }
 
 impl Plan {
@@ -91,13 +92,19 @@ impl Plan {
             *slot = Annotation::compile(&parameter.annotation);
         }
         let integer = expression.integer_only();
+        let returning = Annotation::compile(&declaration.return_type);
+        let scope_independent = parameters
+            .iter()
+            .all(|kind| !matches!(kind, Annotation::General))
+            && !matches!(returning, Annotation::General);
         Some(Box::new(Self {
             expression,
             integer,
             parameter_count: declaration.parameters.len() as u8,
             checkpoint: statement.span,
             parameters,
-            returning: Annotation::compile(&declaration.return_type),
+            returning,
+            scope_independent,
         }))
     }
 
@@ -242,6 +249,32 @@ impl Plan {
 }
 
 impl Runtime {
+    // Called only after ordinary owner/arity/frame/source setup and the cached
+    // numeric-argument guard. Numeric plans cannot read lexical bindings or
+    // capture scopes. Primitive annotations are independent of lexical classes;
+    // configured scope/value quotas and every cold/general case stay ordinary.
+    pub(super) fn numeric_call_without_scopes(
+        &mut self,
+        declaration: &UserDeclaration,
+        values: &[Value],
+    ) -> Option<Result<Value>> {
+        #[cfg(test)]
+        if self.disable_numeric_setup_elision {
+            return None;
+        }
+        let plan = declaration.numeric_call.get()?.as_deref()?;
+        if !plan.scope_independent {
+            return None;
+        }
+        let result = plan.invoke::<false>(self, declaration, values)?;
+        #[cfg(test)]
+        {
+            self.numeric_parameter_scopes_reused += 1;
+            self.numeric_setup_elisions += 1;
+        }
+        Some(result)
+    }
+
     #[inline]
     pub(super) fn can_reuse_numeric_parameter_scope(
         &self,
@@ -293,6 +326,18 @@ impl Runtime {
             }
         };
         let plan = cached.as_deref()?;
+        plan.invoke::<true>(self, declaration, values)
+    }
+}
+
+impl Plan {
+    #[inline]
+    fn invoke<const SCOPED: bool>(
+        &self,
+        runtime: &mut Runtime,
+        declaration: &UserDeclaration,
+        values: &[Value],
+    ) -> Option<Result<Value>> {
         debug_assert_eq!(values.len(), declaration.parameters.len());
         let mut arguments = [Number::Int(0); MAX_PARAMETERS];
         for (slot, value) in arguments.iter_mut().zip(values) {
@@ -300,29 +345,37 @@ impl Runtime {
         }
         #[cfg(test)]
         {
-            self.numeric_calls_executed += 1;
+            runtime.numeric_calls_executed += 1;
         }
         Some((|| {
             // Keep value checks, general resolution and their original order. Only
             // numeric arguments are eligible, so omitting their lexical copies
             // cannot change ownership counts or collector edges.
-            for (kind, (parameter, value)) in plan
+            for (kind, (parameter, value)) in self
                 .parameters
                 .iter()
                 .zip(declaration.parameters.iter().zip(values))
             {
-                kind.check(self, &parameter.annotation, value, parameter.span, false)?;
+                kind.check(runtime, &parameter.annotation, value, parameter.span, false)?;
             }
-            let previous =
-                self.enter_empty_scope(self.environments.current, declaration.body.span)?;
+            let previous = if SCOPED {
+                Some(
+                    runtime
+                        .enter_empty_scope(runtime.environments.current, declaration.body.span)?,
+                )
+            } else {
+                None
+            };
             let result = (|| {
-                self.checkpoint(plan.checkpoint)?;
-                plan.evaluate(&arguments, self)
+                runtime.checkpoint(self.checkpoint)?;
+                self.evaluate(&arguments, runtime)
             })();
-            self.environments.leave_empty(previous);
+            if let Some(previous) = previous {
+                runtime.environments.leave_empty(previous);
+            }
             let value = result?.into_value();
-            plan.returning.check(
-                self,
+            self.returning.check(
+                runtime,
                 &declaration.return_type,
                 &value,
                 declaration.name_span,
@@ -339,5 +392,7 @@ mod annotation_tests;
 mod integer_tests;
 #[cfg(test)]
 mod parameter_scope_tests;
+#[cfg(test)]
+mod setup_tests;
 #[cfg(test)]
 mod tests;

@@ -201,6 +201,10 @@ pub struct Runtime {
     #[cfg(test)]
     numeric_parameter_scopes_reused: usize,
     #[cfg(test)]
+    disable_numeric_setup_elision: bool,
+    #[cfg(test)]
+    numeric_setup_elisions: usize,
+    #[cfg(test)]
     numeric_calls_executed: usize,
     #[cfg(test)]
     disable_prepared_calls: bool,
@@ -1335,6 +1339,13 @@ impl Runtime {
                 let reuse_parameters = receiver.is_none()
                     && self.options.max_value_bytes.is_none()
                     && self.can_reuse_numeric_parameter_scope(declaration, values);
+                if reuse_parameters && self.options.max_scopes.is_none() {
+                    if let Some(result) = self.numeric_call_without_scopes(declaration, values) {
+                        self.source = caller_source;
+                        self.stack.pop();
+                        return result;
+                    }
+                }
                 let parameter_scope = if reuse_parameters {
                     self.enter_empty_scope(*environment, span)
                 } else {

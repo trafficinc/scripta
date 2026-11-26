@@ -154,6 +154,9 @@ map keys.
 For optimization review, preserve before/after optimized binaries and use the
 [owned-argument comparison](../benchmarks/callbacks/owned-arguments.md), which
 alternates frozen builds and also checks startup and existing CLI workloads.
+The [callback-setup experiment](../benchmarks/callbacks/callback-setup.md) uses
+the same driver against the accepted owned-argument baseline and records the
+additional changed runtime source files with --source.
 
 ## Local disk cleanup
 

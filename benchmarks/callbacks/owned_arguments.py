@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--candidate-cli', type=Path)
     parser.add_argument('--rounds', type=int, default=4)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--source', action='append', default=[], help='additional source path to hash')
     args = parser.parse_args()
     if args.rounds < 1 or bool(args.baseline_cli) != bool(args.candidate_cli):
         parser.error('positive rounds and either both CLI paths or neither required')
@@ -51,7 +52,7 @@ def main():
         'sources': [identity(ROOT / name) for name in [
             'benchmarks/callbacks/owned_arguments.py', 'benchmarks/callbacks/run.py',
             'crates/scr-stdlib/benches/callback_comparison.rs',
-            'crates/scr-runtime/src/invocation.rs', 'crates/scr-stdlib/src/collections/callbacks.rs']],
+            'crates/scr-runtime/src/invocation.rs', 'crates/scr-stdlib/src/collections/callbacks.rs', *args.source]],
         'fixture_sha256': hashlib.sha256(data_path.read_bytes()).hexdigest(),
         'rounds': args.rounds, 'runs': [], 'startup_ms': {},
         'cli_control_ms': {}, 'cli_control_fixtures': [],

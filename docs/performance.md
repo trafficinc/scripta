@@ -93,3 +93,7 @@ The cross-runtime table above records the pre-optimization reference. The
 [owned-argument experiment](../benchmarks/callbacks/owned-arguments.md) measures
 the first optimization candidate against a preserved build of that reference.
 Candidate acceptance is separate from these measurements.
+
+The [callback-setup experiment](../benchmarks/callbacks/callback-setup.md) measures
+the next candidate incrementally against accepted step 1. Scope/value quotas and
+unsupported callback forms keep their existing execution path.

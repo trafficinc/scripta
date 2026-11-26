@@ -1,6 +1,6 @@
 # Owned callback argument experiment: step 1
 
-Status: ready for review; acceptance pending. This experiment covers
+Status: accepted by the user on. This experiment covers
 only argument ownership. Callback preparation, validation caching, wider function
 execution plans and copy-on-write collections remain separate future steps.
 
@@ -59,8 +59,8 @@ warmups, with LF/CRLF normalization. Startup is never subtracted.
 
 ## Results
 
-Final candidate: **ready for review, acceptance pending**. No later optimization
-step or standard-library section 10 has started. Baseline is revision
+Final candidate: **accepted by the user**. Callback-setup step 2 is now authorized; standard-library section 10 remains
+unstarted. Baseline is revision
 `396a5626486509cb0235716f2846156ddbc58c53` with the already-added benchmark tooling. The first
 pre-edit runtime/stdlib source hashes match that HEAD revision; baseline engine
 and CLI hashes match the earlier four-language evidence. Both old and new
