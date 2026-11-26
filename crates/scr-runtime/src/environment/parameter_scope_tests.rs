@@ -37,7 +37,7 @@ fn recursion_defaults_methods_and_captures_keep_current_bindings() {
         ),
         (
             "function f($a=1,$b=($a+=2),...$rest){return [$a,$b,$rest];}$seen=f();",
-            Value::List(vec![Value::Int(3), Value::Int(3), Value::List(vec![])]),
+            Value::list(vec![Value::Int(3), Value::Int(3), Value::list(vec![])]),
         ),
         (
             "function make($x,$read=function(){return $x;}){return $read;}$f=make(19);warm(3);warm(4);$seen=$f();",
@@ -57,7 +57,7 @@ fn recursion_defaults_methods_and_captures_keep_current_bindings() {
         ),
         (
             "function f($a,$b=($scratch=7),$c=$a+$scratch){return [$a,$b,$c];}$seen=f(1);",
-            Value::List(vec![Value::Int(1), Value::Int(7), Value::Int(8)]),
+            Value::list(vec![Value::Int(1), Value::Int(7), Value::Int(8)]),
         ),
     ] {
         let (runtime, result) = compare(source, RuntimeOptions::default());

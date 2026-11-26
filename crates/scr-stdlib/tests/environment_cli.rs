@@ -163,7 +163,7 @@ fn cli_args_are_zero_based_verbatim_and_out_of_range_is_null() {
     run(&mut runtime, "$args = Cli::args(); $first = Cli::arg(0); $empty = Cli::arg(2); $last = Cli::arg(3); $missing = Cli::arg(4);", &mut Vec::new()).unwrap();
     assert_eq!(
         runtime.get_global("args"),
-        Some(&Value::List(
+        Some(&Value::list(
             ["one", "世界", "", "--help"]
                 .map(|value| Value::String(value.into()))
                 .to_vec()

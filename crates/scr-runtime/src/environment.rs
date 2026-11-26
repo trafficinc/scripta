@@ -816,7 +816,7 @@ mod tests {
             _ => unreachable!(),
         };
         runtime
-            .set_global("kept", crate::Value::List(vec![closure; 10000]))
+            .set_global("kept", crate::Value::list(vec![closure; 10000]))
             .unwrap();
         assert_eq!(runtime.collect_garbage(), 0);
         let work = runtime.environments.last_collection;

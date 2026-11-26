@@ -33,7 +33,7 @@ fn comprehension_scopes_preserve_captures_shadowing_snapshots_and_nested_names()
     );
     assert_eq!(
         runtime.get_global("mapped"),
-        Some(&Value::List(vec![Value::Int(6), Value::Int(9)]))
+        Some(&Value::list(vec![Value::Int(6), Value::Int(9)]))
     );
     assert_eq!(
         runtime.get_global("seen"),

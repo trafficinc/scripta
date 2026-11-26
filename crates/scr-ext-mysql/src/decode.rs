@@ -349,7 +349,7 @@ pub(crate) fn convert(
         output.push(Value::Map(entries));
     }
     Ok(match selection {
-        Selection::All => Value::List(output),
+        Selection::All => Value::list(output),
         Selection::Row => output.into_iter().next().unwrap_or(Value::Null),
         Selection::Column(_) => unreachable!(),
     })

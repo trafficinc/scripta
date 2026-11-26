@@ -91,9 +91,9 @@ pub(super) fn read(
             &mut total,
             3 * std::mem::size_of::<Value>() + name.len() + decoded.len(),
         )?;
-        result.push(Value::List(vec![Value::String(name), value]));
+        result.push(Value::list(vec![Value::String(name), value]));
     }
-    Ok(Value::List(result))
+    Ok(Value::list(result))
 }
 #[derive(Clone)]
 struct Options {

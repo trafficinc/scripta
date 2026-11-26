@@ -364,7 +364,7 @@ mod tests {
         for _ in 0..2000 {
             random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
             let key = format!("key{}", (random >> 32) % 24);
-            let value = Value::List(vec![Value::Int((random >> 8) as i64)]);
+            let value = Value::list(vec![Value::Int((random >> 8) as i64)]);
             match random % 5 {
                 0 => assert_eq!(bindings.remove(&key), reference.remove(&key)),
                 1 => {

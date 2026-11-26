@@ -198,7 +198,7 @@ impl NativeObject for RequestObject {
                         "query" => crate::url::parse(context, query, true),
                         "uploads" => multipart
                             .as_ref()
-                            .map_or_else(|| Ok(Value::List(vec![])), |m| m.files(context)),
+                            .map_or_else(|| Ok(Value::list(vec![])), |m| m.files(context)),
                         "bodyStream" => {
                             if let Some(m) = &multipart {
                                 m.body_stream(context)

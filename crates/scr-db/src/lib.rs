@@ -482,7 +482,7 @@ pub fn register_with_options(
                         "Db::connect requires DSN, user, and password strings",
                     ));
                 };
-                let default_options = Value::List(Vec::new());
+                let default_options = Value::list(Vec::new());
                 let options = args.get(3).unwrap_or(&default_options);
                 match options {
                     Value::List(values) if values.is_empty() => {}
@@ -795,7 +795,7 @@ pub fn register_with_options(
                 }
                 context.check_cancelled()?;
                 context.permissions.require("network.connect")?;
-                let empty = Value::List(Vec::new());
+                let empty = Value::list(Vec::new());
                 let params = args.get(1).unwrap_or(&empty);
                 stmt.session.call(
                     "execute",

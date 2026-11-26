@@ -101,7 +101,7 @@ fn callback_timings() {
                     (MapKey::String("rank".into()), Value::Int(size - 1 - index)),
                     (
                         MapKey::String("payload".into()),
-                        Value::List(vec![
+                        Value::list(vec![
                             Value::String("x".repeat(128)),
                             Value::String("世界".into()),
                         ]),
@@ -111,7 +111,7 @@ fn callback_timings() {
             .collect();
         let sorted = Value::List(rows.iter().rev().cloned().collect());
         runtime.set_global("values", values.clone()).unwrap();
-        runtime.set_global("rows", Value::List(rows)).unwrap();
+        runtime.set_global("rows", Value::list(rows)).unwrap();
         runtime.execute_source(r#"
             function square($value:int):int {return $value*$value;}
             function even($value:int):bool {return $value%2===0;}

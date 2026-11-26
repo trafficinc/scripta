@@ -227,15 +227,15 @@ fn used_results_chains_indexed_targets_and_captured_variables_keep_value_semanti
     }
     assert_eq!(
         runtime.get_global("items"),
-        Some(&Value::List(vec![Value::String("xy".into())]))
+        Some(&Value::list(vec![Value::String("xy".into())]))
     );
     assert_eq!(
         runtime.get_global("saved"),
-        Some(&Value::List(vec![Value::String("x".into())]))
+        Some(&Value::list(vec![Value::String("x".into())]))
     );
     assert_eq!(
         runtime.get_global("indexed"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::String("xy".into()),
             Value::Int(1)
         ]))
@@ -348,7 +348,7 @@ fn instruction_limits_during_pure_suffix_evaluation_leave_the_destination_unchan
             .unwrap();
         runtime.set_global("needle", Value::Int(99)).unwrap();
         runtime
-            .set_global("values", Value::List(vec![Value::Int(0); 10]))
+            .set_global("values", Value::list(vec![Value::Int(0); 10]))
             .unwrap();
         let source = "$s = $s . ($needle in $values);";
         let error = variant(&mut runtime, source, general).unwrap_err();

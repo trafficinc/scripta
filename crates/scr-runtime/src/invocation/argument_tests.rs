@@ -18,7 +18,7 @@ fn runtime(disabled: bool) -> Runtime {
                     for _ in 0..4 {
                         out.push(context.invoke_arguments(args[0].clone(), [&argument])?);
                     }
-                    Ok(Value::List(out))
+                    Ok(Value::list(out))
                 },
             ),
         )
@@ -38,7 +38,7 @@ fn immutable_record_checks_are_reused_without_sharing_callback_writes() {
     crate::test_support::compare_source(&mut fast, &mut reference, source).unwrap();
     assert_eq!(
         fast.get_global("seen"),
-        Some(&Value::List(vec![Value::Int(4); 4]))
+        Some(&Value::list(vec![Value::Int(4); 4]))
     );
     assert_eq!(fast.argument_validations_reused, 3);
     assert_eq!(reference.argument_validations_reused, 0);
@@ -196,7 +196,7 @@ fn opaque_payloads_are_rechecked_with_original_hook_order_and_alias_counts() {
 fn invalid_arguments_are_not_cached_and_classification_work_is_bounded() {
     let mut deep = Value::Int(1);
     for _ in 0..129 {
-        deep = Value::List(vec![deep]);
+        deep = Value::list(vec![deep]);
     }
     let cases = [
         (Value::Float(f64::NAN), false),
@@ -209,11 +209,11 @@ fn invalid_arguments_are_not_cached_and_classification_work_is_bounded() {
         ),
         (deep, false),
         (
-            Value::List(vec![Value::Int(1); MAX_CACHEABLE_ARGUMENT_NODES - 1]),
+            Value::list(vec![Value::Int(1); MAX_CACHEABLE_ARGUMENT_NODES - 1]),
             true,
         ),
         (
-            Value::List(vec![Value::Int(1); MAX_CACHEABLE_ARGUMENT_NODES]),
+            Value::list(vec![Value::Int(1); MAX_CACHEABLE_ARGUMENT_NODES]),
             true,
         ),
         (

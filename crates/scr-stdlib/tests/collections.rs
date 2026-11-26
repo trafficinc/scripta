@@ -57,7 +57,7 @@ fn sorting_is_strict_and_preserves_equal_float_order() {
         ("List::sort([1], false)", ints(&[1])),
         (
             "List::sort([2.5, -1.0, 0.0])",
-            Value::List(vec![
+            Value::list(vec![
                 Value::Float(-1.0),
                 Value::Float(0.0),
                 Value::Float(2.5),
@@ -65,7 +65,7 @@ fn sorting_is_strict_and_preserves_equal_float_order() {
         ),
         (
             r#"List::sort(["é", "a", "Z", "東京"] )"#,
-            Value::List(
+            Value::list(
                 ["Z", "a", "é", "東京"]
                     .map(|s| Value::String(s.into()))
                     .to_vec(),
@@ -141,7 +141,7 @@ fn map_creation_lookup_and_removal_preserve_key_types_and_insertion_order() {
     );
     assert_eq!(
         runtime.get_global("keys"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::Int(1),
             Value::String("1".into()),
             Value::String("".into()),
@@ -150,7 +150,7 @@ fn map_creation_lookup_and_removal_preserve_key_types_and_insertion_order() {
     );
     assert_eq!(
         runtime.get_global("values"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::String("updated".into()),
             Value::String("text".into()),
             Value::Null,
@@ -217,22 +217,22 @@ fn helper_results_deep_copy_collections_and_defaults_are_eager() {
     );
     assert_eq!(
         runtime.get_global("original"),
-        Some(&Value::List(vec![ints(&[1]), ints(&[2])]))
+        Some(&Value::list(vec![ints(&[1]), ints(&[2])]))
     );
     assert_eq!(
         runtime.get_global("map"),
         Some(&Value::Map(vec![(
             MapKey::String("nested".into()),
-            Value::List(vec![ints(&[1])])
+            Value::list(vec![ints(&[1])])
         )]))
     );
     assert_eq!(
         runtime.get_global("default"),
-        Some(&Value::List(vec![ints(&[9])]))
+        Some(&Value::list(vec![ints(&[9])]))
     );
     assert_eq!(
         runtime.get_global("eager"),
-        Some(&Value::List(vec![Value::Int(1), Value::Null]))
+        Some(&Value::list(vec![Value::Int(1), Value::Null]))
     );
 }
 
@@ -708,9 +708,9 @@ fn indexed_construction_keeps_first_positions_and_last_values_after_many_duplica
         .collect();
     let mut runtime = runtime(None);
     for (name, value) in [
-        ("keys", Value::List(keys)),
-        ("values", Value::List(values)),
-        ("rows", Value::List(rows)),
+        ("keys", Value::list(keys)),
+        ("values", Value::list(values)),
+        ("rows", Value::list(rows)),
         ("source", Value::Map(source)),
     ] {
         runtime.set_global(name, value).unwrap();
@@ -949,7 +949,7 @@ fn indexed_script_maps_compose_with_native_remove_merge_and_copy_independence() 
             "map",
             Value::Map(
                 (0..256)
-                    .map(|i| (MapKey::Int(i), Value::List(vec![Value::Int(i)])))
+                    .map(|i| (MapKey::Int(i), Value::list(vec![Value::Int(i)])))
                     .collect(),
             ),
         )

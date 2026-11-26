@@ -28,7 +28,7 @@ fn group(text: &str, start: i64, end: i64) -> Value {
     ])
 }
 fn record(groups: Vec<Value>, named: Vec<(&str, Value)>) -> Value {
-    map(vec![("groups", Value::List(groups)), ("named", map(named))])
+    map(vec![("groups", Value::list(groups)), ("named", map(named))])
 }
 fn evaluate(runtime: &mut Runtime, input: &str, pattern: &str, all: bool) -> Value {
     runtime
@@ -81,7 +81,7 @@ fn numbered_named_optional_and_empty_groups_have_explicit_records() {
     );
     assert_eq!(
         evaluate(&mut runtime, "ab a", r"(?P<letter>a)(b)?", true),
-        Value::List(vec![
+        Value::list(vec![
             record(
                 vec![group("ab", 0, 2), group("a", 0, 1), group("b", 1, 2)],
                 vec![("letter", group("a", 0, 1))]
@@ -123,7 +123,7 @@ fn scalar_offsets_cover_multibyte_combining_emoji_nested_and_repeated_matches() 
     let matches = evaluate(&mut runtime, input, r"(\p{L})", true);
     assert_eq!(
         matches,
-        Value::List(vec![
+        Value::list(vec![
             record(vec![group("e", 3, 4), group("e", 3, 4)], vec![]),
             record(vec![group("東", 5, 6), group("東", 5, 6)], vec![]),
             record(vec![group("京", 6, 7), group("京", 6, 7)], vec![]),
@@ -159,7 +159,7 @@ fn zero_width_matches_follow_existing_find_all_and_no_match_is_null_or_empty_lis
         assert_eq!(evaluate(&mut runtime, "abc", pattern, false), Value::Null);
         assert_eq!(
             evaluate(&mut runtime, "abc", pattern, true),
-            Value::List(vec![])
+            Value::list(vec![])
         );
     }
     for pattern in ["", "a*", "a?", "^|$", "(?:a|)"] {
@@ -238,7 +238,7 @@ fn exact_nested_budgets_include_named_duplicates_keys_slots_and_nulls() {
     }
     let mut runtime = runtime(Some(size_of::<Value>() + 1));
     assert_eq!(evaluate(&mut runtime, "x", "z", false), Value::Null);
-    assert_eq!(evaluate(&mut runtime, "x", "z", true), Value::List(vec![]));
+    assert_eq!(evaluate(&mut runtime, "x", "z", true), Value::list(vec![]));
 }
 
 #[test]

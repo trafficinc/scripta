@@ -200,9 +200,9 @@ pub(crate) fn parse(context: &RuntimeContext<'_>, text: &str, form: bool) -> Nat
             .map_err(|_| resource("query pair allocation failed"))?;
         pair.push(Value::String(decode(context, key, form)?));
         pair.push(Value::String(decode(context, value, form)?));
-        result.push(Value::List(pair));
+        result.push(Value::list(pair));
     }
-    Ok(Value::List(result))
+    Ok(Value::list(result))
 }
 pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
     full_url::register(runtime)?;
@@ -293,13 +293,13 @@ mod tests {
             ),
             (
                 "Form::encode",
-                Value::List(vec![Value::List(vec![text("&"), text("&")])]),
+                Value::list(vec![Value::list(vec![text("&"), text("&")])]),
                 slot + 7,
             ),
             ("Url::parseQuery", text("a=b&a=c"), slot * 7 + 4),
             ("Form::decode", text("a=b&a=c"), slot * 7 + 4),
             ("Url::parseQuery", text("&&"), slot),
-            ("Form::encode", Value::List(vec![]), slot),
+            ("Form::encode", Value::list(vec![]), slot),
         ] {
             context.max_value_bytes = None;
             let args = [argument];

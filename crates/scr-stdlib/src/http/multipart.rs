@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn multipart_preflights_exact_result_budget_and_native_cancellation() {
         super::super::with_context(|context| {
-            let parts = Value::List(vec![Value::Map(vec![
+            let parts = Value::list(vec![Value::Map(vec![
                 (MapKey::String("name".into()), Value::String("field".into())),
                 (
                     MapKey::String("data".into()),

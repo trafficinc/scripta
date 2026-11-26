@@ -660,7 +660,7 @@ impl Worker {
         if matches!(plan.state, ResultState::Exhausted) {
             return match selection {
                 Selection::Row => Ok(scr_runtime::Value::Null),
-                Selection::All => Ok(scr_runtime::Value::List(Vec::new())),
+                Selection::All => Ok(scr_runtime::Value::list(Vec::new())),
                 Selection::Column(_) => Err(NativeError::new(
                     "DbEndOfResultsError",
                     "no more result rows",

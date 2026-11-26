@@ -180,7 +180,7 @@ fn record(
     fields
         .try_reserve_exact(2)
         .map_err(|_| resource("capture result allocation failed"))?;
-    fields.push((MapKey::String("groups".into()), Value::List(groups)));
+    fields.push((MapKey::String("groups".into()), Value::list(groups)));
     fields.push((MapKey::String("named".into()), Value::Map(named)));
     Ok(Value::Map(fields))
 }
@@ -218,7 +218,7 @@ fn collect_with_checkpoint(
     }
     checkpoint()?;
     Ok(if all {
-        Value::List(result)
+        Value::list(result)
     } else {
         Value::Null
     })

@@ -126,7 +126,7 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
                         .iter()
                         .map(|value| text(value).map(Value::String))
                         .collect::<NativeResult<Vec<_>>>()
-                        .map(Value::List),
+                        .map(Value::list),
                     "arg" => {
                         let [Value::Int(index)] = args else {
                             return Err(NativeError::type_error("Cli::arg requires one int index"));

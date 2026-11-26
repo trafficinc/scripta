@@ -22,7 +22,7 @@ fn text(s: &str) -> Value {
     Value::String(s.into())
 }
 fn pair(k: &str, v: &str) -> Value {
-    Value::List(vec![text(k), text(v)])
+    Value::list(vec![text(k), text(v)])
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn queries_preserve_order_duplicates_empty_fields_and_explicit_string_types() {
         value(
             r#"Url::parseQuery("?tag=rust&&tag=scripting&flag&=x&a=b=c&escaped=%26%3D&plus=+&")"#
         ),
-        Value::List(vec![
+        Value::list(vec![
             pair("tag", "rust"),
             pair("tag", "scripting"),
             pair("flag", ""),
@@ -70,12 +70,12 @@ fn queries_preserve_order_duplicates_empty_fields_and_explicit_string_types() {
         ])
     );
     for expression in [r#"Url::parseQuery("")"#, r#"Url::parseQuery("?&&")"#] {
-        assert_eq!(value(expression), Value::List(vec![]));
+        assert_eq!(value(expression), Value::list(vec![]));
     }
     assert_eq!(value("Url::buildQuery([])"), text(""));
     assert_eq!(
         value(r#"Url::parseQuery(Url::buildQuery([["x", "1"], ["x", "é &+"]]))"#),
-        Value::List(vec![pair("x", "1"), pair("x", "é &+")])
+        Value::list(vec![pair("x", "1"), pair("x", "é &+")])
     );
 }
 #[test]
@@ -86,7 +86,7 @@ fn forms_use_the_form_safe_set_and_treat_plus_as_space_before_percent_decoding()
     );
     assert_eq!(
         value(r#"Form::decode("q=caf%C3%A9+tea&literal=%2B&literal=+&?x=y")"#),
-        Value::List(vec![
+        Value::list(vec![
             pair("q", "café tea"),
             pair("literal", "+"),
             pair("literal", " "),
@@ -95,10 +95,10 @@ fn forms_use_the_form_safe_set_and_treat_plus_as_space_before_percent_decoding()
     );
     assert_eq!(
         value(r#"Form::decode(Form::encode([["x", "1"], ["x", "é +"]]))"#),
-        Value::List(vec![pair("x", "1"), pair("x", "é +")])
+        Value::list(vec![pair("x", "1"), pair("x", "é +")])
     );
     assert_eq!(value("Form::encode([])"), text(""));
-    assert_eq!(value(r#"Form::decode("&&")"#), Value::List(vec![]));
+    assert_eq!(value(r#"Form::decode("&&")"#), Value::list(vec![]));
 }
 #[test]
 fn invalid_encodings_and_parameter_shapes_preserve_failed_assignments() {

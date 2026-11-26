@@ -70,7 +70,7 @@ fn parameter_storage_handles_defaults_promotions_receivers_and_escaped_captures(
     for (source, expected) in [
         (
             "function f($a,$b=($scratch=7),$c=$a+$scratch){return [$a,$b,$c];}$seen=f(1);",
-            Value::List(vec![Value::Int(1), Value::Int(7), Value::Int(8)]),
+            Value::list(vec![Value::Int(1), Value::Int(7), Value::Int(8)]),
         ),
         (
             "function f($n){if($n<2){return $n;}return f($n-1)+f($n-2);}$seen=f(12);",
@@ -82,9 +82,9 @@ fn parameter_storage_handles_defaults_promotions_receivers_and_escaped_captures(
         ),
         (
             "function f($a,...$rest){return [$a,$rest];}$seen=f(1,2,3);",
-            Value::List(vec![
+            Value::list(vec![
                 Value::Int(1),
-                Value::List(vec![Value::Int(2), Value::Int(3)]),
+                Value::list(vec![Value::Int(2), Value::Int(3)]),
             ]),
         ),
         (

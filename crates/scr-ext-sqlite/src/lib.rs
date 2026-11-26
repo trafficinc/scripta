@@ -552,7 +552,7 @@ fn operation(
             result.push(Value::Map(values));
         }
         charge(&mut used, 0, budget)?;
-        Ok(Value::List(result))
+        Ok(Value::list(result))
     })();
     // Release cancellation flags and per-call counters after errors as well as success.
     let clear_progress = connection

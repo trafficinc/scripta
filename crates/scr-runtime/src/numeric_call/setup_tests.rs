@@ -33,7 +33,7 @@ fn warmed_numeric_callbacks_reuse_plans_without_entering_empty_scopes() {
                         for item in items {
                             out.push(context.invoke(args[0].clone(), std::slice::from_ref(item))?);
                         }
-                        Ok(Value::List(out))
+                        Ok(Value::list(out))
                     },
                 ),
             )

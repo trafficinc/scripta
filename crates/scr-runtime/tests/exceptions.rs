@@ -87,7 +87,7 @@ fn exception_classes_inherit_fields_methods_constructors_and_annotations() {
     assert_eq!(rt.get_global("same"), Some(&Value::Bool(true)));
     assert_eq!(rt.get_global("before"), Some(&Value::Null));
     assert_eq!(rt.get_global("code"), Some(&Value::Null));
-    assert_eq!(rt.get_global("beforeTrace"), Some(&Value::List(vec![])));
+    assert_eq!(rt.get_global("beforeTrace"), Some(&Value::list(vec![])));
 }
 
 #[test]

@@ -184,10 +184,10 @@ fn empty_components_encoded_delimiters_and_duplicate_queries_remain_explicit() {
         &mut rt,
         "$pairs=Url::parseQuery($url->query); $form=Form::decode($url->query); $round=Url::serialize(Url::parse(Url::serialize($url)));",
     );
-    let pair = |a: &str, b: &str| Value::List(vec![string(a), string(b)]);
+    let pair = |a: &str, b: &str| Value::list(vec![string(a), string(b)]);
     assert_eq!(
         rt.get_global("pairs"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             pair("tag", "a+z"),
             pair("tag", "/"),
             pair("flag", ""),

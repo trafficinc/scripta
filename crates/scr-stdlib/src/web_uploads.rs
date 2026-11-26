@@ -163,7 +163,7 @@ impl State {
             self.data
                 .fields
                 .iter()
-                .map(|(k, v)| Value::List(vec![Value::String(k.clone()), Value::String(v.clone())]))
+                .map(|(k, v)| Value::list(vec![Value::String(k.clone()), Value::String(v.clone())]))
                 .collect(),
         ))
     }

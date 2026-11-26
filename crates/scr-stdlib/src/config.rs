@@ -137,7 +137,7 @@ fn toml_value(
                 let value = toml_value(budget, item, depth + 1)?;
                 values.push(value);
             }
-            Value::List(values)
+            Value::list(values)
         }
         toml::Value::Table(items) => {
             let mut values = Vec::new();

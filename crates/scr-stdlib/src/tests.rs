@@ -75,7 +75,7 @@ fn invalid_conversions_do_not_coerce_or_truncate() {
         Value::String(" 12".into()),
         Value::String("1.0".into()),
         Value::String("9223372036854775808".into()),
-        Value::List(vec![]),
+        Value::list(vec![]),
     ] {
         assert!(int_value(&[input]).is_err());
     }
@@ -85,7 +85,7 @@ fn invalid_conversions_do_not_coerce_or_truncate() {
         Value::String("NaN".into()),
         Value::String("inf".into()),
         Value::String("1e999".into()),
-        Value::List(vec![]),
+        Value::list(vec![]),
     ] {
         assert!(registered_float(&[input]).is_err());
     }
@@ -96,11 +96,11 @@ fn invalid_conversions_do_not_coerce_or_truncate() {
         Value::String("1".into()),
         Value::String("".into()),
         Value::String("TRUE".into()),
-        Value::List(vec![]),
+        Value::list(vec![]),
     ] {
         assert!(bool_value(&[input]).is_err());
     }
-    assert!(str_value(&[Value::List(vec![])]).is_err());
+    assert!(str_value(&[Value::list(vec![])]).is_err());
     assert!(str_value(&[Value::Map(vec![])]).is_err());
 }
 
@@ -121,11 +121,11 @@ fn lengths_count_unicode_scalars_and_collection_entries() {
     for (value, expected) in [
         (Value::String("".into()), 0),
         (Value::String("é🦀e\u{301}".into()), 4),
-        (Value::List(vec![Value::Null, Value::Int(1)]), 2),
+        (Value::list(vec![Value::Null, Value::Int(1)]), 2),
         (
             Value::Map(vec![(
                 scr_runtime::MapKey::String("x".into()),
-                Value::List(vec![Value::Null]),
+                Value::list(vec![Value::Null]),
             )]),
             1,
         ),

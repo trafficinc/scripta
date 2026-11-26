@@ -40,16 +40,16 @@ fn execute(
 fn argument_preparation_preserves_root_measurement_checkpoints_limits_and_errors() {
     let mut deep = Value::Int(1);
     for _ in 0..129 {
-        deep = Value::List(vec![deep]);
+        deep = Value::list(vec![deep]);
     }
     let inputs = [
-        Value::List(vec![]),
-        Value::List(vec![Value::Int(1), Value::Int(2)]),
-        Value::List(vec![Value::Map(vec![(
+        Value::list(vec![]),
+        Value::list(vec![Value::Int(1), Value::Int(2)]),
+        Value::list(vec![Value::Map(vec![(
             MapKey::String("rank".into()),
             Value::String("世界".into()),
         )])]),
-        Value::List(vec![deep]),
+        Value::list(vec![deep]),
     ];
     for input in inputs {
         let mut options = vec![RuntimeOptions::default()];
@@ -93,7 +93,7 @@ fn preparation_keeps_cancellation_after_native_payload_observation() {
     let mut errors = Vec::new();
     for prepared in [false, true] {
         let flag = Arc::new(AtomicBool::new(false));
-        let input = Value::List(vec![Value::Map(vec![(
+        let input = Value::list(vec![Value::Map(vec![(
             MapKey::String("object".into()),
             Value::NativeObject(Rc::new(Cancel(flag.clone()))),
         )])]);

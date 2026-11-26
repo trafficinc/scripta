@@ -92,11 +92,11 @@ fn bytes_are_measured_in_nested_values_and_at_host_boundaries() {
     let slot = std::mem::size_of::<Value>();
     let mut runtime = runtime(Some(2 * slot + 3));
     runtime
-        .set_global("ok", Value::List(vec![bytes(b"abc")]))
+        .set_global("ok", Value::list(vec![bytes(b"abc")]))
         .unwrap();
     assert!(
         runtime
-            .set_global("large", Value::List(vec![bytes(b"abcd")]))
+            .set_global("large", Value::list(vec![bytes(b"abcd")]))
             .is_err()
     );
     assert!(
@@ -152,7 +152,7 @@ fn regex_is_small_unicode_aware_and_uses_literal_replacements() {
     );
     assert_eq!(
         value(r#"Regex::findAll("café 12 東京", "\\p{L}+")"#),
-        Value::List(vec![
+        Value::list(vec![
             Value::String("café".into()),
             Value::String("東京".into())
         ])
@@ -167,9 +167,9 @@ fn regex_is_small_unicode_aware_and_uses_literal_replacements() {
     );
     assert_eq!(
         value(r#"Regex::findAll("é", "")"#),
-        Value::List(vec![Value::String("".into()), Value::String("".into())])
+        Value::list(vec![Value::String("".into()), Value::String("".into())])
     );
-    assert_eq!(value(r#"Regex::findAll("a", "z")"#), Value::List(vec![]));
+    assert_eq!(value(r#"Regex::findAll("a", "z")"#), Value::list(vec![]));
     let mut runtime = runtime(None);
     error(&mut runtime, "Regex::isMatch('x', '[');", "RegexError");
     error(
@@ -235,7 +235,7 @@ fn warm_regex_cache_preserves_list_boundary_and_error_locations() {
     .unwrap();
     assert_eq!(
         runtime.get_global("result"),
-        Some(&Value::List(vec![Value::String("x".into()); 2]))
+        Some(&Value::list(vec![Value::String("x".into()); 2]))
     );
     error(
         &mut runtime,
@@ -244,7 +244,7 @@ fn warm_regex_cache_preserves_list_boundary_and_error_locations() {
     );
     assert_eq!(
         runtime.get_global("result"),
-        Some(&Value::List(vec![Value::String("x".into()); 2]))
+        Some(&Value::list(vec![Value::String("x".into()); 2]))
     );
     run(
         &mut runtime,
@@ -320,13 +320,13 @@ fn graphemes_keep_skin_tones_flags_combining_accents_and_zwj_sequences_together(
 #[test]
 fn csv_roundtrips_multiline_quotes_empty_fields_and_custom_delimiters() {
     let mut runtime = runtime(None);
-    let rows = Value::List(vec![
-        Value::List(vec![
+    let rows = Value::list(vec![
+        Value::list(vec![
             Value::String("name".into()),
             Value::String("note".into()),
             Value::String("empty".into()),
         ]),
-        Value::List(vec![
+        Value::list(vec![
             Value::String("é,東京".into()),
             Value::String("a\r\nb \"quoted\"".into()),
             Value::String("".into()),
@@ -336,14 +336,14 @@ fn csv_roundtrips_multiline_quotes_empty_fields_and_custom_delimiters() {
     run(&mut runtime, r#"$encoded = Csv::encode($rows); $result = Csv::parse($encoded); $custom = Csv::parse(Csv::encode($rows, ["delimiter" => ";"]), ["delimiter" => ";"]);"#).unwrap();
     assert_eq!(runtime.get_global("result"), Some(&rows));
     assert_eq!(runtime.get_global("custom"), Some(&rows));
-    assert_eq!(value("Csv::parse('')"), Value::List(vec![]));
+    assert_eq!(value("Csv::parse('')"), Value::list(vec![]));
     assert_eq!(
         value(r#"Csv::parse("\r\n\n")"#),
-        Value::List(vec![Value::List(vec![Value::String("".into())]); 2])
+        Value::list(vec![Value::list(vec![Value::String("".into())]); 2])
     );
     assert_eq!(
         value("Csv::parse(Csv::encode([['']]))"),
-        Value::List(vec![Value::List(vec![Value::String("".into())])])
+        Value::list(vec![Value::list(vec![Value::String("".into())])])
     );
     assert_eq!(value("Csv::encode([])"), Value::String("".into()));
 }
@@ -391,7 +391,7 @@ fn csv_streams_multiline_records_close_aliases_and_close_on_failure() {
     run(&mut runtime, "$r = Csv::open($path); $alias = $r; $first = Csv::readRow($r); $second = Csv::readRow($r); $third = Csv::readRow($r); $eof = Csv::readRow($r); Csv::close($r); Csv::close($r); $closed = $alias->closed;").unwrap();
     assert_eq!(
         runtime.get_global("second"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::String("first\nsecond".into()),
             Value::String("x".into())
         ]))
@@ -416,7 +416,7 @@ fn regex_and_csv_preflight_expanding_output_budgets() {
     encoder
         .set_global(
             "rows",
-            Value::List(vec![Value::List(vec![Value::String(
+            Value::list(vec![Value::list(vec![Value::String(
                 "\"".repeat(5 * slot),
             )])]),
         )
@@ -643,13 +643,13 @@ fn csv_handles_initial_bom_without_stripping_bom_inside_fields() {
         run(&mut runtime, "$result = Csv::parse($text);").unwrap();
         assert_eq!(
             runtime.get_global("result"),
-            Some(&Value::List(vec![
-                Value::List(vec![Value::String("first".into())]),
-                Value::List(vec![Value::String("\u{feff}second".into())]),
+            Some(&Value::list(vec![
+                Value::list(vec![Value::String("first".into())]),
+                Value::list(vec![Value::String("\u{feff}second".into())]),
             ]))
         );
     }
-    let rows = Value::List(vec![Value::List(vec![Value::String(
+    let rows = Value::list(vec![Value::list(vec![Value::String(
         "\u{feff}field".into(),
     )])]);
     runtime.set_global("rows", rows.clone()).unwrap();
@@ -682,7 +682,7 @@ fn csv_exact_record_limits_stream_large_files_under_small_budgets() {
     assert_eq!(runtime.get_global("closed"), Some(&Value::Bool(true)));
     assert_eq!(
         value("Csv::parse('abc', ['maxRecordBytes' => 3])"),
-        Value::List(vec![Value::List(vec![Value::String("abc".into())])])
+        Value::list(vec![Value::list(vec![Value::String("abc".into())])])
     );
 }
 
@@ -854,7 +854,7 @@ fn csv_readers_cannot_cross_registrations() {
     .unwrap();
     assert_eq!(
         first.get_global("row"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::String("one".into()),
             Value::String("two".into())
         ]))
@@ -913,7 +913,7 @@ fn csv_reused_parser_obeys_exact_later_record_and_value_limits() {
         run(&mut runtime, "$r=Csv::open($path,['maxRecordBytes'=>$exact]);$a=Csv::readRow($r);$b=Csv::readRow($r);$c=Csv::readRow($r);$end=Csv::readRow($r);Csv::close($r);").unwrap();
         assert_eq!(
             runtime.get_global("b"),
-            Some(&Value::List(vec![Value::String("abc".into())]))
+            Some(&Value::list(vec![Value::String("abc".into())]))
         );
         assert_eq!(runtime.get_global("end"), Some(&Value::Null));
         run(
@@ -928,7 +928,7 @@ fn csv_reused_parser_obeys_exact_later_record_and_value_limits() {
         );
         assert_eq!(
             runtime.get_global("result"),
-            Some(&Value::List(vec![Value::String("x".into())]))
+            Some(&Value::list(vec![Value::String("x".into())]))
         );
         run(&mut runtime, "$closed=$r->closed;").unwrap();
         assert_eq!(runtime.get_global("closed"), Some(&Value::Bool(true)));
@@ -951,13 +951,13 @@ fn csv_reused_parser_obeys_exact_later_record_and_value_limits() {
                 run(&mut bounded, "$b=Csv::readRow($r);").unwrap();
                 assert_eq!(
                     bounded.get_global("b"),
-                    Some(&Value::List(vec![Value::String("abc".into())]))
+                    Some(&Value::list(vec![Value::String("abc".into())]))
                 );
             } else {
                 error(&mut bounded, "$b=Csv::readRow($r);", "ResourceLimitError");
                 assert_eq!(
                     bounded.get_global("b"),
-                    Some(&Value::List(vec![Value::String("x".into())]))
+                    Some(&Value::list(vec![Value::String("x".into())]))
                 );
                 run(&mut bounded, "$closed=$r->closed;").unwrap();
                 assert_eq!(bounded.get_global("closed"), Some(&Value::Bool(true)));

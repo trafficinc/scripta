@@ -19,7 +19,7 @@ enum ArgumentState {
 /// Keeping the argument alive prevents mutation of its owned collection data:
 /// ```compile_fail
 /// use scr_runtime::{InvocationArgument, Value};
-/// let mut value = Value::List(vec![Value::Int(1)]);
+/// let mut value = Value::list(vec![Value::Int(1)]);
 /// let argument = InvocationArgument::new(&value);
 /// value = Value::Null;
 /// drop(argument);

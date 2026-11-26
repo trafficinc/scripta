@@ -69,6 +69,15 @@ columns and retain defining sources and call sites across loads and callbacks.
 
 ## Runtime ownership and scopes
 
+Lists use a reference-counted storage wrapper with copy-on-write for plain data.
+The first clone classifies the tree without native hooks; subsequent plain-data
+clones share storage. Mutable Rust access detaches shared storage and invalidates
+that classification before exposing the vector. Trees containing bytes, objects
+or callables retain element cloning, preserving native handle counts and the
+collector's existing physical ownership edges. Maps still copy their entries;
+their nested plain-data lists can share. Logical value sizes count every value
+occurrence regardless of shared storage, and all existing value checks remain.
+
 `Runtime` owns an arena of lexical scopes. Functions retain declaration metadata,
 lexical scope and runtime identity. Collections have value semantics; objects
 and callables have identity semantics. See the [language specification](language-spec.md).

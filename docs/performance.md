@@ -32,11 +32,12 @@ existing specialized execution path.
 
 This build uses the AST evaluator with bounded runtime-local regex caching,
 direct method calls, discarded string-buffer reuse, lexical lookup/scope-storage
-reuse, guarded list-copy validation, bounded integer self-recursion plans,
+reuse, plain-data list copy-on-write, guarded list-copy validation,
+bounded integer self-recursion plans,
 compact instruction plans and guarded heap-backed calls for eligible scalar
 functions, adaptive field-read hints,
 and verified ordered-map position hints. General evaluation handles unsupported calls;
-the public Value representation and logical resource accounting remain unchanged. See
+logical resource accounting remains independent of physical sharing. See
 [runtime ownership and limits](architecture.md#execution-hot-paths-and-limits).
 
 Comprehensions reuse bounded uncaptured scope storage and share immutable binding

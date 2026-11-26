@@ -463,7 +463,7 @@ fn all_entries(context: &RuntimeContext<'_>, path: &Path) -> NativeResult<Value>
                 .collect(),
         ));
     }
-    Ok(Value::List(result))
+    Ok(Value::list(result))
 }
 
 #[derive(Clone, Copy)]

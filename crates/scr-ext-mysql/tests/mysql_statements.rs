@@ -410,7 +410,7 @@ fn default_protocol_limits_accept_one_mib_sql_and_cells_and_1024_parameters() {
         .set_global("sql", Value::String(format!("SELECT {}", fields.join(","))))
         .unwrap();
     f.runtime
-        .set_global("params", Value::List(vec![Value::Int(1); 1024]))
+        .set_global("params", Value::list(vec![Value::Int(1); 1024]))
         .unwrap();
     run(
         &mut f.runtime,

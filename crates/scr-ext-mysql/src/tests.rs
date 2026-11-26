@@ -91,13 +91,13 @@ fn dsn_and_options_are_strict_and_do_not_echo_untrusted_input() {
         "mysql:host=localhost;dbname=x;",
         "mysql:host=localhost;dbname=x\0",
     ] {
-        let error = parse(dsn, Value::List(vec![]), &policy).err().unwrap();
+        let error = parse(dsn, Value::list(vec![]), &policy).err().unwrap();
         assert_eq!(error.kind, "TypeError", "{dsn}");
         assert!(!error.message.contains("private-fixture-password"));
     }
     let config = parse(
         "mysql:host=LOCALHOST;dbname=test",
-        Value::List(vec![]),
+        Value::list(vec![]),
         &policy,
     )
     .unwrap();
@@ -158,7 +158,7 @@ fn destination_policy_and_host_ceilings_cannot_be_changed_by_scripts() {
     .unwrap();
     let config = parse(
         "mysql:host=localhost;dbname=test",
-        Value::List(vec![]),
+        Value::list(vec![]),
         &policy,
     )
     .unwrap();
@@ -168,7 +168,7 @@ fn destination_policy_and_host_ceilings_cannot_be_changed_by_scripts() {
         "mysql:host=127.0.0.1;dbname=test",
     ] {
         assert_eq!(
-            parse(dsn, Value::List(vec![]), &policy).err().unwrap().kind,
+            parse(dsn, Value::list(vec![]), &policy).err().unwrap().kind,
             "PermissionError"
         );
     }
@@ -301,7 +301,7 @@ fn cancelled_connections_keep_worker_slots_until_the_blocking_work_finishes() {
     let error = fails(
         &mut runtime,
         &dsn(peer.port),
-        Value::List(vec![]),
+        Value::list(vec![]),
         "Interrupted",
     );
     assert!(error.message.contains("interrupted"));
@@ -311,7 +311,7 @@ fn cancelled_connections_keep_worker_slots_until_the_blocking_work_finishes() {
     fails(
         &mut runtime,
         &dsn(peer.port),
-        Value::List(vec![]),
+        Value::list(vec![]),
         "DbLimitError",
     );
     drop(peer);
@@ -330,13 +330,13 @@ fn malformed_and_denied_requests_never_start_workers() {
     fails(
         &mut runtime,
         "mysql:host=localhost;dbname=x",
-        Value::List(vec![]),
+        Value::list(vec![]),
         "PermissionError",
     );
     fails(
         &mut runtime,
         "mysql:host=localhost;dbname=x;port=0",
-        Value::List(vec![]),
+        Value::list(vec![]),
         "TypeError",
     );
     assert_eq!(count.load(Ordering::Acquire), 0);
@@ -413,7 +413,7 @@ fn denied_filesystem_capability_and_connection_payload_fail_before_worker_alloca
     fails(
         &mut runtime,
         "mysql:host=127.0.0.1;dbname=fixture",
-        Value::List(vec![]),
+        Value::list(vec![]),
         "DbLimitError",
     );
     assert_eq!(count.load(Ordering::Acquire), 0);
@@ -425,7 +425,7 @@ fn refused_tcp_connections_report_safe_errors_and_release_worker_slots() {
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     let (mut runtime, count) = setup(MysqlOptions::default(), RuntimeOptions::default());
-    fails(&mut runtime, &dsn(port), Value::List(vec![]), "DbError");
+    fails(&mut runtime, &dsn(port), Value::list(vec![]), "DbError");
     drained(&count);
 }
 
@@ -440,7 +440,7 @@ fn untrusted_server_messages_cannot_echo_credentials_into_errors() {
     let error = fails(
         &mut runtime,
         &dsn(peer.port),
-        Value::List(vec![]),
+        Value::list(vec![]),
         "DbError",
     );
     assert!(error.message.contains("authentication"));

@@ -160,8 +160,8 @@ fn failed_writes_preserve_destinations_but_not_prior_rhs_side_effects() {
     assert_eq!(runtime.get_global("number"), Some(&Value::Int(i64::MAX)));
     assert_eq!(
         runtime.get_global("effects"),
-        Some(&Value::List(vec![
-            Value::List(vec![Value::Int(9)]),
+        Some(&Value::list(vec![
+            Value::list(vec![Value::Int(9)]),
             Value::Int(1),
             Value::Int(1)
         ]))

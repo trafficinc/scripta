@@ -85,7 +85,7 @@ fn literal_indices_keep_typed_keys_order_copies_duplicates_and_allocation_fallba
             let Some(Value::Map(a)) = fast.get_global("seen") else {
                 panic!()
             };
-            assert_eq!(a[2].1, Value::List(vec![Value::Int(2)]));
+            assert_eq!(a[2].1, Value::list(vec![Value::Int(2)]));
         }
     }
 }

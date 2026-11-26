@@ -12,7 +12,7 @@ fn compare(fast: &mut Runtime, slow: &mut Runtime, source: &str) {
 #[test]
 fn only_discarded_plain_variable_copies_use_specialized_validation() {
     let (mut fast, mut slow) = pair(RuntimeOptions::default());
-    let original = Value::List(vec![Value::Int(i64::MIN); 64]);
+    let original = Value::list(vec![Value::Int(i64::MIN); 64]);
     for runtime in [&mut fast, &mut slow] {
         runtime.set_global("source", original.clone()).unwrap();
     }
@@ -53,7 +53,7 @@ fn exact_copy_limits_preserve_errors_spans_and_failed_destinations() {
         let (mut fast, mut slow) = pair(RuntimeOptions::default());
         for runtime in [&mut fast, &mut slow] {
             runtime
-                .set_global("source", Value::List(vec![Value::Int(i64::MAX); 64]))
+                .set_global("source", Value::list(vec![Value::Int(i64::MAX); 64]))
                 .unwrap();
             runtime
                 .set_global("destination", Value::String("saved".into()))
@@ -80,7 +80,7 @@ fn copied_lists_invalidate_previous_map_hints_and_keep_name_slot_fallback() {
     let (mut fast, mut slow) = pair(RuntimeOptions::default());
     for runtime in [&mut fast, &mut slow] {
         runtime
-            .set_global("source", Value::List(vec![Value::Int(7); 64]))
+            .set_global("source", Value::list(vec![Value::Int(7); 64]))
             .unwrap();
         runtime
             .set_global(
@@ -133,7 +133,7 @@ impl NativeObject for Observed {
         }
         // Reentrant sizing must not share borrowed scratch or add handle owners.
         assert_eq!(
-            Value::List(vec![Value::Null; 64]).measure(0, None).unwrap(),
+            Value::list(vec![Value::Null; 64]).measure(0, None).unwrap(),
             65 * size_of::<Value>()
         );
         self.id
@@ -155,7 +155,7 @@ fn observed(
 fn check_measure(prefix: Value, events: &Rc<RefCell<Vec<(usize, usize)>>>) {
     let mut items = vec![prefix];
     items.extend(vec![Value::Bool(true); 48]);
-    let value = Value::List(items);
+    let value = Value::list(items);
     let Value::List(items) = &value else {
         unreachable!()
     };
@@ -184,7 +184,7 @@ fn specialized_prefix_matches_dynamic_payload_order_depth_and_error_precedence()
             (MapKey::Int(1), Value::NativeObject(a.clone())),
             (
                 MapKey::String("1".into()),
-                Value::List(vec![
+                Value::list(vec![
                     Value::NativeObject(b.clone()),
                     Value::String("é東京".into()),
                 ]),
@@ -205,10 +205,10 @@ fn specialized_prefix_matches_dynamic_payload_order_depth_and_error_precedence()
     check_measure(Value::NativeObject(huge), &events);
     let mut nested = Value::Null;
     for _ in 0..127 {
-        nested = Value::List(vec![nested]);
+        nested = Value::list(vec![nested]);
     }
     check_measure(nested.clone(), &events);
-    check_measure(Value::List(vec![nested]), &events);
+    check_measure(Value::list(vec![nested]), &events);
     assert_eq!(Rc::strong_count(&a), 1);
     assert_eq!(Rc::strong_count(&b), 1);
     assert!(copy_validation::validate(&vec![Value::Float(1.0); 64], None).is_none());
@@ -229,7 +229,7 @@ fn payload_cancellation_and_cleanup_match_the_ordinary_copy_path() {
         });
         let mut items = vec![Value::NativeObject(object.clone())];
         items.extend(vec![Value::Int(1); 63]);
-        runtime.set_global("source", Value::List(items)).unwrap();
+        runtime.set_global("source", Value::list(items)).unwrap();
         events.borrow_mut().clear();
         object.armed.set(true);
         states.push((runtime, events, object, weak));

@@ -104,7 +104,7 @@ fn list_growth_obeys_value_budgets_without_partial_mutation() {
         assert!(error.message.contains("byte limit"));
         assert_eq!(
             runtime.get_global("items"),
-            Some(&Value::List(vec![Value::Int(1), Value::Int(2)]))
+            Some(&Value::list(vec![Value::Int(1), Value::Int(2)]))
         );
     }
 }
@@ -119,7 +119,7 @@ fn list_append_obeys_nesting_limits_without_partial_mutation() {
     .unwrap();
     let error = run(&mut runtime, "$items[] = $nested;").unwrap_err();
     assert!(error.message.contains("nesting exceeds 128"));
-    assert_eq!(runtime.get_global("items"), Some(&Value::List(vec![])));
+    assert_eq!(runtime.get_global("items"), Some(&Value::list(vec![])));
 }
 
 #[test]

@@ -86,7 +86,7 @@ pub(crate) fn convert(
 ) -> NativeResult {
     if rows.is_empty() {
         return match selection {
-            Selection::All => Ok(Value::List(Vec::new())),
+            Selection::All => Ok(Value::list(Vec::new())),
             Selection::Row => Ok(Value::Null),
             Selection::Column(_) => Err(NativeError::new(
                 "DbEndOfResultsError",
@@ -150,5 +150,5 @@ pub(crate) fn convert(
         }
         output.push(row);
     }
-    Ok(Value::List(output))
+    Ok(Value::list(output))
 }

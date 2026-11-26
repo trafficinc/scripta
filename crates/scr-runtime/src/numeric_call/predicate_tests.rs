@@ -122,7 +122,7 @@ fn predicate_callbacks_use_the_public_bridge_and_keep_annotation_failures() {
                         for item in items {
                             out.push(context.invoke_owned(args[0].clone(), [item.clone()])?);
                         }
-                        Ok(Value::List(out))
+                        Ok(Value::list(out))
                     },
                 ),
             )
@@ -138,7 +138,7 @@ fn predicate_callbacks_use_the_public_bridge_and_keep_annotation_failures() {
     assert_eq!(fast.numeric_setup_elisions, 3);
     assert_eq!(
         fast.get_global("seen"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::Bool(false),
             Value::Bool(true),
             Value::Bool(false),

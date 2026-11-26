@@ -437,6 +437,13 @@ include paths and limits.
 
 ## Calling script callbacks from a native function
 
+Construct list results with `Value::list(vec![...])`, or use
+`Value::List(values.into())` when starting from a `Vec<Value>`. The enum payload
+is `scr_runtime::List`, which supports vector access and iteration; mutable access
+preserves independent value semantics by detaching shared plain-data storage.
+Use `list.into_vec()` to recover an owned vector. Objects, callables and byte
+handles anywhere in the list tree retain element cloning and handle identity.
+
 Use `NativeFunction::reentrant(signature, callback)` when a native implementation
 must call a script callable. The callback receives `InvocationContext` and its
 validated arguments. Call `context.invoke(value, arguments)` and return its

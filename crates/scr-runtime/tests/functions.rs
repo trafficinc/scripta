@@ -67,37 +67,37 @@ fn mutable_defaults_and_variadic_arguments_have_independent_values() {
     .unwrap();
     assert_eq!(
         runtime.get_global("first"),
-        Some(&Value::List(vec![ints(&[1, 2])]))
+        Some(&Value::list(vec![ints(&[1, 2])]))
     );
     assert_eq!(runtime.get_global("second"), runtime.get_global("first"));
     assert_eq!(
         runtime.get_global("original"),
-        Some(&Value::List(vec![ints(&[9])]))
+        Some(&Value::list(vec![ints(&[9])]))
     );
     assert_eq!(
         runtime.get_global("copy"),
-        Some(&Value::List(vec![ints(&[9, 2])]))
+        Some(&Value::list(vec![ints(&[9, 2])]))
     );
     assert_eq!(runtime.get_global("source"), Some(&ints(&[1])));
     assert_eq!(
         runtime.get_global("extras"),
-        Some(&Value::List(vec![ints(&[1, 2])]))
+        Some(&Value::list(vec![ints(&[1, 2])]))
     );
     assert_eq!(
         runtime.get_global("empty"),
-        Some(&Value::List(vec![Value::Int(9), ints(&[])]))
+        Some(&Value::list(vec![Value::Int(9), ints(&[])]))
     );
     assert_eq!(
         runtime.get_global("many"),
-        Some(&Value::List(vec![Value::Int(1), ints(&[2, 3])]))
+        Some(&Value::list(vec![Value::Int(1), ints(&[2, 3])]))
     );
     assert_eq!(
         runtime.get_global("noExtras"),
-        Some(&Value::List(vec![Value::Int(1), ints(&[])]))
+        Some(&Value::list(vec![Value::Int(1), ints(&[])]))
     );
     assert_eq!(
         runtime.get_global("all"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::Int(1),
             Value::String("two".into()),
             Value::Null

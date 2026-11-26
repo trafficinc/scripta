@@ -42,7 +42,7 @@ fn configured_runtime(
     runtime
         .set_global(
             "arguments",
-            Value::List(
+            Value::list(
                 ["--exact", "child_fixture", "--nocapture"]
                     .map(|value| Value::String(value.into()))
                     .to_vec(),
@@ -822,7 +822,7 @@ fn exact_output_and_logical_value_budgets_charge_results_and_completed_handles()
                     panic!()
                 };
                 assert_eq!(object.payload_bytes(), 4096);
-                assert!(rt.set_global("nested", Value::List(vec![value])).is_err());
+                assert!(rt.set_global("nested", Value::list(vec![value])).is_err());
             }
         }
     }

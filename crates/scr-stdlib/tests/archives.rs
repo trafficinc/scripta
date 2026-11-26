@@ -76,7 +76,7 @@ fn get16(data: &[u8], offset: usize) -> usize {
 fn zip_tar_roundtrips_preserve_binary_empty_files_directories_order_and_unicode() {
     let dir = tempfile::tempdir().unwrap();
     let mut rt = runtime(dir.path(), FilesystemPolicy::default());
-    let entries = Value::List(vec![
+    let entries = Value::list(vec![
         entry("z/世界.bin", Some(&[0, 255, 1, 0])),
         entry("empty", None),
         entry("z", None),
@@ -128,7 +128,7 @@ fn empty_archives_and_gzip_binary_concatenation_roundtrip() {
             &mut rt,
             &format!("$empty={format}::decode({format}::encode([]));"),
         );
-        assert_eq!(rt.get_global("empty"), Some(&Value::List(vec![])));
+        assert_eq!(rt.get_global("empty"), Some(&Value::list(vec![])));
     }
     rt.set_global("data", binary(&[0, 255, 0, 195, 169]))
         .unwrap();
@@ -160,7 +160,7 @@ fn empty_archives_and_gzip_binary_concatenation_roundtrip() {
 fn output_and_input_budgets_count_exact_bytes_and_one_beyond() {
     let dir = tempfile::tempdir().unwrap();
     let mut rt = runtime(dir.path(), FilesystemPolicy::default());
-    rt.set_global("entries", Value::List(vec![entry("a", Some(b"abc"))]))
+    rt.set_global("entries", Value::list(vec![entry("a", Some(b"abc"))]))
         .unwrap();
     rt.set_global("data", binary(b"abc")).unwrap();
     for format in ["Zip", "Tar"] {
@@ -229,7 +229,7 @@ fn output_and_input_budgets_count_exact_bytes_and_one_beyond() {
 fn counts_names_depth_and_options_are_strict() {
     let dir = tempfile::tempdir().unwrap();
     let mut rt = runtime(dir.path(), FilesystemPolicy::default());
-    rt.set_global("entries", Value::List(vec![entry("a/b", Some(b"x"))]))
+    rt.set_global("entries", Value::list(vec![entry("a/b", Some(b"x"))]))
         .unwrap();
     for format in ["Zip", "Tar"] {
         run(
@@ -305,7 +305,7 @@ fn unsafe_paths_are_rejected_for_creation_decode_and_before_extracting() {
         "bad\0x",
         "bad\nx",
     ] {
-        rt.set_global("entries", Value::List(vec![entry(path, Some(b"data"))]))
+        rt.set_global("entries", Value::list(vec![entry(path, Some(b"data"))]))
             .unwrap();
         for format in ["Zip", "Tar"] {
             error(
@@ -554,7 +554,7 @@ fn expansion_budgets_stop_compressed_bombs_and_reject_false_sizes() {
     rt.set_global("data", binary(&vec![0; 256 * 1024])).unwrap();
     rt.set_global(
         "entries",
-        Value::List(vec![entry("a", Some(&vec![0; 256 * 1024]))]),
+        Value::list(vec![entry("a", Some(&vec![0; 256 * 1024]))]),
     )
     .unwrap();
     run(
@@ -696,9 +696,9 @@ fn zip_ignores_alternative_footer_candidates_in_comments_and_requires_deflate_en
     run(&mut rt, "$rows=Zip::decode($archive,['maxEntries'=>1]);");
     assert_eq!(
         rt.get_global("rows"),
-        Some(&Value::List(vec![entry("a", Some(b"abc"))]))
+        Some(&Value::list(vec![entry("a", Some(b"abc"))]))
     );
-    rt.set_global("entries", Value::List(vec![entry("a", Some(b"payload"))]))
+    rt.set_global("entries", Value::list(vec![entry("a", Some(b"payload"))]))
         .unwrap();
     run(&mut rt, "$archive=Zip::encode($entries);");
     let mut trailing = bytes(&rt, "archive");

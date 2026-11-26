@@ -167,8 +167,8 @@ fn directory_creation_listing_collisions_and_safe_removal() {
     "#,
     )
     .unwrap();
-    assert_eq!(runtime.get_global("empty"), Some(&Value::List(vec![])));
-    assert_eq!(runtime.get_global("emptyDirs"), Some(&Value::List(vec![])));
+    assert_eq!(runtime.get_global("empty"), Some(&Value::list(vec![])));
+    assert_eq!(runtime.get_global("emptyDirs"), Some(&Value::list(vec![])));
     assert_eq!(runtime.get_global("fileIsDir"), Some(&Value::Bool(false)));
     assert_eq!(runtime.get_global("dirIsFile"), Some(&Value::Bool(false)));
     let Value::List(files) = runtime.get_global("files").unwrap() else {

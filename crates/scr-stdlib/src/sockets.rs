@@ -651,7 +651,7 @@ fn poll_handles(
                 result.push(value.clone())
             }
         }
-        results.push(Value::List(result));
+        results.push(Value::list(result));
     }
     Ok(Value::Map(vec![
         (MapKey::String("readable".into()), results.remove(0)),

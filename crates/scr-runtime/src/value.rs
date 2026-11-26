@@ -144,7 +144,7 @@ pub enum Value {
     String(String),
     /// Immutable arbitrary bytes, with content equality and cheap clones.
     Bytes(Rc<[u8]>),
-    List(Vec<Value>),
+    List(crate::List),
     /// Ordered entries with unique, strictly typed keys.
     Map(Vec<(MapKey, Value)>),
     NativeObject(Rc<dyn NativeObject>),
@@ -177,6 +177,12 @@ impl PartialEq for Value {
 }
 
 impl Value {
+    /// Construct a list from an owned vector. Mutable access to its public
+    /// List payload preserves independent value semantics.
+    pub fn list(values: Vec<Value>) -> Self {
+        Self::List(values.into())
+    }
+
     /// Construct a native callable for object methods without a global registration.
     pub fn native_function(name: impl Into<String>, function: NativeFunction) -> Self {
         Self::Callable(Callable(Rc::new(Function::Native {

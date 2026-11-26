@@ -497,7 +497,7 @@ fn response_headers(context: &RuntimeContext<'_>, source: &http::HeaderMap) -> N
             grow(context, &mut size, size_of::<Value>() + value.len())?;
             values.push(Value::String(value.into()));
         }
-        headers.push((MapKey::String(key.as_str().into()), Value::List(values)));
+        headers.push((MapKey::String(key.as_str().into()), Value::list(values)));
     }
     Ok(Value::Map(headers))
 }
@@ -724,7 +724,7 @@ pub(crate) fn open_stream(
             grow(context, &mut cost, size_of::<Value>() + value.len())?;
             values.push(Value::String(value.into()));
         }
-        headers.push((MapKey::String(key.as_str().into()), Value::List(values)));
+        headers.push((MapKey::String(key.as_str().into()), Value::list(values)));
     }
     grow(context, &mut cost, size_of::<Value>())?;
     let (_, body) = response.into_parts();

@@ -101,7 +101,7 @@ fn split(context: &RuntimeContext<'_>, input: &str, separator: &str) -> NativeRe
             .map_err(|_| resource("split result allocation failed"))?;
         fields.push(owned(context, field)?);
     }
-    Ok(Value::List(fields))
+    Ok(Value::list(fields))
 }
 
 fn join(context: &RuntimeContext<'_>, values: &Value, separator: &str) -> NativeResult {
@@ -350,13 +350,13 @@ mod tests {
             (slot, Box::new(|c| owned(c, ""))),
             (4 * slot + 2, Box::new(|c| split(c, "a,,b", ","))),
             (2 * slot, Box::new(|c| split(c, "", ","))),
-            (slot, Box::new(|c| join(c, &Value::List(vec![]), ","))),
+            (slot, Box::new(|c| join(c, &Value::list(vec![]), ","))),
             (
                 slot + 6,
                 Box::new(|c| {
                     join(
                         c,
-                        &Value::List(vec![Value::String("a".into()), Value::String("b".into())]),
+                        &Value::list(vec![Value::String("a".into()), Value::String("b".into())]),
                         "🦀",
                     )
                 }),
@@ -412,7 +412,7 @@ mod tests {
                 format(context, "{}", &[Value::Int(1)]),
                 format(context, "", &[]),
                 split(context, "a,b", ","),
-                join(context, &Value::List(vec![Value::String("a".into())]), ","),
+                join(context, &Value::list(vec![Value::String("a".into())]), ","),
                 replace(context, "aaa", "a", "b"),
                 case(context, "abc", false),
                 case(context, "abc", true),

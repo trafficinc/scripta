@@ -66,14 +66,14 @@ fn eager_list_helpers_reuse_named_native_and_captured_functions() {
         ("total", Value::Int(11)),
         (
             "trimmed",
-            Value::List(vec![Value::String("a".into()), Value::String("b".into())]),
+            Value::list(vec![Value::String("a".into()), Value::String("b".into())]),
         ),
     ] {
         assert_eq!(rt.get_global(name), Some(&value), "{name}");
     }
     assert_eq!(
         rt.get_global("nativeStrings"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::String("1".into()),
             Value::String("2".into())
         ]))
@@ -93,7 +93,7 @@ fn eager_list_helpers_reuse_named_native_and_captured_functions() {
     assert_eq!(rt.get_global("afterCollection"), Some(&ints(&[0, 511])));
     assert_eq!(
         rt.get_global("nested"),
-        Some(&Value::List(vec![ints(&[1, 9]), ints(&[2, 9])]))
+        Some(&Value::list(vec![ints(&[1, 9]), ints(&[2, 9])]))
     );
     assert_eq!(
         rt.get_global("empty"),
@@ -162,7 +162,7 @@ fn map_callbacks_keep_typed_keys_order_nulls_and_empty_map_identity() {
     );
     assert_eq!(
         rt.get_global("keys"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::Int(1),
             Value::String("1".into()),
             Value::String("last".into())
@@ -200,7 +200,7 @@ fn sort_by_computes_keys_once_in_input_order_and_preserves_ties_both_directions(
     assert_eq!(rt.get_global("words"), Some(&strings(&["A", "a", "b"])));
     rt.set_global(
         "zeros",
-        Value::List(vec![Value::Float(-0.0), Value::Float(0.0)]),
+        Value::list(vec![Value::Float(-0.0), Value::Float(0.0)]),
     )
     .unwrap();
     let Value::List(zeros) = evaluate(
@@ -230,13 +230,13 @@ fn comparator_sort_is_stable_uses_integer_sign_and_handles_inconsistent_order_wi
     assert_eq!(rt.get_global("permutation"), rt.get_global("numbers"));
     assert_eq!(
         rt.get_global("sorted"),
-        Some(&Value::List(
+        Some(&Value::list(
             ["b", "a", "c"].map(|s| Value::String(s.into())).to_vec()
         ))
     );
     assert_eq!(
         rt.get_global("descending"),
-        Some(&Value::List(
+        Some(&Value::list(
             ["a", "c", "b"].map(|s| Value::String(s.into())).to_vec()
         ))
     );
@@ -255,7 +255,7 @@ fn empty_singleton_and_callback_type_contracts_are_explicit() {
     }
     assert_eq!(
         evaluate(&mut rt, "List::sortWith([null],function(){throw 1;})"),
-        Value::List(vec![Value::Null])
+        Value::list(vec![Value::Null])
     );
     for expression in [
         "List::map([],1)",
@@ -300,7 +300,7 @@ fn snapshots_reentrancy_and_shared_object_side_effects_follow_existing_value_sem
     );
     assert_eq!(
         rt.get_global("snapshot"),
-        Some(&Value::List(vec![ints(&[99]), ints(&[2, 4, 6])]))
+        Some(&Value::list(vec![ints(&[99]), ints(&[2, 4, 6])]))
     );
     assert_eq!(rt.get_global("nested"), Some(&ints(&[6, 6])));
     assert_eq!(rt.get_global("shared"), Some(&Value::Int(7)));
@@ -352,7 +352,7 @@ fn exact_output_key_cache_and_depth_limits_fail_without_partial_assignments() {
         } else {
             assert_eq!(
                 evaluate(&mut rt, &expression),
-                Value::List(vec![
+                Value::list(vec![
                     Value::String(text.clone()),
                     Value::String(text.clone())
                 ])
@@ -368,7 +368,7 @@ fn exact_output_key_cache_and_depth_limits_fail_without_partial_assignments() {
     let mut rt = runtime(Default::default());
     let mut deep = Value::Int(1);
     for _ in 0..128 {
-        deep = Value::List(vec![deep]);
+        deep = Value::list(vec![deep]);
     }
     rt.register(
         "Test::deep",
@@ -579,7 +579,7 @@ fn owned_callback_arguments_keep_nested_snapshots_and_seed_values() {
     );
     assert_eq!(
         rt.get_global("recorded"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             ints(&[1]),
             ints(&[2]),
             ints(&[1, 9]),

@@ -383,7 +383,7 @@ fn interruption_from_last_native_payload_keeps_the_completed_assignment() {
 #[test]
 fn depth_bounds_and_binary_unicode_payloads_preserve_accounting() {
     fn nested(depth: usize) -> Value {
-        (0..depth).fold(Value::Int(1), |value, _| Value::List(vec![value]))
+        (0..depth).fold(Value::Int(1), |value, _| Value::list(vec![value]))
     }
     for depth in [127, 128] {
         let (mut fast, mut slow) = pair(RuntimeOptions::default());

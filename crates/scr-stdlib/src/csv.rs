@@ -201,7 +201,7 @@ impl<R: BufRead> Records<R> {
                 .map_err(|_| resource("CSV field allocation failed"))?;
             values.push(Value::String(field.into()));
         }
-        Ok(Some(Value::List(values)))
+        Ok(Some(Value::list(values)))
     }
 }
 #[derive(Debug)]
@@ -292,7 +292,7 @@ pub(crate) fn register(runtime: &mut Runtime, policy: FilesystemPolicy) -> Nativ
                         .map_err(|_| resource("CSV row allocation failed"))?;
                     rows.push(row);
                 }
-                Ok(Value::List(rows))
+                Ok(Value::list(rows))
             },
         ),
     )?;
@@ -490,13 +490,13 @@ mod tests {
             let mut reader = records(Cursor::new(format!("{large}\nsmall\n\nlast")));
             assert_eq!(
                 reader.next(context).unwrap(),
-                Some(Value::List(vec![Value::String(large)]))
+                Some(Value::list(vec![Value::String(large)]))
             );
             assert_no_record_retained(&mut reader);
             for expected in ["small", "", "last"] {
                 assert_eq!(
                     reader.next(context).unwrap(),
-                    Some(Value::List(vec![Value::String(expected.into())]))
+                    Some(Value::list(vec![Value::String(expected.into())]))
                 );
                 assert_no_record_retained(&mut reader);
             }
@@ -517,7 +517,7 @@ mod tests {
             assert_no_record_retained(&mut reader);
             assert_eq!(
                 reader.next(context).unwrap(),
-                Some(Value::List(vec![Value::String("last".into())]))
+                Some(Value::list(vec![Value::String("last".into())]))
             );
             assert_no_record_retained(&mut reader);
         });

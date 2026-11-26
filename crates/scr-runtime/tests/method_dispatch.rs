@@ -129,8 +129,8 @@ fn native_properties_and_effectful_receivers_are_evaluated_once_before_arguments
     .unwrap();
     assert_eq!(
         runtime.get_global("order"),
-        Some(&Value::List(vec![
-            Value::List(vec![Value::Int(7); 2]),
+        Some(&Value::list(vec![
+            Value::list(vec![Value::Int(7); 2]),
             Value::Int(7),
             Value::List([1, 2, 2, 1, 2, 4].map(Value::Int).into()),
         ]))
@@ -348,7 +348,7 @@ fn direct_and_bound_calls_preserve_instruction_and_exact_value_budgets() {
                 outcome.unwrap();
                 assert_eq!(
                     runtime.get_global("result"),
-                    Some(&Value::List(vec![Value::Int(1), Value::Int(2)]))
+                    Some(&Value::list(vec![Value::Int(1), Value::Int(2)]))
                 );
             }
         }

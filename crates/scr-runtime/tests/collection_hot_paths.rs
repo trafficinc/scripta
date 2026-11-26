@@ -36,7 +36,7 @@ fn indexed_maps_preserve_order_typed_keys_nested_copies_and_handle_identity() {
     let Value::Map(mut entries) = map(0) else {
         unreachable!()
     };
-    entries[0].1 = Value::List(vec![Value::List(vec![Value::Int(1)])]);
+    entries[0].1 = Value::list(vec![Value::list(vec![Value::Int(1)])]);
     entries[1].1 = Value::NativeObject(Rc::new(Probe));
     entries[2].1 = Value::native_function(
         "identity",
@@ -62,11 +62,11 @@ fn indexed_maps_preserve_order_typed_keys_nested_copies_and_handle_identity() {
     .unwrap();
     assert_eq!(
         runtime.get_global("old"),
-        Some(&Value::List(vec![Value::Int(1)]))
+        Some(&Value::list(vec![Value::Int(1)]))
     );
     assert_eq!(
         runtime.get_global("new"),
-        Some(&Value::List(vec![Value::Int(1), Value::Int(2)]))
+        Some(&Value::list(vec![Value::Int(1), Value::Int(2)]))
     );
     assert_eq!(
         runtime.get_global("text"),

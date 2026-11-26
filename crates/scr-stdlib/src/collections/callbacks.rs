@@ -118,7 +118,7 @@ fn list_transform(
             result.push(value);
         }
     }
-    let result = Value::List(result);
+    let result = Value::list(result);
     measure(context, &result, 0)?;
     Ok(result)
 }
@@ -388,7 +388,7 @@ fn sort(context: &mut InvocationContext<'_>, args: &[Value], by_key: bool) -> In
         context.checkpoint()?;
         output.push(items[index].clone());
     }
-    Ok(Value::List(output))
+    Ok(Value::list(output))
 }
 pub(super) fn register(runtime: &mut Runtime) -> NativeResult<()> {
     use NativeType::{Any, Bool, Callable, List, Map};

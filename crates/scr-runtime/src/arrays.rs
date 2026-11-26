@@ -228,7 +228,7 @@ impl Runtime {
             self.push_array_value(&mut result, items[at as usize].clone(), &mut bytes, span)?;
             at += step;
         }
-        let result = Value::List(result);
+        let result = Value::list(result);
         self.validate_value(&result, 0, span)?;
         Ok(result)
     }
@@ -295,7 +295,7 @@ impl Runtime {
                     self.environments.leave_empty(previous);
                     result?;
                 }
-                let result = Value::List(values);
+                let result = Value::list(values);
                 self.validate_value(&result, 0, span)?;
                 return Ok(result);
             }
@@ -333,7 +333,7 @@ impl Runtime {
             self.environments.leave_parameter(previous);
             result?;
         }
-        let value = Value::List(values);
+        let value = Value::list(values);
         self.validate_value(&value, 0, span)?;
         Ok(value)
     }
@@ -392,7 +392,7 @@ impl Runtime {
         }
         let mut replacements = items[..fixed].to_vec();
         if rest {
-            replacements.push(Value::List(items[fixed..].to_vec()));
+            replacements.push(Value::list(items[fixed..].to_vec()));
         }
         for replacement in &replacements {
             self.validate_value(replacement, 0, span)?;

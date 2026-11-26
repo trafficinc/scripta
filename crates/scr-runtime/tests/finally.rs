@@ -52,7 +52,7 @@ fn return_values_are_preserved_and_cleanup_can_replace_control_flow() {
     assert_eq!(output, "ab");
     assert_eq!(
         runtime.get_global("original"),
-        Some(&Value::List(vec![Value::Int(1)]))
+        Some(&Value::list(vec![Value::Int(1)]))
     );
     assert_eq!(runtime.get_global("replaced"), Some(&Value::Int(2)));
     assert_eq!(runtime.get_global("suppressed"), Some(&Value::Int(3)));

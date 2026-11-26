@@ -142,7 +142,7 @@ fn register_owned_bridge(runtime: &mut Runtime) {
 }
 
 #[test]
-fn owned_invocation_moves_collection_storage_and_borrowed_invocation_copies_it() {
+fn owned_invocation_moves_opaque_list_storage_and_borrowed_invocation_copies_it() {
     use std::{cell::Cell, rc::Rc};
     for owned in [false, true] {
         let pointer = Rc::new(Cell::new(0));
@@ -158,7 +158,10 @@ fn owned_invocation_moves_collection_storage_and_borrowed_invocation_copies_it()
                             unreachable!()
                         };
                         assert_eq!(items.as_ptr() as usize == expected.get(), owned);
-                        assert_eq!(items, &[Value::Int(7), Value::Int(9)]);
+                        assert_eq!(
+                            items,
+                            &[Value::Bytes(Rc::from(&b"data"[..])), Value::Int(9)]
+                        );
                         Ok(Value::Int(42))
                     },
                 ),
@@ -171,12 +174,12 @@ fn owned_invocation_moves_collection_storage_and_borrowed_invocation_copies_it()
                 NativeFunction::reentrant(
                     NativeSignature::new(vec![], NativeType::Any),
                     move |context, _| {
-                        let items = vec![Value::Int(7), Value::Int(9)];
+                        let items = vec![Value::Bytes(Rc::from(&b"data"[..])), Value::Int(9)];
                         pointer.set(items.as_ptr() as usize);
                         if owned {
-                            context.invoke_owned(callee.clone(), [Value::List(items)])
+                            context.invoke_owned(callee.clone(), [Value::list(items)])
                         } else {
-                            context.invoke(callee.clone(), &[Value::List(items)])
+                            context.invoke(callee.clone(), &[Value::list(items)])
                         }
                     },
                 ),
@@ -215,11 +218,11 @@ fn owned_invocation_preserves_arity_snapshots_reentrancy_and_control_flow() {
         .unwrap();
     assert_eq!(
         runtime.get_global("input"),
-        Some(&Value::List(vec![Value::List(vec![Value::Int(1)])]))
+        Some(&Value::list(vec![Value::list(vec![Value::Int(1)])]))
     );
     assert_eq!(
         runtime.get_global("changed"),
-        Some(&Value::List(vec![Value::List(vec![
+        Some(&Value::list(vec![Value::list(vec![
             Value::Int(1),
             Value::Int(2)
         ])]))
@@ -263,7 +266,7 @@ fn owned_invocation_keeps_validation_limits_and_foreign_owner_checks() {
     let mut cases = Vec::new();
     for limit in [exact - 1, exact, exact + 1] {
         cases.push((
-            Value::List(vec![Value::String(text.clone())]),
+            Value::list(vec![Value::String(text.clone())]),
             Some(limit),
             limit >= exact,
         ));
@@ -279,7 +282,7 @@ fn owned_invocation_keeps_validation_limits_and_foreign_owner_checks() {
     ));
     let mut deep = Value::Int(1);
     for _ in 0..129 {
-        deep = Value::List(vec![deep]);
+        deep = Value::list(vec![deep]);
     }
     cases.push((deep, None, false));
     for (value, limit, success) in cases {

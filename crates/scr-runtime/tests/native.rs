@@ -176,7 +176,7 @@ fn native_return_contracts_and_host_values_are_validated() {
         (NativeType::Float, Value::Float(f64::INFINITY), "finite"),
         (
             NativeType::List,
-            Value::List(vec![Value::Float(f64::NAN)]),
+            Value::list(vec![Value::Float(f64::NAN)]),
             "finite",
         ),
         (
@@ -221,7 +221,7 @@ impl NativeObject for ReadOnly {
     fn get_property(&self, name: &str) -> Result<Value, String> {
         match name {
             "code" => Ok(Value::Int(7)),
-            "items" => Ok(Value::List(vec![Value::Int(1)])),
+            "items" => Ok(Value::list(vec![Value::Int(1)])),
             _ => Err(format!("unknown property {name}")),
         }
     }

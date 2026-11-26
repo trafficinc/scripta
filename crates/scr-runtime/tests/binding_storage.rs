@@ -145,7 +145,7 @@ fn reentrant_callbacks_keep_resolved_targets_and_lexical_updates() {
     .unwrap();
     assert_eq!(
         runtime.get_global("result"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::String("new".into()),
             Value::String("changed".into())
         ]))

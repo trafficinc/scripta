@@ -474,7 +474,7 @@ mod tests {
             (NativeType::Int, Value::Int(0)),
             (NativeType::Float, Value::Float(0.0)),
             (NativeType::String, Value::String(String::new())),
-            (NativeType::List, Value::List(vec![])),
+            (NativeType::List, Value::list(vec![])),
             (NativeType::Map, Value::Map(vec![])),
         ] {
             assert!(ty.accepts(&value));
@@ -540,7 +540,7 @@ mod optional_tests {
             signature
                 .validate(
                     "process",
-                    &[Value::String("exe".into()), Value::List(vec![])]
+                    &[Value::String("exe".into()), Value::list(vec![])]
                 )
                 .is_ok()
         );
@@ -550,7 +550,7 @@ mod optional_tests {
                     "process",
                     &[
                         Value::String("exe".into()),
-                        Value::List(vec![]),
+                        Value::list(vec![]),
                         Value::Map(vec![])
                     ]
                 )
@@ -561,7 +561,7 @@ mod optional_tests {
             vec![Value::String("exe".into()), Value::Int(1)],
             vec![
                 Value::String("exe".into()),
-                Value::List(vec![]),
+                Value::list(vec![]),
                 Value::Map(vec![]),
                 Value::Null,
             ],

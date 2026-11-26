@@ -63,7 +63,7 @@ fn request_data_preserves_duplicates_encoded_paths_and_strict_types() {
     );
     assert_eq!(
         runtime.get_global("headers"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::String("first".into()),
             Value::String("second".into())
         ]))
@@ -72,11 +72,11 @@ fn request_data_preserves_duplicates_encoded_paths_and_strict_types() {
     assert_eq!(runtime.get_global("n"), Some(&Value::Int(1)));
     assert_eq!(
         runtime.get_global("query"),
-        Some(&Value::List(vec![
-            Value::List(vec![Value::String("a".into()), Value::String("1".into())]),
-            Value::List(vec![Value::String("a".into()), Value::String("2".into())]),
-            Value::List(vec![Value::String("x".into()), Value::String("a b".into())]),
-            Value::List(vec![Value::String("1".into()), Value::String("v".into())])
+        Some(&Value::list(vec![
+            Value::list(vec![Value::String("a".into()), Value::String("1".into())]),
+            Value::list(vec![Value::String("a".into()), Value::String("2".into())]),
+            Value::list(vec![Value::String("x".into()), Value::String("a b".into())]),
+            Value::list(vec![Value::String("1".into()), Value::String("v".into())])
         ]))
     );
     assert!(

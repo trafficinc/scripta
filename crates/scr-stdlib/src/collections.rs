@@ -85,7 +85,7 @@ fn list_result<'a>(
         context.check_cancelled()?;
         result.push(value.clone());
     }
-    Ok(Value::List(result))
+    Ok(Value::list(result))
 }
 
 fn map_result<'a>(
@@ -282,7 +282,7 @@ fn map_call(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> NativeR
                     MapKey::String(v) => Value::String(v.clone()),
                 });
             }
-            Ok(Value::List(result))
+            Ok(Value::list(result))
         }
         "remove" => map_result(
             context,
@@ -382,7 +382,7 @@ impl Output<'_> {
                 for value in values {
                     result.push(value.copy(context)?);
                 }
-                Value::List(result)
+                Value::list(result)
             }
             Self::Map(entries) => {
                 let mut result = Vec::new();
@@ -962,7 +962,7 @@ mod tests {
                 "List",
                 "slice",
                 vec![
-                    Value::List(vec![Value::Int(1), Value::String("é".into())]),
+                    Value::list(vec![Value::Int(1), Value::String("é".into())]),
                     Value::Int(1),
                 ],
                 2 * slot + 2,
@@ -1046,7 +1046,7 @@ mod tests {
             (MapKey::Int(1), Value::String("é".into())),
             (MapKey::String("1".into()), Value::Null),
         ]);
-        let rows = Value::List(vec![Value::Map(vec![
+        let rows = Value::list(vec![Value::Map(vec![
             (MapKey::String("id".into()), Value::String("é".into())),
             (MapKey::String("v".into()), ints(&[1, 2])),
         ])]);
@@ -1057,12 +1057,12 @@ mod tests {
             (
                 false,
                 "pop",
-                vec![Value::List(vec![ints(&[1]), Value::Null])],
+                vec![Value::list(vec![ints(&[1]), Value::Null])],
             ),
             (
                 false,
                 "shift",
-                vec![Value::List(vec![ints(&[1]), Value::Null])],
+                vec![Value::list(vec![ints(&[1]), Value::Null])],
             ),
             (
                 false,
@@ -1084,7 +1084,7 @@ mod tests {
             (
                 false,
                 "unique",
-                vec![Value::List(vec![sample.clone(), sample.clone()])],
+                vec![Value::list(vec![sample.clone(), sample.clone()])],
             ),
             (false, "sum", vec![ints(&[1, 2])]),
             (false, "product", vec![ints(&[1, 2])]),
@@ -1098,7 +1098,7 @@ mod tests {
                 "combine",
                 vec![
                     ints(&[1, 1]),
-                    Value::List(vec![text("overwritten"), Value::Null]),
+                    Value::list(vec![text("overwritten"), Value::Null]),
                 ],
             ),
             (
@@ -1166,7 +1166,7 @@ mod tests {
         for (name, args) in [
             (
                 "combine",
-                vec![ints(&[1, 1]), Value::List(vec![large.clone(), Value::Null])],
+                vec![ints(&[1, 1]), Value::list(vec![large.clone(), Value::Null])],
             ),
             ("column", vec![rows, field, index]),
             (
@@ -1246,14 +1246,14 @@ mod tests {
         with_context(None, |context| {
             let mut nested = Value::Int(1);
             for _ in 0..127 {
-                nested = Value::List(vec![nested]);
+                nested = Value::list(vec![nested]);
             }
             assert!(list_extra("fill", context, &[Value::Int(1), nested.clone()]).is_ok());
             assert_eq!(
                 list_extra(
                     "chunk",
                     context,
-                    &[Value::List(vec![nested.clone()]), Value::Int(1)]
+                    &[Value::list(vec![nested.clone()]), Value::Int(1)]
                 )
                 .unwrap_err()
                 .kind,
@@ -1263,7 +1263,7 @@ mod tests {
                 list_extra(
                     "pop",
                     context,
-                    &[Value::List(vec![nested.clone(), Value::Null])]
+                    &[Value::list(vec![nested.clone(), Value::Null])]
                 )
                 .unwrap_err()
                 .kind,
@@ -1273,7 +1273,7 @@ mod tests {
                 list_extra(
                     "splice",
                     context,
-                    &[Value::List(vec![nested]), Value::Int(0), Value::Int(0)]
+                    &[Value::list(vec![nested]), Value::Int(0), Value::Int(0)]
                 )
                 .unwrap_err()
                 .kind,
@@ -1288,7 +1288,7 @@ mod tests {
             for name in ["sum", "product"] {
                 for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
                     assert_eq!(
-                        list_extra(name, context, &[Value::List(vec![Value::Float(value)])])
+                        list_extra(name, context, &[Value::list(vec![Value::Float(value)])])
                             .unwrap_err()
                             .kind,
                         "TypeError"
@@ -1305,7 +1305,7 @@ mod tests {
             assert_eq!(add(usize::MAX, 1).unwrap_err().kind, "ResourceLimitError");
             let mut nested = Value::Int(1);
             for _ in 0..128 {
-                nested = Value::List(vec![nested]);
+                nested = Value::list(vec![nested]);
             }
             assert!(measure(context, &nested, 0).is_ok());
             assert!(

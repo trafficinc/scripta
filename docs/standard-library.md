@@ -625,9 +625,10 @@ Direct array syntax now includes negative indexes, slices, comprehensions,
 spread, membership, and destructuring; see [array expressions](arrays.md).
 Helper-specific bounds remain unchanged, including `List::slice`. Script objects
 retain reference identity within copied collections.
-Nested lists and maps are copied; native object and callable handles retain
-their identity, matching ordinary assignment and argument passing. List results
-have contiguous indexes starting at zero. Map results and key/value projections
+Nested lists and maps retain independent value semantics; native object and
+callable handles retain their identity, matching ordinary assignment and
+argument passing. List results have contiguous indexes starting at zero.
+Map results and key/value projections
 preserve insertion order and distinguish integer keys from string keys.
 
 | Function | Behavior |

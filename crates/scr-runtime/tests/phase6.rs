@@ -75,7 +75,7 @@ fn arguments_are_left_to_right_deep_values() {
     .unwrap();
     assert_eq!(
         runtime.get_global("args"),
-        Some(&Value::List(vec![Value::Int(1), Value::Int(2)]))
+        Some(&Value::list(vec![Value::Int(1), Value::Int(2)]))
     );
     assert_eq!(runtime.get_global("before"), Some(&Value::Int(1)));
     assert_eq!(runtime.get_global("after"), Some(&Value::Int(99)));

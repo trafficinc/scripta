@@ -33,7 +33,7 @@ fn scalar_methods_preserve_field_aliases_arguments_bound_receivers_and_return_ch
     assert!(runtime.method_plans_executed >= 5);
     assert_eq!(
         runtime.get_global("seen"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::Int(9),
             Value::Int(3),
             Value::Int(12),

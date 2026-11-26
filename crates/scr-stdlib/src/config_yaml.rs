@@ -105,7 +105,7 @@ fn node(
                 let value = node(parser, budget, event, mark, depth + 1)?;
                 items.push(value);
             }
-            Ok(Value::List(items))
+            Ok(Value::list(items))
         }
         Event::MappingStart(0, None) => {
             let mut items = Vec::new();

@@ -113,7 +113,7 @@ fn register_with_cache(runtime: &mut Runtime, cache: Rc<RefCell<RegexCache>>) ->
                                 .map_err(|_| resource("match allocation failed"))?;
                             values.push(Value::String(found.as_str().into()));
                         }
-                        return Ok(Value::List(values));
+                        return Ok(Value::list(values));
                     }
                     let Value::String(replacement) = &args[2] else {
                         unreachable!()

@@ -70,7 +70,7 @@ fn transactions_counts_constraints_and_failed_call_recovery() {
         Sqlite::execute($db, 'ROLLBACK'); $empty = Sqlite::query($db, 'SELECT * FROM t');
         Sqlite::execute($db, 'BEGIN'); Sqlite::execute($db, 'INSERT INTO t VALUES (2)');
         $commit = Sqlite::execute($db, 'COMMIT'); $ddl = Sqlite::execute($db, 'CREATE TABLE x (id)');").unwrap();
-    assert_eq!(rt.get_global("empty"), Some(&Value::List(vec![])));
+    assert_eq!(rt.get_global("empty"), Some(&Value::list(vec![])));
     assert_eq!(rt.get_global("commit"), Some(&Value::Int(0)));
     assert_eq!(rt.get_global("ddl"), Some(&Value::Int(0)));
     fails(

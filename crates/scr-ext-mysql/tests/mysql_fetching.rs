@@ -115,7 +115,7 @@ fn mixed_fetches_preserve_order_consume_remaining_rows_and_distinguish_exhaustio
     );
     assert_eq!(
         f.runtime.get_global("rest"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::Map(vec![
                 (MapKey::String("z".into()), Value::Int(2)),
                 (MapKey::String("a".into()), Value::Int(22))
@@ -127,7 +127,7 @@ fn mixed_fetches_preserve_order_consume_remaining_rows_and_distinguish_exhaustio
         ]))
     );
     assert_eq!(f.runtime.get_global("end"), Some(&Value::Null));
-    assert_eq!(f.runtime.get_global("again"), Some(&Value::List(vec![])));
+    assert_eq!(f.runtime.get_global("again"), Some(&Value::list(vec![])));
     run(&mut f.runtime, "$destination='preserved';");
     fails(
         &mut f.runtime,
@@ -181,7 +181,7 @@ fn null_zero_empty_results_and_no_result_commands_have_distinct_states() {
         "$empty=Db::prepare($db,'SELECT 1 AS v WHERE 1=0');Db::execute($empty);$none=Db::fetch($empty);$all=Db::fetchAll($empty);",
     );
     assert_eq!(f.runtime.get_global("none"), Some(&Value::Null));
-    assert_eq!(f.runtime.get_global("all"), Some(&Value::List(vec![])));
+    assert_eq!(f.runtime.get_global("all"), Some(&Value::list(vec![])));
     fails(
         &mut f.runtime,
         "Db::fetchColumn($empty);",

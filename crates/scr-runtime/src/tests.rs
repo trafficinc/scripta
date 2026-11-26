@@ -113,11 +113,11 @@ fn list_growth_supports_empty_nested_and_indexed_targets_with_value_semantics() 
     }
     assert_eq!(
         runtime.get_global("groups"),
-        Some(&Value::List(vec![
-            Value::List(vec![Value::Int(7), Value::Int(9)]),
+        Some(&Value::list(vec![
+            Value::list(vec![Value::Int(7), Value::Int(9)]),
             Value::Map(vec![(
                 MapKey::String("values".into()),
-                Value::List(vec![Value::Int(8)])
+                Value::list(vec![Value::Int(8)])
             )]),
         ]))
     );
@@ -140,9 +140,9 @@ fn append_evaluates_targets_once_and_uses_the_list_after_rhs_side_effects() {
     );
     assert_eq!(
         runtime.get_global("result"),
-        Some(&Value::List(vec![
-            Value::List(vec![Value::Int(1), Value::Int(2)]),
-            Value::List(vec![Value::List(vec![Value::Int(7)])]),
+        Some(&Value::list(vec![
+            Value::list(vec![Value::Int(1), Value::Int(2)]),
+            Value::list(vec![Value::list(vec![Value::Int(7)])]),
             Value::Int(1),
         ]))
     );
@@ -173,7 +173,7 @@ fn invalid_list_growth_does_not_create_variables_or_intermediate_collections() {
     assert!(run(&mut runtime, "$items[] = 1 / 0;", &mut Vec::new()).is_err());
     assert_eq!(
         runtime.get_global("items"),
-        Some(&Value::List(vec![Value::Int(1)]))
+        Some(&Value::list(vec![Value::Int(1)]))
     );
 }
 
@@ -369,13 +369,13 @@ fn assignment_targets_and_arguments_are_evaluated_once_left_to_right() {
     assert_int(&runtime, "i", 11);
     assert_eq!(
         runtime.get_global("args"),
-        Some(&Value::List(vec![Value::Int(10), Value::Int(11)]))
+        Some(&Value::list(vec![Value::Int(10), Value::Int(11)]))
     );
     let (runtime, _, _) =
         execute("$a = [1, 2]; function change() { $a = [0, 9]; return 3; } $a[0] += change();");
     assert_eq!(
         runtime.get_global("a"),
-        Some(&Value::List(vec![Value::Int(4), Value::Int(2)]))
+        Some(&Value::list(vec![Value::Int(4), Value::Int(2)]))
     );
 }
 
@@ -644,7 +644,7 @@ fn native_calls_static_calls_properties_and_identity_values() {
     .unwrap();
     assert_eq!(
         *object.name.borrow(),
-        Value::List(vec![
+        Value::list(vec![
             Value::Int(7),
             Value::Int(2),
             Value::Int(8),
@@ -666,7 +666,7 @@ fn host_values_are_validated_and_foreign_closures_are_rejected() {
     );
     assert!(
         runtime
-            .set_global("invalid", Value::List(vec![Value::Float(f64::INFINITY)]))
+            .set_global("invalid", Value::list(vec![Value::Float(f64::INFINITY)]))
             .is_err()
     );
     assert!(

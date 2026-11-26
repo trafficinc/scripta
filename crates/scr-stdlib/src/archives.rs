@@ -323,7 +323,7 @@ fn values(context: &RuntimeContext<'_>, entries: Vec<Entry>) -> NativeResult<Val
             ),
         ]));
     }
-    Ok(Value::List(result))
+    Ok(Value::list(result))
 }
 // Convert library I/O errors without losing cancellation/resource error kinds.
 struct Io<'a, 'ctx> {
@@ -788,7 +788,7 @@ mod tests {
     #[test]
     fn exact_logical_archive_and_gzip_results_include_bytes_keys_and_slots() {
         with_context(|context| {
-            let input = Value::List(vec![Value::Map(vec![
+            let input = Value::list(vec![Value::Map(vec![
                 (MapKey::String("path".into()), Value::String("n".into())),
                 (
                     MapKey::String("data".into()),

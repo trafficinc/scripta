@@ -226,7 +226,7 @@ fn walk(
         context.check_cancelled()?;
         result.push(value);
     }
-    Ok(Value::List(result))
+    Ok(Value::list(result))
 }
 
 pub(super) fn register(runtime: &mut Runtime, policy: Rc<FilesystemPolicy>) -> NativeResult<()> {

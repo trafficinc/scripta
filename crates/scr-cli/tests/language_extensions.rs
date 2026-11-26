@@ -25,7 +25,7 @@ fn arrays_support_negative_reads_writes_slices_membership_and_unpacked_calls() {
     assert_eq!(rt.get_global("sum"), Some(&Value::Int(5)));
     assert_eq!(
         rt.get_global("slice"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::Int(1),
             Value::Int(2),
             Value::Int(30)
@@ -33,7 +33,7 @@ fn arrays_support_negative_reads_writes_slices_membership_and_unpacked_calls() {
     );
     assert_eq!(
         rt.get_global("reverse"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::Int(4),
             Value::Int(30),
             Value::Int(2),
@@ -43,13 +43,13 @@ fn arrays_support_negative_reads_writes_slices_membership_and_unpacked_calls() {
     );
     assert_eq!(
         rt.get_global("step"),
-        Some(&Value::List(vec![
+        Some(&Value::list(vec![
             Value::Int(0),
             Value::Int(2),
             Value::Int(4)
         ]))
     );
-    assert_eq!(rt.get_global("explicit"), Some(&Value::List(vec![])));
+    assert_eq!(rt.get_global("explicit"), Some(&Value::list(vec![])));
     assert_eq!(rt.get_global("key"), Some(&Value::Bool(true)));
     assert_eq!(rt.get_global("text"), Some(&Value::Bool(true)));
     for source in [
@@ -71,11 +71,11 @@ fn comprehension_bindings_do_not_leak_and_destructuring_failure_is_atomic() {
     assert_eq!(rt.get_global("first"), Some(&Value::Int(4)));
     assert_eq!(
         rt.get_global("rest"),
-        Some(&Value::List(vec![Value::Int(9)]))
+        Some(&Value::list(vec![Value::Int(9)]))
     );
     assert_eq!(
         rt.get_global("captured"),
-        Some(&Value::List(vec![Value::Int(1), Value::Int(2)]))
+        Some(&Value::list(vec![Value::Int(1), Value::Int(2)]))
     );
     assert_eq!(rt.get_global("before"), Some(&Value::String("kept".into())));
     assert!(rt.get_global("other").is_none());
@@ -98,7 +98,7 @@ fn classes_have_typed_fields_reference_identity_methods_and_private_per_instance
     assert_eq!(rt.get_global("same"), Some(&Value::Bool(true)));
     assert_eq!(rt.get_global("different"), Some(&Value::Bool(true)));
     assert_eq!(rt.get_global("name"), Some(&Value::String("Grace".into())));
-    assert_eq!(rt.get_global("independent"), Some(&Value::List(vec![])));
+    assert_eq!(rt.get_global("independent"), Some(&Value::list(vec![])));
     rt.collect_garbage();
     run(&mut rt, "$from_callback=$cb(); $bound=$method();").unwrap();
     assert_eq!(

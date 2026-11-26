@@ -54,13 +54,13 @@ fn toml_converts_types_arrays_tables_and_lexical_keys_with_explicit_newline_byte
         ("database", map(vec![("port", Value::Int(5432))])),
         (
             "items",
-            Value::List(vec![Value::Int(1), text("世界"), Value::Bool(false)]),
+            Value::list(vec![Value::Int(1), text("世界"), Value::Bool(false)]),
         ),
         ("number", Value::Int(i64::MIN)),
         ("ratio", Value::Float(1.0)),
         (
             "workers",
-            Value::List(vec![
+            Value::list(vec![
                 map(vec![("name", text("a"))]),
                 map(vec![("name", text("b"))]),
             ]),
@@ -114,7 +114,7 @@ fn yaml_converts_core_scalars_without_yaml_11_boolean_or_timestamp_coercion() {
     );
     assert_eq!(
         value,
-        Value::List(vec![
+        Value::list(vec![
             Value::Null,
             Value::Null,
             Value::Bool(true),
@@ -159,9 +159,9 @@ fn yaml_preserves_mapping_and_sequence_order_block_strings_and_unicode_with_lf_c
         ("z", text("世界")),
         (
             "a",
-            Value::List(vec![
+            Value::list(vec![
                 map(vec![("name", text("café")), ("enabled", Value::Bool(true))]),
-                Value::List(vec![]),
+                Value::list(vec![]),
             ]),
         ),
         ("block", text("first\nsecond\n")),

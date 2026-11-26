@@ -105,7 +105,7 @@ fn binding_fetching_and_cursor_contract() {
         ]),
     );
     value(&r, "end", Value::Null);
-    value(&r, "all", Value::List(vec![]));
+    value(&r, "all", Value::list(vec![]));
     fails(&mut r, "Db::fetchColumn($s);", "DbEndOfResultsError");
     run(
         &mut r,

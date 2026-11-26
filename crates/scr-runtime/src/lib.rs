@@ -30,6 +30,8 @@ mod field_update_tests;
 mod float_loop;
 mod integer_loop;
 mod invocation;
+mod list;
+pub use list::List;
 mod map_builder;
 #[cfg(test)]
 mod map_builder_tests;
@@ -1131,7 +1133,7 @@ impl Runtime {
             }
             ExprKind::List(items) => self
                 .expanded_values(items, expr.span, output)
-                .map(Value::List),
+                .map(Value::list),
             ExprKind::Map(entries) => self.map_literal(entries, expr.span, output),
         }
     }
@@ -1432,7 +1434,7 @@ impl Runtime {
                                     false,
                                 )?;
                             }
-                            let value = Value::List(items);
+                            let value = Value::list(items);
                             self.validate_value(&value, 0, parameter.span)?;
                             value
                         } else {
