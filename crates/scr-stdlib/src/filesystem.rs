@@ -1,5 +1,7 @@
 //! Filesystem modules with native path handling and host policy checks.
 use crate::paths;
+#[path = "archives.rs"]
+mod archives;
 #[path = "atomic_writes.rs"]
 mod atomic_writes;
 #[path = "discovery.rs"]
@@ -492,6 +494,7 @@ enum Operation {
 /// Register File, Dir, and filesystem-related Path helpers with an optional policy.
 pub fn register(runtime: &mut Runtime, policy: FilesystemPolicy) -> NativeResult<()> {
     let policy = Rc::new(policy.prepare()?);
+    archives::register(runtime, policy.clone())?;
     discovery::register(runtime, policy.clone())?;
     temporary::register(runtime, policy.clone())?;
     use NativeType::{Bool, Int, List, Null, String as Text};

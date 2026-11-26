@@ -82,6 +82,16 @@ opaque and file URLs, credentials, encoded delimiters, duplicate queries,
 reference resolution, sharing, and unchanged HTTP permission/credential policy.
 `examples/url-handling.scripta` is a pure controlled-input review example.
 
+Archive regression tests are in `crates/scr-stdlib/tests/archives.rs`. They use
+local byte fixtures for traversal, duplicates, link/special types, forged ZIP
+catalogs and sizes, TAR termination, gzip metadata and expansion bombs. Unit tests
+in `src/archives.rs` (relative to scr-stdlib) cover exact logical output budgets,
+cancellation after partial extraction and identity-checked rollback. The shared
+filesystem/collection tests remain relevant. Execute the self-cleaning
+`examples/archives.scripta` to validate file composition and both extraction paths.
+Archive support uses the already locked ZIP/TAR/flate2 libraries with minimal
+features; release packaging keeps its explicit stored-ZIP settings.
+
 ## Local disk cleanup
 
 From the workspace root, preview removable build outputs and Python caches:

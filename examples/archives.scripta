@@ -1,0 +1,20 @@
+// Controlled byte records and owned temporary output; no external input.
+$work = Temp::directory(".");
+$entries = [["path" => "docs", "data" => null], ["path" => "docs/message.txt", "data" => Bytes::encodeUtf8("hello café\n")], ["path" => "payload.bin", "data" => Hex::decode("00ff0100")]];
+$zip = Zip::encode($entries);
+$tar = Tar::encode($entries);
+$gzip = Gzip::compress($tar);
+$plain = Gzip::decompress($gzip);
+echo "ZIP entries: " . str(len(Zip::decode($zip))) . "\n";
+echo "TAR entries: " . str(len(Tar::decode($plain))) . "\n";
+echo "Gzip round trip: " . str($plain === $tar) . "\n";
+$archivePath = Path::join($work->path, "sample.zip");
+File::writeBytes($archivePath, $zip);
+$destination = Path::join($work->path, "extracted");
+Zip::extract(File::readBytes($archivePath), $destination);
+Tar::extract($plain, Path::join($work->path, "tar-extracted"));
+echo "Message: " . File::read(Path::join($destination, "docs/message.txt"));
+echo "Binary: " . Hex::encode(File::readBytes(Path::join($destination, "payload.bin"))) . "\n";
+$path = $work->path;
+Temp::close($work);
+echo "Cleaned: " . str(!Dir::exists($path)) . "\n";

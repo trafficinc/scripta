@@ -40,13 +40,13 @@ Embedders opt in by calling `scr_stdlib::register(&mut runtime)?`. Registration
 returns `NativeResult<()>`; duplicate names produce `RegistryError` and preserve
 the existing registration. `echo` and `exit` remain language statements. Neither
 is registered as a native function; exit returns a code without terminating the
-embedding process. `File`, `Dir`, `Path`, `Process`, `Env`, `Cli`, `System`, `Date`, `Clock`, `Log`, `Json`, `Html`, `Password`, `Hash`, `Random`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Base64`, `Hex`, `Csv`, `Regex`, `Socket`, and `Stream` are
+embedding process. `File`, `Dir`, `Path`, `Temp`, `Zip`, `Tar`, `Gzip`, `Process`, `Env`, `Cli`, `System`, `Date`, `Clock`, `Log`, `Json`, `Html`, `Password`, `Hash`, `Random`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Base64`, `Hex`, `Csv`, `Regex`, `Socket`, and `Stream` are
 registered by default.
 
 ## Export index
 
-This reference covers 210 core functions and four default CLI SQLite functions
-(226 in total), plus 19 request-context Web/Session functions, native response/entry
+This reference covers 230 core functions and four default CLI SQLite functions
+(234 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -64,6 +64,9 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort`, end operations, generation, search, aggregation, comparisons, `List::column` | [Collections](#collections) |
 | Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove`, merge/replace, combine/flip, search/reverse, comparisons, `Map::column` | [Collections](#collections) |
 | File | `File::exists`, `File::read`, `File::readBytes`, `File::writeBytes`, `File::appendBytes`, `File::write`, `File::writeAtomic`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close`, `File::lock`, `File::unlock` | [Filesystem](#filesystem-and-paths) |
+| Zip | `Zip::encode`, `Zip::decode`, `Zip::extract` | [Archives and compression](#archives-and-compression) |
+| Tar | `Tar::encode`, `Tar::decode`, `Tar::extract` | [Archives and compression](#archives-and-compression) |
+| Gzip | `Gzip::compress`, `Gzip::decompress` | [Archives and compression](#archives-and-compression) |
 | Temp | `Temp::file`, `Temp::directory`, `Temp::close` | [Temporary resources and locks](#temporary-resources-and-file-locks) |
 | Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::entries`, `Dir::walk`, `Dir::glob`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
 | Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute`, `Path::canonical`, `Path::matchesGlob` | [Paths](#filesystem-and-paths) |
@@ -1304,6 +1307,129 @@ locks are never persistent after the owning process exits.
 
 Run `scripta examples/temporary-resources.scripta .` for a self-cleaning example.
 
+## Archives and compression
+
+| Function | Contract |
+| --- | --- |
+| `Zip::encode(entries: list, options: map optional): bytes` | Create a ZIP archive from explicit records in input order. |
+| `Zip::decode(data: bytes, options: map optional): list` | Validate and expand a ZIP archive into records in central-directory order. |
+| `Zip::extract(data: bytes, destination: string, options: map optional): null` | Validate completely, then extract into a new directory. |
+| `Tar::encode(entries: list, options: map optional): bytes` | Create a plain USTAR archive in input order. |
+| `Tar::decode(data: bytes, options: map optional): list` | Validate a plain TAR archive and expand records in archive order. |
+| `Tar::extract(data: bytes, destination: string, options: map optional): null` | Same owned-directory extraction rules as ZIP. |
+| `Gzip::compress(data: bytes, options: map optional): bytes` | Encode one gzip member, using the default DEFLATE level. |
+| `Gzip::decompress(data: bytes, options: map optional): bytes` | Decode all concatenated members, checking every checksum and trailer. |
+
+Each archive record is a map with exactly `path: string` and `data: bytes or null`.
+Null means a directory; empty bytes means an empty regular file. Paths in results
+omit a directory's optional terminal `/`. Contents are binary: convert UTF-8 text
+explicitly with `Bytes::encodeUtf8`/`Bytes::decodeUtf8`. There is no implicit text
+conversion, filesystem walk, archive-format detection, gzip wrapping of TAR, or
+native resource handle. Decode/encode do not need filesystem capabilities and do
+not mutate their inputs. Use `File::readBytes`/`File::writeBytes` explicitly for
+files, or compose `Gzip::compress(Tar::encode($entries))` for tar.gz. File helper
+overwrite, symlink and permission rules remain unchanged. These APIs materialize
+bounded byte values; they do not provide archive stream handles or large-file
+streaming.
+
+Options are strict: unknown keys, wrong types and options for another operation
+raise `TypeError`; out-of-range integers raise `RangeError`.
+
+| Option | Default / allowed range | Meaning |
+| --- | --- | --- |
+| `maxInputBytes: int` | 67108864 / 0–67108864 | Encode: aggregate file-data bytes; decode/extract: complete archive bytes; gzip: input bytes. Names and metadata have separate bounds. |
+| `maxOutputBytes: int` | 67108864 / 0–67108864 | Encode/compress: complete output bytes including headers. Decode/extract: aggregate expanded file bytes. Gzip decompress: aggregate output across members. |
+| `maxEntries: int` | 10000 / 0–10000 | ZIP/TAR only. Bounds both explicit records and all distinct path nodes, including implied parents. A single `a/b` file needs two nodes. |
+| `maxNameBytes: int` | 1024 / 0–4096 | ZIP/TAR only. UTF-8 bytes in the normalized portable relative path. |
+| `maxDepth: int` | 64 / 0–128 | ZIP/TAR only. Component count; `a/b` has depth 2. Zero permits only an empty archive. |
+| `compression: string` | `"deflate"`; also `"stored"` | ZIP encode only. Directory entries are stored without compression. |
+| `maxMembers: int` | 10000 / 0–10000 | Gzip decompress only. Each empty member still counts. |
+
+Ceilings raise `ResourceLimitError`, including when advertised sizes already
+exceed a limit before expansion. Exact limits succeed; limit-plus-one fails.
+The runtime logical value-byte budget additionally accounts byte payloads,
+record maps, string keys, path strings and collection slots. Extraction uses the
+same bounded decoded representation even though it returns null. Zero output
+bytes can decode empty files or an empty gzip payload; zero encoded-output bytes
+cannot create an archive with mandatory headers. Gzip requires at least one
+complete member. Limits are not a process heap cap: third-party parser/compressor
+state, bounded metadata indexes, and temporary copies use additional storage.
+
+Paths use `/` on every OS. One terminal `/` is allowed only for directory records.
+Reject absolute, drive and UNC paths; backslashes; empty, `.` and `..` components;
+NUL/ASCII controls/DEL; Windows reserved device stems (also before extensions);
+Windows reserved punctuation; and trailing ASCII spaces/dots. Percent sequences
+are literal filenames, never decoded. Exact duplicates, file ancestors,
+file/directory collisions and ASCII case aliases are rejected, including implied
+parents. Explicit directory records may follow earlier children, but may appear
+only once. Names are strict UTF-8. Target filesystems can impose additional name,
+Unicode-normalization or length restrictions; exclusive creation rejects aliases
+instead of merging them. No archive link is materialized.
+
+ZIP supports a strict single-disk, non-ZIP64 profile: Stored/DEFLATE regular files
+and directories, no encryption or streaming data descriptors. Non-ASCII names
+require the UTF-8 flag; CP437 conversion is not performed. ZIP64, AES and Unicode
+path-override extra fields are rejected. Harmless extra metadata and comments are
+ignored within input limits. Local names, flags, methods, CRCs and sizes must
+agree with the central directory. Local records must be contiguous and
+nonoverlapping; self-extracting prefixes, gaps, and trailing non-archive data are
+unsupported. The bounded raw catalog is decoded directly instead of using an
+eager/recovering ZIP index. Hidden duplicate records, forged catalog counts and alternative end
+records therefore cannot bypass limits. Full entry reads verify CRCs, declared
+sizes and complete DEFLATE termination without trailing compressed data.
+
+TAR supports ordinary regular-file and directory headers. Links, devices, FIFOs,
+sparse files, PAX headers and GNU extension records are rejected. Raw iteration
+prevents implicit extension allocation/interpretation. Encoders require names
+representable in a USTAR header; a large `maxNameBytes` does not remove USTAR's
+field constraints. Headers/checksums, path termination, declared sizes, zero data
+padding and a complete two-zero-block end marker are checked; trailing nonzero
+data and concatenated TAR archives are rejected. ZIP/TAR encoding fixes metadata
+(times, ownership and safe ordinary modes) instead of copying host state. Gzip
+has mtime zero, no filename/comment, and a neutral OS marker. Compression bytes
+may vary with dependency/backend versions; byte-identical output across different
+build configurations is not promised.
+
+Gzip accepts concatenated members and ignores original filename/comment metadata
+as paths. A member header, including optional fields, is limited to 65536 bytes
+before decoder metadata allocation. Truncation, CRC/size mismatches and trailing
+junk raise `ArchiveError`. Expanded output is bounded as it is produced, including
+streams with misleading size trailers or high compression ratios.
+
+Extraction requires `filesystem.write` and the registered host write/root policy;
+reading an archive file separately requires read access. Every existing
+extraction destination is refused with `AlreadyExistsError`, including empty
+directories and symlinks (root-policy denial may occur earlier). The parent must
+exist and must not be a final symlink. Validate all records and expansion limits
+before creating anything. Then create a new owned root, each implied/explicit
+directory once, and each regular file exclusively. Apply no archived ownership,
+timestamps, permissions, executable bits or special attributes. On Unix, new
+files/directories use 0600/0700 subject to umask; Windows inherits ACLs.
+
+The new tree is visible while files are being written; publication is not an
+atomic directory rename. A failure detected during extraction attempts to remove
+only its identity-checked new root, without following contained links. A replaced
+root is refused during cleanup. Cleanup failures are appended to the original
+error and may leave residue. Existing destinations are never merged into or
+modified. Successful extraction persists after later script failures; late
+cancellation after the commit point likewise cannot undo completed effects.
+Concurrent hostile path replacement, mount behavior and cleanup retain the
+existing filesystem policy's non-adversarial limitations. No general recursive
+removal API is added.
+
+Cancellation is checked during catalog parsing, bounded codec reads/writes,
+record loops and filesystem writes. Parser/compressor work between checkpoints
+and OS filesystem calls remain synchronous. Error cleanup ignores cancellation
+so it can remove its owned tree. Malformed, unsafe or unsupported data raises
+`ArchiveError`; native ceilings raise `ResourceLimitError`; filesystem failures
+retain their existing error kinds. Failed byte/list assignments preserve their
+destination, and incomplete encoded/decoded results are never returned.
+
+The self-cleaning [archive example](../examples/archives.scripta) creates ZIP,
+TAR and gzip bytes, writes/reads a ZIP file, extracts into new directories, checks
+binary data, and closes its owned temporary parent:
+`scripta examples/archives.scripta`.
+
 ## Processes
 
 `Process::run(command, arguments = [], options = ...)` launches one executable
@@ -2031,7 +2157,7 @@ connection metadata and `request_id: None` leave these properties unknown
 Connection metadata and request-ID dynamic strings count toward the request value
 budget. See [host logs and health checks](web-servers.md#logs-and-health-checks)
 for ID lifecycle and privacy rules.
-These properties do not add registered functions: export counts stay 226 default
+These properties do not add registered functions: export counts stay 234 default
 functions plus 19 request-context functions.
 
 It has these methods:

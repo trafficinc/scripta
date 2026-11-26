@@ -1487,7 +1487,9 @@ dependencies = [
  "argon2",
  "base64 0.22.1",
  "chrono",
+ "crc32fast",
  "csv",
+ "flate2",
  "fs2",
  "getrandom 0.3.4",
  "jiff",
@@ -1506,11 +1508,13 @@ dependencies = [
  "socket2 0.6.5",
  "subtle",
  "sysinfo",
+ "tar",
  "tempfile",
  "unicode-segmentation",
  "ureq",
  "url",
  "zeroize",
+ "zip",
 ]
 
 [[package]]
@@ -2584,6 +2588,7 @@ dependencies = [
  "arbitrary",
  "crc32fast",
  "crossbeam-utils",
+ "flate2",
  "indexmap",
  "memchr",
 ]

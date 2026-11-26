@@ -118,6 +118,12 @@ locked url/IDNA dependencies. Their parsing and reference resolution perform no
 I/O and do not modify HTTP/Stream validation, permission, or TLS policy. Encoded
 components and canonical text remain distinct from explicit query/form decoding.
 
+Archive codecs live under scr-stdlib filesystem registration. Bounded ZIP catalog
+preflight, raw TAR iteration, gzip-member limits, and checked codec I/O precede
+publication of byte/list results. Filesystem extraction validates first and then
+owns an exclusively created tree with identity-checked rollback. It never delegates
+to permissive archive unpack helpers or applies archive links/permissions.
+
 OS, network and database backends belong in standard-library or extension crates.
 They enforce capabilities, resource ownership and operation-specific limits.
 Process stdin payloads are staged in bounded temporary regular files; stdout and

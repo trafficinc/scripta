@@ -632,6 +632,9 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             "encodeComponent decodeComponent buildQuery parseQuery parse serialize resolve isValid",
         ),
         ("Form", "encode decode"),
+        ("Zip", "encode decode extract"),
+        ("Tar", "encode decode extract"),
+        ("Gzip", "compress decompress"),
         ("Sqlite", "open execute query close"),
         ("Bytes", "encodeUtf8 decodeUtf8 slice timingSafeEqual"),
         ("Random", "bytes"),
@@ -671,7 +674,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 226);
+    assert_eq!(count, 234);
     for name in [
         "start",
         "id",
@@ -1178,5 +1181,43 @@ fn full_url_example_normalizes_hosts_and_resolves_without_network_requests() {
             "Host: xn--bcher-kva.example\nPort: 443\n",
             "Tags: [[\"tag\",\"rust\"],[\"tag\",\"scripting\"]]\nValid: true\n"
         )
+    );
+}
+
+#[test]
+fn archive_example_roundtrips_binary_data_and_cleans_its_owned_outputs() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/archives.scripta");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg("run")
+        .arg(path)
+        .current_dir(directory.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        success(output),
+        "ZIP entries: 3\nTAR entries: 3\nGzip round trip: true\nMessage: hello café\nBinary: 00ff0100\nCleaned: true\n"
+    );
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+    let failing = directory.path().join("limit.scripta");
+    fs::write(
+        &failing,
+        "Zip::encode([['path'=>'a','data'=>Bytes::encodeUtf8('abc')]],['maxOutputBytes'=>0]);",
+    )
+    .unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg("run")
+        .arg(failing)
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(1));
+    let diagnostic = String::from_utf8(result.stderr).unwrap();
+    assert!(diagnostic.contains("ResourceLimitError"), "{diagnostic}");
+    assert!(
+        !diagnostic.contains("ZipWriter drop failed"),
+        "{diagnostic}"
     );
 }
