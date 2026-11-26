@@ -1,4 +1,5 @@
 //! Direct argv execution with bounded temporary-file I/O and owned children.
+mod interactive;
 use crate::{bytes, environment, paths};
 use process_wrap::std::{StdChildWrapper, StdCommandWrap, StdCommandWrapper};
 use scr_runtime::{
@@ -63,6 +64,7 @@ struct Options {
     input_limit: usize,
     output_type: OutputType,
     value_limit: Option<usize>,
+    interactive: bool,
 }
 fn type_error(message: &str) -> NativeError {
     NativeError::type_error(message)
@@ -106,9 +108,11 @@ fn options<'a>(
         input_limit: config.max_input_bytes,
         output_type: OutputType::Text,
         value_limit: context.max_value_bytes,
+        interactive: false,
     };
     let mut input = None;
     let mut explicit_stdin = false;
+    let mut explicit_capture_options = false;
     if let Some(value) = value {
         let Value::Map(entries) = value else {
             return Err(type_error("process options must be a map"));
@@ -117,7 +121,17 @@ fn options<'a>(
             let MapKey::String(key) = key else {
                 return Err(type_error("process option keys must be strings"));
             };
+            if matches!(
+                key.as_str(),
+                "stdin" | "stdout" | "stderr" | "outputType" | "input"
+            ) {
+                explicit_capture_options = true;
+            }
             match key.as_str() {
+                "interactive" => match value {
+                    Value::Bool(enabled) => result.interactive = *enabled,
+                    _ => return Err(type_error("interactive must be a bool")),
+                },
                 "cwd" => result.cwd = paths::resolve(context, paths::string(value)?)?,
                 "timeoutMs" => {
                     result.timeout = if *value == Value::Null {
@@ -194,6 +208,18 @@ fn options<'a>(
                 }
                 _ => return Err(type_error(&format!("unknown process option {key}"))),
             }
+        }
+    }
+    if result.interactive {
+        if explicit_capture_options {
+            return Err(type_error(
+                "interactive cannot be combined with input, stdin, stdout, stderr, or outputType",
+            ));
+        }
+        if result.timeout.is_none_or(|timeout| timeout.is_zero()) {
+            return Err(type_error(
+                "interactive requires a finite positive timeoutMs",
+            ));
         }
     }
     // Script writes/overrides are validated above. Preserve the native host
@@ -491,6 +517,8 @@ struct ProcessHandle {
     pid: u32,
     shared: Arc<Shared>,
     worker: RefCell<Option<JoinHandle<()>>>,
+    io: Option<interactive::Io>,
+    owner: Option<Rc<()>>,
 }
 impl std::fmt::Debug for ProcessHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -500,6 +528,12 @@ impl std::fmt::Debug for ProcessHandle {
     }
 }
 impl ProcessHandle {
+    fn owner_matches(&self, context: &RuntimeContext<'_>) -> bool {
+        self.owner
+            .as_ref()
+            .zip(context.runtime_identity.as_ref())
+            .is_some_and(|(owner, current)| Rc::ptr_eq(owner, current))
+    }
     fn snapshot(&self) -> NativeResult<Option<NativeResult<Arc<Outcome>>>> {
         self.shared
             .result
@@ -558,6 +592,9 @@ impl NativeObject for ProcessHandle {
         "ProcessHandle"
     }
     fn payload_bytes(&self) -> usize {
+        if let Some(io) = &self.io {
+            return io.pending_bytes();
+        }
         self.shared
             .result
             .lock()
@@ -593,10 +630,12 @@ fn monitor(
                 return Err(NativeError::new("Interrupted", "execution interrupted"));
             }
             check_size(&stdout, &stderr, options.limit)?;
-            value_budget(
-                options.value_limit,
-                captured_size(&stdout)?.saturating_add(captured_size(&stderr)?),
-            )?;
+            if !options.interactive {
+                value_budget(
+                    options.value_limit,
+                    captured_size(&stdout)?.saturating_add(captured_size(&stderr)?),
+                )?;
+            }
             if shared.kill.load(Ordering::Relaxed) {
                 break;
             }
@@ -626,6 +665,15 @@ fn monitor(
     }
     let status = cleanup?;
     check_size(&stdout, &stderr, options.limit)?;
+    if options.interactive {
+        return Ok(Arc::new(Outcome {
+            exit_code: status.code().map(i64::from),
+            success: status.success(),
+            stdout: Captured::Bytes(Vec::new()),
+            stderr: Captured::Bytes(Vec::new()),
+            duration_ms: i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX),
+        }));
+    }
     let mut budget = CaptureBudget {
         remaining: options.limit,
         used: 0,
@@ -694,7 +742,13 @@ fn launch(
     }
     bytes::payload(context, 0)?;
     let start = Instant::now();
-    let stdin = if let Some(input) = input {
+    let permit = options
+        .interactive
+        .then(|| interactive::Permit::acquire().map(Arc::new))
+        .transpose()?;
+    let stdin = if options.interactive {
+        Stdio::piped()
+    } else if let Some(input) = input {
         bytes::payload(context, input.len())?;
         stage_input(input, || {
             execution_checkpoint(context.cancellation.as_deref(), start, options.timeout)
@@ -727,8 +781,8 @@ fn launch(
         .env_clear()
         .envs(&options.environment)
         .stdin(stdin);
-    let (out, stdout) = capture(options.stdout)?;
-    let (err, stderr) = capture(options.stderr)?;
+    let (out, stdout, live_stdout) = interactive::capture(options.stdout, options.interactive)?;
+    let (err, stderr, live_stderr) = interactive::capture(options.stderr, options.interactive)?;
     builder.stdout(out).stderr(err);
     execution_checkpoint(context.cancellation.as_deref(), start, options.timeout)?;
     let mut wrapped = StdCommandWrap::from(builder);
@@ -743,7 +797,19 @@ fn launch(
         error
     })?;
     let pid = child.id();
-    let guard = ChildGuard(Some(child));
+    let mut guard = ChildGuard(Some(child));
+    let io = if options.interactive {
+        Some(interactive::Io::new(
+            live_stdout.unwrap(),
+            live_stderr.unwrap(),
+            options.input_limit,
+            options.limit,
+            permit.as_ref().unwrap().clone(),
+        ))
+    } else {
+        None
+    };
+    let writer_state = io.as_ref().map(|io| io.input.clone());
     let shared = Arc::new(Shared::default());
     let monitor_state = shared.clone();
     let cancellation = context.cancellation.clone();
@@ -751,7 +817,15 @@ fn launch(
         .name(format!("scr-process-{pid}"))
         .spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                monitor(
+                let writer = if let Some(state) = writer_state {
+                    let stdin = guard.child()?.inner_mut().stdin.take().ok_or_else(|| {
+                        NativeError::new("ProcessError", "missing interactive stdin")
+                    })?;
+                    Some(interactive::Writer::spawn(stdin, state, permit.unwrap())?)
+                } else {
+                    None
+                };
+                let mut result = monitor(
                     guard,
                     stdout,
                     stderr,
@@ -759,7 +833,15 @@ fn launch(
                     &monitor_state,
                     cancellation.as_deref(),
                     start,
-                )
+                );
+                drop(writer);
+                if let Ok(outcome) = &mut result {
+                    if let Some(outcome) = Arc::get_mut(outcome) {
+                        outcome.duration_ms =
+                            i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX);
+                    }
+                }
+                result
             }))
             .unwrap_or_else(|_| Err(NativeError::new("ProcessError", "process monitor panicked")));
             if let Ok(mut slot) = monitor_state.result.lock() {
@@ -772,6 +854,8 @@ fn launch(
         pid,
         shared,
         worker: RefCell::new(Some(worker)),
+        io,
+        owner: context.runtime_identity.clone(),
     })
 }
 fn handle(args: &[Value]) -> NativeResult<&ProcessHandle> {
@@ -837,6 +921,9 @@ pub fn register(runtime: &mut Runtime, config: ProcessConfig) -> NativeResult<()
                         (command.clone(), arguments, values.get(2))
                     };
                     let (options, input) = options(context, options_value, &config)?;
+                    if options.interactive && method != "spawn" {
+                        return Err(type_error("interactive mode requires Process::spawn"));
+                    }
                     let child = launch(
                         context,
                         &command,
@@ -895,8 +982,18 @@ pub fn register(runtime: &mut Runtime, config: ProcessConfig) -> NativeResult<()
                 move |context, args| {
                     context.permissions.require("process.execute")?;
                     let handle = handle(args)?;
+                    if handle.io.is_some() && !handle.owner_matches(context) {
+                        return Err(type_error("interactive ProcessHandle belongs to another runtime"));
+                    }
                     match method {
-                        "wait" => handle.wait(context),
+                        "wait" => {
+                            if let Some(io) = &handle.io {
+                                if !io.input.is_closed()? && handle.snapshot()?.is_none() {
+                                    return Err(NativeError::new("ProcessError", "close interactive stdin before waiting; use Process::poll while coordinating I/O"));
+                                }
+                            }
+                            handle.wait(context)
+                        },
                         "kill" => {
                             handle.shared.kill.store(true, Ordering::Relaxed);
                             handle.wait(context)
@@ -913,6 +1010,7 @@ pub fn register(runtime: &mut Runtime, config: ProcessConfig) -> NativeResult<()
             ),
         )?;
     }
+    interactive::register(runtime)?;
     Ok(())
 }
 

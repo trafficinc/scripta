@@ -605,7 +605,10 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             "join filename extension parent normalize absolute canonical matchesGlob",
         ),
         ("Temp", "file directory close"),
-        ("Process", "run spawn shell wait poll kill exists currentId"),
+        (
+            "Process",
+            "run spawn shell wait poll kill exists currentId writeStdin closeStdin readStdout readStderr",
+        ),
         ("Env", "get set has remove all"),
         ("Cli", "args arg has option isTerminal prompt readLine"),
         (
@@ -678,7 +681,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 241);
+    assert_eq!(count, 245);
     for name in [
         "start",
         "id",
@@ -1257,5 +1260,32 @@ fn date_arithmetic_example_distinguishes_calendar_and_elapsed_days() {
     assert_eq!(
         success(output),
         "Month end: 2024-02-29\nCalendar day: 82800 seconds\nElapsed day: 86400 seconds\nNegative duration: -5400 seconds\nNonexistent local time rejected\n"
+    );
+}
+
+#[test]
+fn interactive_process_example_exchanges_a_message_before_eof() {
+    let path = example("process-interactive.scripta");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    let child = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/process-interactive.scripta");
+    let child_source = fs::read_to_string(&child).unwrap();
+    scr_cli::pipeline::check(&child_source).unwrap();
+    assert_eq!(
+        scr_cli::formatter::format(&child_source).unwrap(),
+        child_source
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg("run")
+        .arg(path)
+        .arg(env!("CARGO_BIN_EXE_scripta"))
+        .arg(child)
+        .output()
+        .unwrap();
+    assert_eq!(
+        success(output),
+        "Reply: echo:ping\nStderr received: true\nExit code: 0\n"
     );
 }

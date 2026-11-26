@@ -113,6 +113,14 @@ this lifecycle through a bounded native registry, so cancellation does not leave
 host-retained aliases open. Backend state, filesystem identity checks, removal,
 and lock polling remain in scr-stdlib; existing resource lifetimes are unchanged.
 
+Interactive process handles remain in scr-stdlib and reuse process-group/job
+cleanup and bounded temporary-file output monitoring. Independently reopened
+spool readers preserve child write cursors. A bounded stdin queue is serviced by
+a limited writer thread; finite deadlines and bounded worker shutdown prevent
+script coordination or escaped pipe readers from causing unbounded joins.
+Existing staged-input/capture calls retain their behavior; stream APIs use the
+public native interface and validate runtime ownership.
+
 Immutable full-URL values use a bounded WHATWG parser in scr-stdlib, reusing the
 locked url/IDNA dependencies. Their parsing and reference resolution perform no
 I/O and do not modify HTTP/Stream validation, permission, or TLS policy. Encoded

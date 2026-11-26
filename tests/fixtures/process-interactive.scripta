@@ -1,0 +1,8 @@
+// Controlled child: flush a response before waiting for the next input or EOF.
+$line = Cli::readLine();
+while ($line !== null) {
+    echo "echo:" . $line . "\n";
+    flush();
+    Log::info("received message");
+    $line = Cli::readLine();
+}

@@ -1,0 +1,36 @@
+// Run with an executable and the controlled line-echo child script path.
+$program = Cli::arg(0);
+$script = Cli::arg(1);
+if ($program === null || $script === null) {
+    echo "Usage: scripta run examples/process-interactive.scripta PROGRAM CHILD_SCRIPT\n";
+    exit(2);
+}
+$child = Process::spawn($program, [$script], ["interactive" => true, "timeoutMs" => 5000]);
+$message = Bytes::encodeUtf8("ping\n");
+$offset = 0;
+while ($offset < len($message)) {
+    $offset = $offset + Process::writeStdin($child, Bytes::slice($message, $offset));
+}
+// Gather the complete expected message before decoding UTF-8.
+$replyHex = "";
+while (len($replyHex) < 20) {
+    $chunk = Process::readStdout($child, 64, 100);
+    if ($chunk === null) {
+        throw "Child ended before replying";
+    }
+    $replyHex = $replyHex . Hex::encode($chunk);
+}
+$reply = Bytes::decodeUtf8(Hex::decode($replyHex));
+Process::closeStdin($child);
+$result = Process::wait($child);
+$stderrSeen = false;
+$chunk = Process::readStderr($child, 65536);
+while ($chunk !== null) {
+    if (len($chunk) > 0) {
+        $stderrSeen = true;
+    }
+    $chunk = Process::readStderr($child, 65536);
+}
+echo "Reply: " . String::trim($reply) . "\n";
+echo "Stderr received: " . str($stderrSeen) . "\n";
+echo "Exit code: " . str($result->exitCode) . "\n";

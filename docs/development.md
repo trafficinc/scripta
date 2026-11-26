@@ -109,6 +109,15 @@ and exact signed integer/timestamp/input limits. Existing timezone and logging
 regressions remain in `tests/system_date_log.rs`. The controlled
 `examples/date-arithmetic.scripta` requires no network or host timezone setting.
 
+Interactive process regressions extend `crates/scr-stdlib/tests/process.rs`,
+using the same portable child fixture for responses before EOF, large simultaneous
+stdout/stderr plus input, closed/foreign handles, early exit, cancellation,
+timeouts, limits and tree cleanup. Native queue/read budget, worker-permit and
+spool cleanup checks live in `src/process/interactive.rs`. The CLI example test
+executes `examples/process-interactive.scripta` against the controlled
+`tests/fixtures/process-interactive.scripta` child; no shell, public endpoint or
+external scripting runtime is required.
+
 ## Local disk cleanup
 
 From the workspace root, preview removable build outputs and Python caches:

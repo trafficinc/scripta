@@ -94,6 +94,16 @@ fn child_fixture() {
         return;
     };
     match mode.as_str() {
+        "interactive-response" => {
+            std::io::stderr().write_all(b"ready").unwrap();
+            let mut input = [0; 4];
+            std::io::stdin().read_exact(&mut input).unwrap();
+            std::io::stderr().write_all(&input).unwrap();
+            let mut tail = Vec::new();
+            std::io::stdin().read_to_end(&mut tail).unwrap();
+            std::io::stdout().write_all(b"done").unwrap();
+            std::process::exit(0);
+        }
         "echo" => {
             print!("child stdout 世界");
             eprint!("child stderr");
@@ -909,4 +919,372 @@ fn windows_explicit_shell_preserves_its_command_language_quoting() {
     assert!(
         matches!(property(&rt, "result", "stdout"), Value::String(value) if value.contains("quoted words") && value.contains("second-line") && !value.contains("\\\""))
     );
+}
+
+fn interactive_read(runtime: &mut Runtime, stream: &str, timeout: u32) -> Option<Vec<u8>> {
+    run(
+        runtime,
+        &format!("$chunk = Process::read{stream}($child, 65536, {timeout});"),
+    )
+    .unwrap();
+    match runtime.get_global("chunk").unwrap() {
+        Value::Null => None,
+        Value::Bytes(data) => Some(data.to_vec()),
+        other => panic!("unexpected output {other:?}"),
+    }
+}
+fn interactive_drain(runtime: &mut Runtime) -> (Vec<u8>, Vec<u8>) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    loop {
+        assert!(Instant::now() < deadline, "interactive drain timed out");
+        let out = interactive_read(runtime, "Stdout", 5);
+        let err = interactive_read(runtime, "Stderr", 5);
+        if out.is_none() && err.is_none() {
+            break;
+        }
+        stdout.extend(out.unwrap_or_default());
+        stderr.extend(err.unwrap_or_default());
+    }
+    (stdout, stderr)
+}
+
+#[test]
+fn interactive_responses_arrive_before_stdin_eof_and_remain_binary() {
+    let mut runtime = runtime();
+    run(&mut runtime, "Env::set('SCR_PROCESS_FIXTURE','interactive-response'); $child=Process::spawn($program,$arguments,['interactive'=>true,'timeoutMs'=>5000]);").unwrap();
+    assert_eq!(
+        interactive_read(&mut runtime, "Stderr", 1000).unwrap(),
+        b"ready"
+    );
+    runtime
+        .set_global("input", Value::Bytes(vec![0xff, 0, 0xc3, 0xa9].into()))
+        .unwrap();
+    run(
+        &mut runtime,
+        "$accepted=Process::writeStdin($child,$input);",
+    )
+    .unwrap();
+    assert_eq!(runtime.get_global("accepted"), Some(&Value::Int(4)));
+    assert_eq!(
+        interactive_read(&mut runtime, "Stderr", 1000).unwrap(),
+        [0xff, 0, 0xc3, 0xa9]
+    );
+    run(&mut runtime, "$pending=Process::poll($child);").unwrap();
+    assert_eq!(runtime.get_global("pending"), Some(&Value::Null));
+    run(&mut runtime, "$result=42;").unwrap();
+    error(
+        &mut runtime,
+        "$result=Process::wait($child);",
+        "ProcessError",
+    );
+    assert_eq!(runtime.get_global("result"), Some(&Value::Int(42)));
+    run(
+        &mut runtime,
+        "Process::closeStdin($child); Process::closeStdin($child); $result=Process::wait($child);",
+    )
+    .unwrap();
+    assert_eq!(property(&runtime, "result", "success"), Value::Bool(true));
+    assert_eq!(
+        property(&runtime, "result", "stdout"),
+        Value::Bytes(Vec::<u8>::new().into())
+    );
+    assert_eq!(
+        property(&runtime, "result", "stderr"),
+        Value::Bytes(Vec::<u8>::new().into())
+    );
+    let (stdout, stderr) = interactive_drain(&mut runtime);
+    assert!(stdout.ends_with(b"done"));
+    assert!(stderr.is_empty());
+    error(
+        &mut runtime,
+        "Process::writeStdin($child,'x');",
+        "ProcessError",
+    );
+}
+
+#[test]
+fn interactive_large_bidirectional_transfer_cannot_deadlock_on_output() {
+    let mut runtime = runtime();
+    let data: Vec<_> = (0..1024 * 1024).map(|n| (n % 256) as u8).collect();
+    runtime
+        .set_global("input", Value::Bytes(data.clone().into()))
+        .unwrap();
+    run(&mut runtime, "Env::set('SCR_PROCESS_FIXTURE','write-before-input'); $child=Process::spawn($program,$arguments,['interactive'=>true,'timeoutMs'=>10000]); $offset=0;").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    while runtime.get_global("offset") != Some(&Value::Int(data.len() as i64)) {
+        assert!(Instant::now() < deadline);
+        run(&mut runtime, "$size=Math::min(16384,len($input)-$offset); $offset=$offset+Process::writeStdin($child,Bytes::slice($input,$offset,$size));").unwrap();
+        stdout.extend(interactive_read(&mut runtime, "Stdout", 0).unwrap_or_default());
+        stderr.extend(interactive_read(&mut runtime, "Stderr", 0).unwrap_or_default());
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    run(
+        &mut runtime,
+        "Process::closeStdin($child); $result=Process::wait($child);",
+    )
+    .unwrap();
+    let (out, err) = interactive_drain(&mut runtime);
+    stdout.extend(out);
+    stderr.extend(err);
+    assert!(stdout.ends_with(&vec![b'o'; 512 * 1024]));
+    let mut expected = vec![b'e'; 512 * 1024];
+    expected.extend(data);
+    assert_eq!(stderr, expected);
+    assert_eq!(property(&runtime, "result", "success"), Value::Bool(true));
+}
+
+#[test]
+fn interactive_input_limits_ranges_invalid_modes_and_failed_destinations_are_strict() {
+    let mut runtime = runtime();
+    run(&mut runtime, "$result=42;").unwrap();
+    for options in [
+        "['interactive'=>1]",
+        "['interactive'=>true,'stdin'=>'null']",
+        "['interactive'=>true,'stdout'=>'capture']",
+        "['interactive'=>true,'stderr'=>'inherit']",
+        "['interactive'=>true,'input'=>'']",
+        "['interactive'=>true,'outputType'=>'bytes']",
+        "['interactive'=>true,'timeoutMs'=>null]",
+        "['interactive'=>true,'timeoutMs'=>0]",
+    ] {
+        error(
+            &mut runtime,
+            &format!("$result=Process::spawn('never-launched',[],{options});"),
+            "TypeError",
+        );
+        assert_eq!(runtime.get_global("result"), Some(&Value::Int(42)));
+    }
+    error(
+        &mut runtime,
+        "Process::run('never-launched',[],['interactive'=>true]);",
+        "TypeError",
+    );
+    run(&mut runtime,"Env::set('SCR_PROCESS_FIXTURE','stdin-echo'); $child=Process::spawn($program,$arguments,['interactive'=>true,'maxInputBytes'=>2,'timeoutMs'=>3000]);").unwrap();
+    let source = "function invalidRead($h) { return Process::readStdout($h, 0); } $result=invalidRead($child);";
+    let failure = runtime.execute_source(source, &mut Vec::new()).unwrap_err();
+    assert!(failure.message.starts_with("RangeError:"));
+    assert_eq!(
+        failure.span.start,
+        source.find("Process::readStdout").unwrap()
+    );
+    assert!(
+        failure
+            .trace
+            .iter()
+            .any(|frame| frame.function == "invalidRead")
+    );
+    assert_eq!(runtime.get_global("result"), Some(&Value::Int(42)));
+    for expression in [
+        "Process::readStdout($child,0)",
+        "Process::readStderr($child,65537)",
+        "Process::readStdout($child,1,-1)",
+        "Process::readStderr($child,1,30001)",
+    ] {
+        error(
+            &mut runtime,
+            &format!("$result={expression};"),
+            "RangeError",
+        );
+        assert_eq!(runtime.get_global("result"), Some(&Value::Int(42)));
+    }
+    for expression in [
+        "Process::writeStdin($child,1)",
+        "Process::readStdout($child,1.0)",
+        "Process::readStderr($child,1,null)",
+        "Process::closeStdin($child,1)",
+    ] {
+        error(&mut runtime, &format!("$result={expression};"), "TypeError");
+    }
+    error(
+        &mut runtime,
+        "$result=Process::writeStdin($child,'abc');",
+        "InputLimitError",
+    );
+    run(&mut runtime, "$accepted=Process::writeStdin($child,'é');").unwrap();
+    assert_eq!(runtime.get_global("accepted"), Some(&Value::Int(2)));
+    error(
+        &mut runtime,
+        "$result=Process::writeStdin($child,'x');",
+        "InputLimitError",
+    );
+    run(
+        &mut runtime,
+        "Process::closeStdin($child); Process::wait($child);",
+    )
+    .unwrap();
+    let (_, stderr) = interactive_drain(&mut runtime);
+    assert_eq!(stderr, "é".as_bytes());
+    run(
+        &mut runtime,
+        "$plain=Process::spawn($program,$arguments,['input'=>'']);",
+    )
+    .unwrap();
+    error(
+        &mut runtime,
+        "Process::readStdout($plain,1);",
+        "ProcessError",
+    );
+    run(&mut runtime, "Process::wait($plain);").unwrap();
+}
+
+#[test]
+fn interactive_broken_pipe_preserves_early_exit_status() {
+    let mut runtime = runtime();
+    run(&mut runtime,"Env::set('SCR_PROCESS_FIXTURE','early-input-exit'); $child=Process::spawn($program,$arguments,['interactive'=>true,'timeoutMs'=>3000]);").unwrap();
+    runtime
+        .set_global("payload", Value::Bytes(vec![0xff; 65536].into()))
+        .unwrap();
+    run(&mut runtime, "Process::writeStdin($child,$payload);").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        run(&mut runtime, "$result=Process::poll($child);").unwrap();
+        if runtime.get_global("result") != Some(&Value::Null) {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(property(&runtime, "result", "exitCode"), Value::Int(17));
+    error(
+        &mut runtime,
+        "Process::writeStdin($child,'unread');",
+        "BrokenPipeError",
+    );
+    run(&mut runtime, "$again=Process::wait($child);").unwrap();
+    assert_eq!(property(&runtime, "again", "success"), Value::Bool(false));
+}
+
+#[test]
+fn interactive_foreign_and_forged_handles_and_permissions_are_rejected() {
+    let mut owner = runtime();
+    run(&mut owner,"Env::set('SCR_PROCESS_FIXTURE','sleep'); $child=Process::spawn($program,$arguments,['interactive'=>true,'timeoutMs'=>3000]);").unwrap();
+    let mut foreign = runtime();
+    foreign
+        .set_global("child", owner.get_global("child").unwrap().clone())
+        .unwrap();
+    for expression in [
+        "Process::readStdout($child,1)",
+        "Process::readStderr($child,1)",
+        "Process::writeStdin($child,'x')",
+        "Process::closeStdin($child)",
+        "Process::wait($child)",
+        "Process::poll($child)",
+        "Process::kill($child)",
+    ] {
+        error(&mut foreign, &format!("{expression};"), "TypeError");
+    }
+    #[derive(Debug)]
+    struct Fake;
+    impl NativeObject for Fake {
+        fn get_property(&self, _: &str) -> Result<Value, String> {
+            Err("forged".into())
+        }
+        fn type_name(&self) -> &str {
+            "ProcessHandle"
+        }
+    }
+    foreign
+        .set_global("child", Value::NativeObject(std::rc::Rc::new(Fake)))
+        .unwrap();
+    error(&mut foreign, "Process::readStdout($child,1);", "TypeError");
+    let mut denied_options = RuntimeOptions::default();
+    denied_options
+        .context
+        .permissions
+        .allowed
+        .remove("process.execute");
+    let mut denied = configured_runtime(Default::default(), denied_options);
+    denied
+        .set_global("child", owner.get_global("child").unwrap().clone())
+        .unwrap();
+    error(
+        &mut denied,
+        "Process::writeStdin($child,'x');",
+        "PermissionError",
+    );
+    run(&mut owner, "Process::kill($child);").unwrap();
+}
+
+#[test]
+fn interactive_timeouts_output_limits_and_cancellation_reap_owned_children() {
+    let mut runtime = runtime();
+    run(&mut runtime,"Env::set('SCR_PROCESS_FIXTURE','sleep'); $child=Process::spawn($program,$arguments,['interactive'=>true,'timeoutMs'=>60]);").unwrap();
+    let child_pid = pid(&runtime, "child");
+    error(
+        &mut runtime,
+        "Process::readStderr($child,1,1000);",
+        "TimeoutError",
+    );
+    assert!(gone(child_pid));
+    run(&mut runtime,"Env::set('SCR_PROCESS_FIXTURE','flood'); $child=Process::spawn($program,$arguments,['interactive'=>true,'timeoutMs'=>3000,'maxOutputBytes'=>100]); Process::closeStdin($child);").unwrap();
+    let child_pid = pid(&runtime, "child");
+    error(
+        &mut runtime,
+        "Process::readStderr($child,1,1000);",
+        "OutputLimitError",
+    );
+    error(&mut runtime, "Process::wait($child);", "OutputLimitError");
+    assert!(gone(child_pid));
+    let flag = Arc::new(AtomicBool::new(false));
+    let mut cancelled = configured_runtime(
+        Default::default(),
+        RuntimeOptions {
+            interrupt_flag: Some(flag.clone()),
+            ..Default::default()
+        },
+    );
+    run(&mut cancelled,"Env::set('SCR_PROCESS_FIXTURE','sleep'); $child=Process::spawn($program,$arguments,['interactive'=>true,'timeoutMs'=>3000]);").unwrap();
+    cancelled
+        .set_global("payload", Value::Bytes(vec![b'x'; 65536].into()))
+        .unwrap();
+    run(&mut cancelled, "Process::writeStdin($child,$payload);").unwrap();
+    let child_pid = pid(&cancelled, "child");
+    let worker = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(30));
+        flag.store(true, Ordering::Relaxed);
+    });
+    let start = Instant::now();
+    assert!(
+        run(
+            &mut cancelled,
+            "try { Process::readStderr($child,1,30000); } catch (Error $error) {}"
+        )
+        .is_err()
+    );
+    worker.join().unwrap();
+    assert!(start.elapsed() < Duration::from_secs(2));
+    assert!(gone(child_pid));
+}
+
+#[test]
+fn interactive_last_alias_drop_and_kill_cleanup_child_trees() {
+    let directory = tempfile::tempdir().unwrap();
+    let marker = directory.path().join("late");
+    let mut runtime = runtime();
+    runtime
+        .set_global("marker", Value::String(marker.to_str().unwrap().into()))
+        .unwrap();
+    run(&mut runtime,"Env::set('SCR_PROCESS_FIXTURE','sleep'); $child=Process::spawn($program,$arguments,['interactive'=>true,'timeoutMs'=>3000]); $alias=$child;").unwrap();
+    runtime
+        .set_global("payload", Value::Bytes(vec![b'x'; 65536].into()))
+        .unwrap();
+    run(&mut runtime, "Process::writeStdin($child,$payload);").unwrap();
+    let child_pid = pid(&runtime, "child");
+    run(&mut runtime, "$child=null;").unwrap();
+    assert!(!gone_immediately(child_pid));
+    run(&mut runtime, "$alias=null;").unwrap();
+    assert!(gone(child_pid));
+    run(&mut runtime,"Env::set('SCR_PROCESS_FIXTURE','descendant'); Env::set('SCR_LATE_MARKER',$marker); $child=Process::spawn($program,$arguments,['interactive'=>true,'timeoutMs'=>3000]); Process::closeStdin($child); Process::wait($child);").unwrap();
+    std::thread::sleep(Duration::from_millis(900));
+    assert!(!marker.exists());
+}
+fn gone_immediately(pid: u32) -> bool {
+    let mut system = sysinfo::System::new();
+    let pid = sysinfo::Pid::from_u32(pid);
+    system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+    system.process(pid).is_none()
 }

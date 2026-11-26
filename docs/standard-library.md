@@ -45,8 +45,8 @@ registered by default.
 
 ## Export index
 
-This reference covers 237 core functions and four default CLI SQLite functions
-(241 in total), plus 19 request-context Web/Session functions, native response/entry
+This reference covers 241 core functions and four default CLI SQLite functions
+(245 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -70,7 +70,7 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Temp | `Temp::file`, `Temp::directory`, `Temp::close` | [Temporary resources and locks](#temporary-resources-and-file-locks) |
 | Dir | `Dir::exists`, `Dir::create`, `Dir::createAll`, `Dir::files`, `Dir::directories`, `Dir::entries`, `Dir::walk`, `Dir::glob`, `Dir::remove`, `Dir::current`, `Dir::change` | [Filesystem](#filesystem-and-paths) |
 | Path | `Path::join`, `Path::filename`, `Path::extension`, `Path::parent`, `Path::normalize`, `Path::absolute`, `Path::canonical`, `Path::matchesGlob` | [Paths](#filesystem-and-paths) |
-| Process | `Process::run`, `Process::spawn`, `Process::shell`, `Process::wait`, `Process::poll`, `Process::kill`, `Process::exists`, `Process::currentId` | [Processes](#processes) |
+| Process | `Process::run`, `Process::spawn`, `Process::shell`, `Process::wait`, `Process::poll`, `Process::kill`, `Process::exists`, `Process::currentId`, `Process::writeStdin`, `Process::closeStdin`, `Process::readStdout`, `Process::readStderr` | [Processes](#processes) |
 | Env | `Env::get`, `Env::set`, `Env::has`, `Env::remove`, `Env::all` | [Environment](#environment) |
 | Cli | `Cli::args`, `Cli::arg`, `Cli::has`, `Cli::option`, `Cli::isTerminal`, `Cli::prompt`, `Cli::readLine` | [CLI](#script-arguments-and-prompts) |
 | System | `System::platform`, `System::architecture`, `System::hostname`, `System::cpuUsage`, `System::memoryUsage`, `System::diskUsage`, `System::uptime`, `System::homeDirectory`, `System::tempDirectory` | [System](#system-information) |
@@ -1494,6 +1494,7 @@ $result = Process::run("git", ["status"], [
 | `outputType` | `"text"` by default (strict UTF-8); `"bytes"` returns raw bytes for both captured fields. Does not change inherited/null OS stream behavior. |
 | `stdout`, `stderr` | Each accepts `capture`, `inherit`, or `null`. Capture is the default. |
 | `stdin` | `null` (immediate EOF) by default; `inherit` uses OS stdin. |
+| `interactive` | `false` by default. `true` opts into the spawn-only live stdin/output contract below. |
 
 Unknown options and invalid values raise `TypeError` before a child is launched.
 Oversized supplied input raises `InputLimitError` before launch, independent of
@@ -1511,7 +1512,8 @@ after its contents. Children can read stdin and write both captured outputs
 independently without pipe backpressure or a stdin-writer thread. Early stdin
 closure or child exit discards unread input and returns the ordinary exit status;
 there is no pipe `BrokenPipe` delivery error. Spawn stages input before returning
-its handle. These are one-shot payload APIs; interactive pipes are not exposed.
+its handle. These remain one-shot payload APIs. Opt into the separate interactive mode below
+for ongoing stdin and live output reads.
 
 Capture uses separate temporary files, with no stdout/stderr pipe dependency or
 reader thread waiting for EOF. A monitor polls status, deadline, cancellation, and
@@ -1601,6 +1603,100 @@ cancellation; pending child jobs are cleaned up and interrupted runs exit 130.
 Abnormal host termination (for example SIGKILL, power loss, or an abort outside
 normal cleanup) does not provide a portable cleanup guarantee.
 
+### Interactive child I/O
+
+`Process::spawn(command, arguments, ["interactive" => true])` gives the handle
+owned stdin and live stdout/stderr access. This is an explicit opt-in: ordinary
+run/spawn/shell retain their staged-input and capture behavior. Interactive mode
+requires `Process::spawn`, rejects explicit `input`, `stdin`, `stdout`, `stderr`,
+and `outputType` options, and requires a finite positive `timeoutMs` (default
+60000). Invalid combinations raise `TypeError` before launch. `cwd`, `env`,
+`maxInputBytes`, and `maxOutputBytes` retain their validation and host ceilings.
+
+| API | Behavior |
+| --- | --- |
+| `Process::writeStdin(handle, data: string or bytes): int` | Nonblocking acceptance of an ordered prefix into a 64 KiB stdin queue. Returns the number of bytes accepted; zero means backpressure (or empty input). Strings supply their UTF-8 bytes. |
+| `Process::closeStdin(handle): null` | Request EOF after accepted input drains. Repeat close is idempotent; later writes raise `ProcessError`. |
+| `Process::readStdout(handle, maxBytes: int, timeoutMs: int optional): bytes or null` | Consume up to `maxBytes` (1–65536). Wait at most `timeoutMs` (0–30000, default zero) for data. Empty bytes means no data yet; null means process cleanup completed and this stream is drained. |
+| `Process::readStderr(handle, maxBytes: int, timeoutMs: int optional): bytes or null` | The same independent cursor, polling, byte and EOF rules for stderr. |
+
+Read sizes and wait times outside these ranges raise `RangeError`; wrong types
+or argument counts raise `TypeError`. All four APIs require `process.execute`,
+a real interactive `ProcessHandle` owned by the calling runtime, and check
+cancellation. Noninteractive/closed stdin operations raise `ProcessError`;
+forged or foreign handles raise `TypeError`. Dropping the last handle alias kills
+and reaps its managed child as before. No separate stream value can retain access
+after its process handle is dropped.
+
+A dedicated writer services stdin in chunks of at most 16 KiB. An accepted byte
+count acknowledges queueing, not child consumption or OS delivery. Retry only
+the unaccepted suffix (counts are bytes; use `Bytes::encodeUtf8` and
+`Bytes::slice` for string retries); the queue can apply backpressure while the child is busy.
+The cumulative **accepted** input, including bytes already delivered, is bounded
+by `maxInputBytes`. Offering more bytes than the remaining allowance raises
+`InputLimitError` without enqueueing any of that offer. Queue allocation is checked
+against the current logical value-byte budget before copying. Pending input is
+charged as handle payload; worker stacks/queue capacity are not a process heap cap.
+
+Pipe delivery failures are retained for stdin operations as `BrokenPipeError`
+(or `ProcessError` for another I/O failure). A completed child with unavailable
+stdin also raises `BrokenPipeError` on write. These do not replace its normal exit
+result: an early exit can leave queued input undelivered. EOF after a successful
+close is guaranteed only when queued delivery succeeds. On kill, timeout,
+cancellation, or drop, queued input is discarded as part of cleanup.
+
+Live stdout/stderr are spooled to private temporary files with independently
+reopened read cursors. Reading never seeks the child's write cursor and output
+cannot fill a parent-owned pipe. Simultaneous stdout, stderr and stdin therefore
+do not require the script to drain a particular stream before writing another.
+The process monitor checks the combined spool length against `maxOutputBytes`.
+For sequential output this includes all produced bytes, even already-consumed
+prefixes, which the host does not remove. Child stdout/stderr are append-only
+files, not OS pipes; intentional file truncation is unsupported. As with ordinary capture,
+temporary disk usage can overshoot between approximately 5 ms monitor polls;
+this is not a hard aggregate disk quota. Live reads also check the combined
+spool limit before returning any more data and trigger cleanup on excess. Disk
+failures propagate. Returned
+chunks are checked against the logical value-byte budget before allocation and
+consumption; disk spools themselves are not returned-value payloads.
+
+Read results are always bytes; a chunk can split a UTF-8 character. Collect a
+complete text message before calling `Bytes::decodeUtf8`; invalid UTF-8 is never
+silently replaced. Per-stream byte order is preserved; no cross-stream ordering
+is promised. Null EOF is reported after the entire managed process finishes and
+that stream is drained, even if the child closed its stream earlier.
+
+While stdin remains open, `Process::wait` raises `ProcessError` unless the
+monitor has already completed. Use polling/live reads while coordinating a
+conversation, then call `closeStdin` before waiting. `Process::kill` always
+requests cleanup. Readers can continue consuming spooled output after a normal
+wait or kill. Interactive `ProcessResult->stdout` and `->stderr` are empty bytes;
+output is exposed only by the live-read APIs. Repeated waits retain the status.
+Monitor timeout/limit/cancellation failures raise their stored error on further
+reads and discard access to unread output; bytes already returned cannot be
+revoked. A failed operation preserves its assignment destination.
+
+Interactive processes require finite deadlines, and read waits check cancellation
+at approximately 5 ms intervals. OS file operations and process creation remain
+cooperative. At most 64 interactive resources can be live across all runtimes (retained
+handles and any surviving stdin workers share their resource permits);
+exhaustion raises `ResourceLimitError` before launch. Managed-child cleanup
+normally unblocks pending pipe writes and joins the worker. Shutdown waits at
+most 100 ms for that worker: if a descendant escaped its managed group/job and
+retains stdin, a blocked worker can outlive the handle until that reader closes.
+It retains at most one 16 KiB delivery chunk and its resource permit; queued input
+is cleared. Such detached descendants are outside the existing process-tree
+ownership guarantee. This avoids an unbounded worker join during host cleanup.
+Temporary output files are removed when the last process handle drops.
+
+The [interactive example](../examples/process-interactive.scripta) sends one
+message, receives a reply before stdin EOF, closes stdin and observes stderr and
+exit status. From a checkout with `scripta` on PATH, run:
+
+```sh
+scripta run examples/process-interactive.scripta scripta tests/fixtures/process-interactive.scripta
+```
+
 ### Explicit shell execution and permissions
 
 `Process::shell(code, options = ...)` is a separately named operation requiring
@@ -1621,7 +1717,7 @@ root policy. Remove it when a host must not permit external programs.
 
 Errors include `CommandNotFoundError`, `ProcessError`, `PermissionError`,
 `TimeoutError`, `InputLimitError`, `OutputLimitError`, `ResourceLimitError`,
-`EncodingError`, and `TypeError`. Errors retain
+`EncodingError`, `BrokenPipeError`, `RangeError`, and `TypeError`. Errors retain
 the native call span and script stack. Timeout/limit errors discard partial output
 after cleanup instead of returning a successful result with truncated text.
 
