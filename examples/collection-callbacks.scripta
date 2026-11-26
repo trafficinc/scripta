@@ -1,0 +1,42 @@
+// Keep comprehensions for simple inline mapping/filtering.
+$numbers = [-2, 0, 3, 4];
+$squares = [$n * $n for $n in $numbers if $n > 0];
+echo "Comprehension: " . Json::encode($squares) . "\n";
+function double($value: int): int {
+    return $value * 2;
+}
+$positive = List::filter($numbers, function ($value): bool {
+    return $value > 0;
+});
+$mapped = List::map($positive, double);
+echo "Mapped: " . Json::encode($mapped) . "\n";
+// Prefer the fixed-purpose helper for summation; reduce handles custom folds.
+$sum = List::sum($mapped);
+$reduced = List::reduce($mapped, function ($accumulator, $value) {
+    return $accumulator + $value;
+}, 0);
+echo "Sum: " . str($sum) . ", reduced: " . str($reduced) . "\n";
+$rows = [["name" => "Grace", "score" => 2], ["name" => "Ada", "score" => 2], ["name" => "Linus", "score" => 1]];
+$byKey = List::sortBy($rows, function ($row) {
+    return $row["score"];
+}, true);
+echo "By key: " . Json::encode(List::column($byKey, "name")) . "\n";
+// Custom comparison expresses score descending, then name ascending.
+function compareRows($left, $right): int {
+    if ($left["score"] > $right["score"])
+        return -1;
+    if ($left["score"] < $right["score"])
+        return 1;
+    if ($left["name"] < $right["name"])
+        return -1;
+    if ($left["name"] > $right["name"])
+        return 1;
+    return 0;
+}
+$custom = List::sortWith($rows, compareRows);
+echo "Custom: " . Json::encode(List::column($custom, "name")) . "\n";
+$settings = ["fast" => 1, 7 => 2];
+$scaled = Map::map($settings, function ($value, $key) {
+    return $value * 10;
+});
+echo "Typed keys: " . Json::encode(Map::keys($scaled)) . "\n";

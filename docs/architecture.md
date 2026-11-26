@@ -107,6 +107,12 @@ resource release. See [resource behavior](standard-library.md#distribution-and-r
 Typed native registration validates arguments and results. Runtime contexts
 supply streams, permissions, cancellation and host state. Reentrant invocation
 shares script scopes, budgets and error signals without terminating the host.
+Invocation contexts expose a read-only logical byte ceiling for backend allocation
+preflight. Eager collection callbacks use this public bridge; the runtime has no
+collection-backend dependency. Key sorting computes each scalar key once, then
+sorts indexes with a fallible stable merge; comparator sorting invokes scripts
+through the same bounded bridge. Existing fixed-purpose helpers, comprehensions
+and value-copy rules remain unchanged.
 Backend-free execution-cleanup callbacks run after top-level outcomes and before
 runtime teardown. Standard-library temporary resources and file locks opt into
 this lifecycle through a bounded native registry, so cancellation does not leave

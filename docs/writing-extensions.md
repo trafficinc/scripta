@@ -443,7 +443,12 @@ validated arguments. Call `context.invoke(value, arguments)` and return its
 `InvocationResult` to propagate the original exception, exit, or fatal signal.
 Use `context.error(NativeError::new(kind, message))` for a new catchable exception
 and `context.require_permission(capability)` before effects. `context.checkpoint()`
-checks cancellation and instruction limits during iterative work. Reentrant
+checks cancellation and instruction limits during iterative work.
+`context.max_value_bytes()` returns the current optional logical per-value byte
+ceiling for preflighting result/work allocations. Include collection/value/key
+slots and payloads; this read-only accessor does not reset budgets or provide an
+aggregate process heap cap. Use checked arithmetic, fallible reservations and
+checkpoints during growing/iterative work. Reentrant
 functions share the output writer, lexical ownership, call depth, and the execution
 budget; callback invocation does not reset limits. Functions in the test runner
 use this public interface, rather than adding test names to the evaluator.

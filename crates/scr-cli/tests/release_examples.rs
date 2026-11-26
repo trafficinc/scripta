@@ -663,11 +663,11 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Math", "abs min max floor ceil round"),
         (
             "List",
-            "remove slice concat contains sort push unshift pop shift splice reverse chunk fill search unique sum product diff intersect column",
+            "remove slice concat contains sort push unshift pop shift splice reverse chunk fill search unique sum product diff intersect column map filter reduce sortBy sortWith",
         ),
         (
             "Map",
-            "create has get keys values remove merge replace combine flip search reverse diff intersect diffKeys intersectKeys column",
+            "create has get keys values remove merge replace combine flip search reverse diff intersect diffKeys intersectKeys column map filter reduce",
         ),
     ];
     let output_functions = "flush";
@@ -684,7 +684,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 248);
+    assert_eq!(count, 256);
     for name in [
         "start",
         "id",
@@ -1349,4 +1349,16 @@ fn http_conveniences_example_uses_explicit_cookies_retry_and_binary_multipart() 
         "Multipart body: bytes\nGET status: 200\nPOST status: 200\nCookie jar closed: true\n"
     );
     worker.join().unwrap();
+}
+
+#[test]
+fn callback_collection_example_retains_comprehensions_fixed_helpers_and_stable_sorting() {
+    let path = example("collection-callbacks.scripta");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    assert_eq!(
+        success(run("collection-callbacks.scripta", &[])),
+        "Comprehension: [9,16]\nMapped: [6,8]\nSum: 14, reduced: 14\nBy key: [\"Grace\",\"Ada\",\"Linus\"]\nCustom: [\"Ada\",\"Grace\",\"Linus\"]\nTyped keys: [\"fast\",7]\n"
+    );
 }

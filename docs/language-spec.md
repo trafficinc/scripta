@@ -703,7 +703,9 @@ resource-close guarantee, and freed memory need not immediately reduce RSS.
 
 ## Planned features
 
-Variable annotation syntax and callback-based collection transforms remain future work. Recursive map merge
+Variable annotation syntax remains future work. Eager callback collection
+transforms and stable key/comparator sorting are standard-library APIs. Lazy
+collection iterators remain future work. Recursive map merge
 variants are not implemented. List and map helpers, including `List::pop`,
 `List::shift`, splice, aggregation, comparisons, and column extraction, are
 implemented alongside construction, projection, and safe lookup.

@@ -127,6 +127,26 @@ JSON/HTTP and binary-stream tests cover default behavior and non-replayable sour
 rules. `examples/http-conveniences.scripta` runs without network arguments and is
 also executed against a controlled server by the CLI example suite.
 
+Callback collection behavior is covered in
+`crates/scr-stdlib/tests/collection_callbacks.rs`: callable reuse/captures,
+list/map ordering, strict predicates/keys/comparators, stable sort ties,
+reentrancy/shared-object effects, typed errors/traces, exits, fatal limits,
+exact output/key-cache budgets, depth and partial-output cleanup. Existing
+`collections` integration and unit tests remain required. The controlled
+`examples/collection-callbacks.scripta` contrasts a comprehension, fixed-purpose
+sum, eager callbacks and key/comparator sorting.
+
+`cargo bench -p scr-stdlib --bench collections --locked --offline --target TARGET`
+prints CSV observations for fixed-purpose helpers plus callbacks, comprehensions,
+foreach loops, scalar/growing reduction and record sorting. Use the native target
+and deployment settings from AGENTS.md. Parsing, registration and fixture setup
+are outside timers; argument copies, execution checks, calls, result assignment
+and normal execute cleanup remain inside. Callback cases alternate traversal
+order, use two warmups/nine measured samples, and assert complete result equality
+outside timing. These observations have no test timing thresholds and do not
+establish startup or cross-platform performance. The full pre-expansion matched
+release comparison remains the final expansion-plan section's work.
+
 ## Local disk cleanup
 
 From the workspace root, preview removable build outputs and Python caches:

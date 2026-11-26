@@ -45,8 +45,8 @@ registered by default.
 
 ## Export index
 
-This reference covers 244 core functions and four default CLI SQLite functions
-(248 in total), plus 19 request-context Web/Session functions, native response/entry
+This reference covers 252 core functions and four default CLI SQLite functions
+(256 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -61,8 +61,8 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Password | `Password::hash`, `Password::verify`, `Password::needsRehash` | [Passwords](#passwords) |
 | Html | `Html::escape` | [HTML escaping](#html-escaping) |
 | Math | `Math::abs`, `Math::min`, `Math::max`, `Math::floor`, `Math::ceil`, `Math::round` | [Math](#math) |
-| List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort`, end operations, generation, search, aggregation, comparisons, `List::column` | [Collections](#collections) |
-| Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove`, merge/replace, combine/flip, search/reverse, comparisons, `Map::column` | [Collections](#collections) |
+| List | `List::remove`, `List::slice`, `List::concat`, `List::contains`, `List::sort`, end operations, generation, search, aggregation, comparisons, `List::column`, `List::map`, `List::filter`, `List::reduce`, `List::sortBy`, `List::sortWith` | [Collections](#collections) |
+| Map | `Map::create`, `Map::has`, `Map::get`, `Map::keys`, `Map::values`, `Map::remove`, merge/replace, combine/flip, search/reverse, comparisons, `Map::column`, `Map::map`, `Map::filter`, `Map::reduce` | [Collections](#collections) |
 | File | `File::exists`, `File::read`, `File::readBytes`, `File::writeBytes`, `File::appendBytes`, `File::write`, `File::writeAtomic`, `File::append`, `File::copy`, `File::move`, `File::delete`, `File::size`, `File::modified`, `File::extension`, `File::openLines`, `File::readLine`, `File::close`, `File::lock`, `File::unlock` | [Filesystem](#filesystem-and-paths) |
 | Zip | `Zip::encode`, `Zip::decode`, `Zip::extract` | [Archives and compression](#archives-and-compression) |
 | Tar | `Tar::encode`, `Tar::decode`, `Tar::extract` | [Archives and compression](#archives-and-compression) |
@@ -113,8 +113,9 @@ Default and variadic parameters and anonymous literals are language features,
 separate from native function registration. A script variadic annotation checks
 each extra argument and binds a list. See
 [function parameters and captures](language-spec.md#function-parameters-and-captures)
-and [the functions playground](../playground/functions.scripta). Callback-based
-collection transforms remain deferred; callbacks can be passed to script helpers.
+and [the functions playground](../playground/functions.scripta). Eager callback
+helpers and stable key/comparator sorting use this existing callable interface;
+see [collection callbacks](#collection-callbacks-and-custom-sorting).
 
 ## Strings
 
@@ -706,8 +707,8 @@ size overflows, byte-budget violations, and fallible result reservations raise
 `ResourceLimitError`; input arguments and returned booleans also remain subject
 to the runtime's ordinary value checks. These limits do not bound process RSS
 or temporary key indexes and sorting scratch space. Cancellation is checked at native-call boundaries
-and during result traversal/copying; a sort can delay cancellation while it is
-ordering the result. Failed helpers leave assignment destinations unchanged.
+and during result traversal/copying; the fixed-purpose `List::sort` can delay
+cancellation while ordering the result. Failed helpers leave assignment destinations unchanged.
 
 `Map::merge`, `replace`, `diffKeys`, and `intersectKeys` use temporary hash
 indexes of borrowed typed keys. `combine`, `flip`, and indexed `column` use
@@ -724,10 +725,95 @@ core operand/index types raise `TypeError`, and arithmetic overflow or division
 by zero raises `ArithmeticError`. Core runtime safety limits and cancellation
 remain outside catches. Existing helper `RangeError` and `ResourceLimitError`
 exceptions are unchanged. See the [exception contract](language-spec.md#statement-grammar)
-and [errors playground](../playground/errors.scripta). Callback transforms and recursive merge variants
-are deferred. Try the [collections playground](../playground/collections.scripta)
+and [errors playground](../playground/errors.scripta). Recursive merge variants
+remain deferred. Try the [collections playground](../playground/collections.scripta)
 and [log analyzer](../playground/log-analyzer.scripta) for complete examples.
 
+
+### Collection callbacks and custom sorting
+
+Keep fixed-purpose helpers such as `List::sum`, `List::product` and `List::column`
+for those operations. Comprehensions remain the direct way to combine simple
+inline mapping and filtering in one pass:
+
+```scripta
+$squares = [$n * $n for $n in $numbers if $n > 0];
+```
+
+Use callback helpers for reusable functions/closures and custom behavior. These
+APIs are eager and return new values; they are not lazy iterators or automatic
+vectorization of script callbacks. Native and script callable values are accepted.
+
+| API | Callback and result |
+| --- | --- |
+| `List::map(items: list, callback: callable): list` | Call callback(value) left to right; collect every returned value. |
+| `List::filter(items: list, callback: callable): list` | Call callback(value) left to right; require bool and keep values whose predicate is true, with contiguous output indexes. |
+| `List::reduce(items: list, callback: callable, initial: any): any` | Call callback(accumulator, value) left to right, replacing the accumulator with its result. Empty input returns a copy of initial. |
+| `Map::map(items: map, callback: callable): map` | Call callback(value, key) in insertion order; retain exact typed keys and replace values with callback results. |
+| `Map::filter(items: map, callback: callable): map` | Call callback(value, key); require bool, preserve retained keys and insertion order. Empty output is a map. |
+| `Map::reduce(items: map, callback: callable, initial: any): any` | Call callback(accumulator, value, key) in insertion order; empty input returns a copy of initial. |
+| `List::sortBy(items: list, keyCallback: callable, descending: bool optional): list` | Compute keyCallback(value) exactly once per element, left to right; stable sorted copy, ascending by default. |
+| `List::sortWith(items: list, comparator: callable, descending: bool optional): list` | Comparator(left, right) must return int; negative/zero/positive means less/equal/greater. Stable sorted copy, ascending by default. |
+
+Initial reduction values are mandatory, including for empty input. There is no
+implicit null seed or first-element seed. Reduce results can change type when
+the callback explicitly returns a different valid value. Filter results require
+bool; truthiness or implicit conversion is not accepted. Wrong helper argument
+types/counts, predicate/comparator result types, and invalid sort key types raise
+`TypeError`. Callback annotations and arity are checked when invoked. Empty inputs
+do not invoke callbacks; sortWith also makes no comparisons for a singleton.
+Callable arguments are still required for those inputs. sortBy computes and
+validates a singleton's key.
+
+Sort keys must be all ints, all finite floats, or all strings, with existing
+numeric/UTF-8 string ordering and no coercion or locale collation. Invalid/mixed
+key types raise `TypeError`; nonfinite values remain invalid under ordinary
+runtime value guards. Equal keys retain input order, even when descending and
+for positive/negative float zero. The key function is never re-run during
+comparison. Prefer sortBy when one scalar key expresses the desired ordering.
+Use sortWith for composite or other custom ordering; integer signs are compared
+without negating the result, so the minimum signed int is safe.
+
+Comparators must define a consistent ordering. Full transitivity is not checked;
+comparison count/order is unspecified, and inconsistent comparators do not promise
+meaningful sortedness. A fallible stable index merge bounds work without relying
+on Rust's infallible sort interface or panicking on inconsistent script callbacks.
+Callback errors abort sorting and propagate their original kind/value, source and
+trace; no partially sorted collection is published.
+
+Helpers iterate collection snapshots and preserve input collection structure.
+Nested collections retain value-copy semantics; script/native object and callable
+identity remains shared. A callback may update captured locals, explicitly change
+caller bindings, mutate shared objects, invoke other helpers, or perform I/O.
+Those side effects persist after an error. Failed outer assignments do not commit
+the helper result; they do not undo explicit callback writes to that variable.
+
+Each callback runs under the same output writer, lexical ownership, call/scope and
+instruction budgets. Typed throws, exit and fatal cancellation/limit signals are
+propagated without rewrapping or resetting limits. Helpers checkpoint between
+iterations and during traversal/merge work. Budget checking charges Value/MapKey
+slots, key/string/byte payloads and reported native-object payloads before output
+growth/copying, with depth ceiling 128. Retained results are rechecked after
+callbacks for mutable native payloads. Sort key caches and index scratch sizes
+are checked independently against the logical value ceiling; allocation failure
+raises `ResourceLimitError`. These are not aggregate heap/RSS caps, and callback
+construction/argument copies can require additional temporary memory.
+
+Callback helpers are not guaranteed to beat loops or comprehensions. Key sorting
+uses n key callbacks, while a comparison sort commonly makes order n log n calls;
+large nested-record copies can amplify that difference. Chaining eager transforms
+allocates intermediate collections. Reduce with a growing collection accumulator
+can perform quadratic copying/traversal; prefer a loop when building such results.
+Benchmark representative inputs rather than assuming native iteration removes
+script call overhead. The native `collections` bench compares these alternatives
+without timing pass/fail thresholds.
+
+Unqualified function names (for example `square` or built-in `str`) and retained
+callable values can be passed directly. Bare namespaced references such as
+`String::lower` are not current language syntax; use a wrapper
+`function ($value) { return String::lower($value); }`. No new reference syntax or
+lazy iterator type is introduced here. See the runnable
+[callback collections example](../examples/collection-callbacks.scripta).
 
 ### PHP array function mapping
 
@@ -752,6 +838,10 @@ Comparisons are always strict, without PHP's default coercion.
 | `array_diff`, `array_intersect` | List or Map `diff`, `intersect` | Always strict; map results retain left keys. |
 | `array_diff_key`, `array_intersect_key` | `Map::diffKeys`, `Map::intersectKeys` | Typed key comparison. |
 | `array_column` | `List::column`, `Map::column` | Requires map rows and existing fields; indexed output requires valid typed keys. |
+| `array_map` | `List::map`, `Map::map` | List callback receives value; Map callback receives value and typed key. |
+| `array_filter` | `List::filter`, `Map::filter` | Explicit callable and strict bool required; list results renumber, map keys remain intact. |
+| `array_reduce` | `List::reduce`, `Map::reduce` | Initial accumulator is mandatory; Map callback also receives the typed key. |
+| `usort` | `List::sortWith` | Stable new list; sign of strict int comparator result, with no coercion or mutation. |
 
 ## Database connectors
 

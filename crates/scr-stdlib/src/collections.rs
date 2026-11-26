@@ -1,4 +1,5 @@
 //! Collection helpers return new values and preserve strictly typed map keys.
+mod callbacks;
 use scr_runtime::{
     MapKey, NativeError, NativeFunction, NativeResult, NativeSignature, NativeType, Runtime,
     RuntimeContext, Value,
@@ -912,6 +913,7 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
             ),
         )?;
     }
+    callbacks::register(runtime)?;
     Ok(())
 }
 

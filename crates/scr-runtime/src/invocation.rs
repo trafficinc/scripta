@@ -77,6 +77,12 @@ pub struct InvocationContext<'a> {
     pub(crate) span: Span,
 }
 impl InvocationContext<'_> {
+    /// Logical per-value byte ceiling for checked native output/work allocation.
+    /// This is not an aggregate host heap limit and does not reset execution budgets.
+    pub fn max_value_bytes(&self) -> Option<usize> {
+        self.runtime.options.max_value_bytes
+    }
+
     pub fn invoke(&mut self, callee: Value, arguments: &[Value]) -> InvocationResult {
         self.checkpoint()?;
         let Value::Callable(callable) = callee else {
