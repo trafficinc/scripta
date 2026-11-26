@@ -616,6 +616,9 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Clock", "monotonicMs"),
         ("Log", "info warn error debug setFile"),
         ("Json", "encode decode pretty"),
+        ("Toml", "parse"),
+        ("Yaml", "parse"),
+        ("Ini", "parse"),
         ("Html", "escape"),
         ("Password", "hash verify needsRehash"),
         ("Http", "get post request download"),
@@ -674,7 +677,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 234);
+    assert_eq!(count, 237);
     for name in [
         "start",
         "id",
@@ -1219,5 +1222,22 @@ fn archive_example_roundtrips_binary_data_and_cleans_its_owned_outputs() {
     assert!(
         !diagnostic.contains("ZipWriter drop failed"),
         "{diagnostic}"
+    );
+}
+
+#[test]
+fn configuration_example_parses_controlled_documents_with_explicit_types() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/configuration.scripta");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg("run")
+        .arg(path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        success(output),
+        "TOML: worker, port 8080 (int)\nYAML: café, enabled true (bool)\nINI: 8080 (string), converted 8080 (int)\nUnsafe YAML rejected\n"
     );
 }

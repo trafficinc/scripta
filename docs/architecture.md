@@ -124,6 +124,12 @@ publication of byte/list results. Filesystem extraction validates first and then
 owns an exclusively created tree with identity-checked rollback. It never delegates
 to permissive archive unpack helpers or applies archive links/permissions.
 
+Configuration parsing remains in scr-stdlib. TOML uses the locked bounded-input
+parser plus checked value conversion; YAML consumes low-level events without an
+alias-expanding loader; INI has an explicit literal-string dialect. Shared limits
+account values, map keys and UTF-8 payloads before growing returned structures.
+No configuration format backend or dependency enters scr-runtime.
+
 OS, network and database backends belong in standard-library or extension crates.
 They enforce capabilities, resource ownership and operation-specific limits.
 Process stdin payloads are staged in bounded temporary regular files; stdout and

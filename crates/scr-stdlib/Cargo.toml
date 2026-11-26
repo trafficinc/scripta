@@ -31,6 +31,8 @@ flate2 = { version = "=1.1.11", default-features = false, features = ["rust_back
 tar = { version = "=0.4.46", default-features = false }
 zip = { version = "=2.6.1", default-features = false, features = ["deflate-flate2", "flate2"] }
 crc32fast = "=1.5.5"
+toml = { version = "=0.8.23", default-features = false, features = ["parse"] }
+yaml-rust2 = { version = "=0.13.2", default-features = false }
 
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 

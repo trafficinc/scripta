@@ -40,13 +40,13 @@ Embedders opt in by calling `scr_stdlib::register(&mut runtime)?`. Registration
 returns `NativeResult<()>`; duplicate names produce `RegistryError` and preserve
 the existing registration. `echo` and `exit` remain language statements. Neither
 is registered as a native function; exit returns a code without terminating the
-embedding process. `File`, `Dir`, `Path`, `Temp`, `Zip`, `Tar`, `Gzip`, `Process`, `Env`, `Cli`, `System`, `Date`, `Clock`, `Log`, `Json`, `Html`, `Password`, `Hash`, `Random`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Base64`, `Hex`, `Csv`, `Regex`, `Socket`, and `Stream` are
+embedding process. `File`, `Dir`, `Path`, `Temp`, `Zip`, `Tar`, `Gzip`, `Process`, `Env`, `Cli`, `System`, `Date`, `Clock`, `Log`, `Json`, `Toml`, `Yaml`, `Ini`, `Html`, `Password`, `Hash`, `Random`, `Http`, `Url`, `Form`, `String`, `Math`, `List`, `Map`, `Bytes`, `Base64`, `Hex`, `Csv`, `Regex`, `Socket`, and `Stream` are
 registered by default.
 
 ## Export index
 
-This reference covers 230 core functions and four default CLI SQLite functions
-(234 in total), plus 19 request-context Web/Session functions, native response/entry
+This reference covers 233 core functions and four default CLI SQLite functions
+(237 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -78,6 +78,9 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Clock | `Clock::monotonicMs` | [Monotonic timing](#monotonic-timing) |
 | Log | `Log::info`, `Log::warn`, `Log::error`, `Log::debug`, `Log::setFile` | [Logging](#local-logging) |
 | Json | `Json::encode`, `Json::decode`, `Json::pretty` | [JSON](#json) |
+| Toml | `Toml::parse` | [Configuration formats](#configuration-formats) |
+| Yaml | `Yaml::parse` | [Configuration formats](#configuration-formats) |
+| Ini | `Ini::parse` | [Configuration formats](#configuration-formats) |
 | Bytes | `Bytes::encodeUtf8`, `Bytes::decodeUtf8`, `Bytes::slice`, `Bytes::timingSafeEqual` | [Binary values](#binary-values), [timing-safe comparison](#secure-randomness-and-comparison) |
 | Random | `Random::bytes` | [Secure randomness and comparison](#secure-randomness-and-comparison) |
 | Base64 | `Base64::encode`, `Base64::decode`, `Base64::encodeUrl`, `Base64::decodeUrl` | [Binary encoding](#binary-encoding) |
@@ -1964,6 +1967,89 @@ $data = Json::decode("{\"status\":\"up\",\"count\":3}");
 echo Json::pretty($data) . "\n";
 ```
 
+## Configuration formats
+
+| Function | Result |
+| --- | --- |
+| `Toml::parse(text: string, options: map optional): map` | Parse a TOML 1.0 document into string-keyed maps, lists and scalars. |
+| `Yaml::parse(text: string, options: map optional): any` | Parse one YAML document using the restricted conversion rules below. |
+| `Ini::parse(text: string, options: map optional): map` | Parse the explicit INI dialect below into a map of section maps. |
+
+These pure helpers require no capabilities, perform no file/network access, and
+do not mutate inputs. Use `Toml::parse(File::read($path))` explicitly when reading
+files; existing read permissions and UTF-8 checks apply. LF and CRLF are supported.
+An initial UTF-8 BOM is accepted and removed. No encoding, comment-preserving
+editing, interpolation, environment substitution, includes, or object construction
+is performed. Empty maps and lists remain distinct.
+
+| Common option | Default and hard maximum | Meaning |
+| --- | --- | --- |
+| `maxInputBytes: int` | 1048576 | UTF-8 input bytes, including an initial BOM. |
+| `maxOutputBytes: int` | 16777216 | Logical bytes in the entire returned value, including Value/MapKey slots and string/key UTF-8 payloads. |
+| `maxValues: int` | 10000 | Every scalar/list/map Value, including the root. Map keys are charged to bytes, not counted as Values. |
+| `maxDepth: int` | 64 | Root depth is zero; each child value adds one. Keys do not add depth. |
+
+All limits can be lowered to zero. Unknown keys, non-string option keys and wrong
+types raise `TypeError`; integers outside 0–maximum raise `RangeError`. Exceeding
+limits raises `ResourceLimitError`. Exact limits succeed. The runtime logical
+value-byte budget also applies. Limits bound returned data, not the process heap:
+parser state, source buffers, metadata and temporary copies need extra storage.
+The TOML parser materializes a working document from bounded input before checked
+conversion and also has an independent parser recursion ceiling. YAML event
+consumption checks depth before descending; anchors/aliases are never expanded.
+Cancellation is checked before/after parser calls and during value conversion,
+event consumption and INI line iteration. Parser work between checkpoints remains
+synchronous. No incomplete result is returned; failed assignments preserve their
+destination.
+
+TOML strings, bools, signed i64 integers, finite f64 floats, arrays and tables
+convert directly. Tables use lexical key order; arrays retain document order.
+Keys are case-sensitive, including quoted numeric keys. Duplicate definitions,
+invalid syntax, integer overflow and nonfinite floats raise `TomlError`. TOML's
+typed dates, times and datetimes raise `TomlError`; quote timestamps to keep them
+as explicit strings. No implicit Unix-time or timezone conversion occurs.
+
+YAML mappings/sequences preserve source order. Plain scalars use YAML 1.2 core
+forms: null (`null`/`Null`/`NULL`, `~`, empty), bool (`true`/`True`/`TRUE` and
+corresponding false), signed decimal integers, `0o` octal and `0x` hexadecimal
+integers, and decimal floats with optional exponent. Integer overflow or nonfinite
+floats raise `YamlError` rather than falling back to strings. Decimal leading zeros
+remain decimal (`01` is integer 1). Quoted and block scalars remain strings.
+Dates/timestamps, `yes`/`no`/`on`/`off`, sexagesimal numbers and numeric forms with
+underscores stay strings. Empty streams/documents yield null; `{}` yields an empty
+map and `[]` an empty list. Multiple documents are rejected.
+
+YAML keys must resolve to strings: quote numeric, boolean and null keys. Empty
+quoted keys are valid. Duplicate keys, complex/non-string keys, every anchor or
+alias (even unused anchors), every explicit tag (including `!!str`), and merge
+keys (`<<`, also when quoted) raise `YamlError`. No YAML alias loader is invoked.
+Malformed syntax and unsupported structures raise `YamlError`. This is a
+restricted configuration conversion profile, not a lossless YAML representation.
+
+INI is case-sensitive and line-oriented. `key=value` assigns a literal string;
+only the first `=` separates the pair. `[section]` starts a named section.
+ASCII spaces/tabs around section names, keys and values are trimmed. The root
+always starts with `"" => map` for global keys, followed by section maps in source
+order. Names and dots are literal; `service.api` is one section. Keys preserve
+source order within each section. Duplicate keys in one section or repeated
+section declarations raise `IniError`; case variants remain distinct. Empty
+keys/section names, malformed headers, missing `=`, bare CR and control characters
+other than tabs and line endings are rejected.
+
+Blank INI lines and whole-line `#`/`;` comments are ignored. Inline `#`/`;`, quote
+characters, backslashes, `%` and `${...}` are literal data. Empty values are empty
+strings. There are no escapes, continuations, colon separators or implicit scalar
+types; convert explicitly with `int`, `float` or `bool`. Even an empty INI document
+contains the root and globals maps (two Values, deepest depth 1); a key's string
+value is at depth 2.
+
+Syntax errors report one-based line/column positions without copying source
+snippets into native error messages; conversion errors identify unsupported
+categories. Script spans/traces and catchable format error kinds are preserved.
+The [configuration example](../examples/configuration.scripta) demonstrates all
+three formats, explicit INI numeric conversion and unsafe-YAML rejection:
+`scripta examples/configuration.scripta`.
+
 ## URL and form encoding
 
 All helpers in this section require no network or filesystem capabilities.
@@ -2157,7 +2243,7 @@ connection metadata and `request_id: None` leave these properties unknown
 Connection metadata and request-ID dynamic strings count toward the request value
 budget. See [host logs and health checks](web-servers.md#logs-and-health-checks)
 for ID lifecycle and privacy rules.
-These properties do not add registered functions: export counts stay 234 default
+These properties do not add registered functions: export counts stay 237 default
 functions plus 19 request-context functions.
 
 It has these methods:

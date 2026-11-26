@@ -9,9 +9,11 @@ mod bytes;
 mod cli;
 mod clock;
 mod collections;
+mod config;
 mod csv;
 mod data_text;
 mod date;
+mod date_operations;
 mod encoding;
 mod environment;
 pub mod filesystem;
@@ -126,6 +128,7 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
     data_text::register(runtime)?;
     csv::register(runtime, options.filesystem.clone())?;
     json::register(runtime)?;
+    config::register(runtime)?;
     strings::register(runtime)?;
     html::register(runtime)?;
     password::register(runtime, options.password)?;
@@ -142,6 +145,7 @@ pub fn register_with_options(runtime: &mut Runtime, options: StdlibOptions) -> N
     filesystem::register(runtime, options.filesystem.clone())?;
     system::register(runtime, options.filesystem.clone())?;
     date::register(runtime)?;
+    date_operations::register(runtime)?;
     clock::register(runtime)?;
     log::register(runtime, options.log, options.filesystem)?;
     paths::register(runtime)?;

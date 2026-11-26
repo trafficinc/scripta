@@ -1,0 +1,12 @@
+$toml = Toml::parse("name = 'worker'\n[server]\nport = 8080\n");
+$yaml = Yaml::parse("name: café\nenabled: true\nworkers: [first, second]\n");
+$ini = Ini::parse("mode=local\n[server]\nport=8080\n");
+echo "TOML: " . $toml["name"] . ", port " . str($toml["server"]["port"]) . " (" . type($toml["server"]["port"]) . ")\n";
+echo "YAML: " . $yaml["name"] . ", enabled " . str($yaml["enabled"]) . " (" . type($yaml["enabled"]) . ")\n";
+$port = int($ini["server"]["port"]);
+echo "INI: " . $ini["server"]["port"] . " (" . type($ini["server"]["port"]) . "), converted " . str($port) . " (" . type($port) . ")\n";
+try {
+    Yaml::parse("defaults: &settings [1, 2]\ncopy: *settings\n");
+} catch (YamlError $error) {
+    echo "Unsafe YAML rejected\n";
+}

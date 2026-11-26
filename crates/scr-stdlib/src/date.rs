@@ -27,14 +27,34 @@ pub(crate) fn now_millis() -> NativeResult<i64> {
     };
     i64::try_from(milliseconds).map_err(|_| range())
 }
-fn range() -> NativeError {
+pub(crate) fn range() -> NativeError {
     NativeError::new("RangeError", "timestamp is outside the supported range")
 }
 pub(crate) fn timestamp_millis(value: i64) -> NativeResult<DateTime<Utc>> {
     DateTime::from_timestamp_millis(value).ok_or_else(range)
 }
-fn date_error(message: &str) -> NativeError {
+pub(crate) fn date_error(message: &str) -> NativeError {
     NativeError::new("DateError", message)
+}
+
+pub(crate) fn resolve_timezone(name: &str) -> NativeResult<TimeZone> {
+    if name.is_empty() || name.len() > 255 || name.contains('\0') {
+        return Err(date_error("expected local, UTC, or an IANA timezone name"));
+    }
+    let zone = if name.eq_ignore_ascii_case("UTC") {
+        TimeZone::UTC
+    } else if name == "local" {
+        TimeZone::try_system()
+            .map_err(|_| date_error("could not determine the local timezone"))?
+    } else {
+        // Always use bundled rules, even if another dependency enables system data.
+        TimeZoneDatabase::bundled().get(name)
+            .map_err(|_| date_error("unknown IANA timezone name"))?
+    };
+    if zone.is_unknown() {
+        return Err(date_error("could not determine the timezone"));
+    }
+    Ok(zone)
 }
 
 // Count the exact formatted output before allocating it. write_to avoids the
@@ -83,23 +103,7 @@ fn format_date(
     let (offset, abbreviation) = if timezone.is_none_or(|name| name.eq_ignore_ascii_case("UTC")) {
         (FixedOffset::east_opt(0).unwrap(), "UTC")
     } else {
-        let name = timezone.unwrap();
-        if name.is_empty() || name.len() > 255 || name.contains('\0') {
-            return Err(date_error("expected local, UTC, or an IANA timezone name"));
-        }
-        zone = if name == "local" {
-            TimeZone::try_system()
-                .map_err(|_| date_error("could not determine the local timezone"))?
-        } else {
-            // Explicitly use the bundle even if another dependency enables
-            // Jiff's optional system database features in the future.
-            TimeZoneDatabase::bundled()
-                .get(name)
-                .map_err(|_| date_error("unknown IANA timezone name"))?
-        };
-        if zone.is_unknown() {
-            return Err(date_error("could not determine the timezone"));
-        }
+        zone = resolve_timezone(timezone.unwrap())?;
         let instant = Timestamp::from_second(value).map_err(|_| range())?;
         info = zone.to_offset_info(instant);
         (

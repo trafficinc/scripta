@@ -92,6 +92,15 @@ filesystem/collection tests remain relevant. Execute the self-cleaning
 Archive support uses the already locked ZIP/TAR/flate2 libraries with minimal
 features; release packaging keeps its explicit stored-ZIP settings.
 
+Configuration tests are in `crates/scr-stdlib/tests/configuration.rs`, with exact
+logical output budgets and cancellation cases in `src/config.rs`. Explicit LF
+and CRLF strings cover TOML/YAML/INI conversion, Unicode and literal strings;
+malformed input, duplicate definitions, unsupported dates/tags/aliases, nesting,
+value counts and numeric overflow preserve failed-assignment destinations.
+`examples/configuration.scripta` exercises all formats without external inputs.
+TOML reuses the locked parser. YAML uses yaml-rust2 event tokens with the encoding
+feature disabled, never its alias-expanding document loader.
+
 ## Local disk cleanup
 
 From the workspace root, preview removable build outputs and Python caches:
