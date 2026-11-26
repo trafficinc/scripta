@@ -113,6 +113,11 @@ this lifecycle through a bounded native registry, so cancellation does not leave
 host-retained aliases open. Backend state, filesystem identity checks, removal,
 and lock polling remain in scr-stdlib; existing resource lifetimes are unchanged.
 
+Immutable full-URL values use a bounded WHATWG parser in scr-stdlib, reusing the
+locked url/IDNA dependencies. Their parsing and reference resolution perform no
+I/O and do not modify HTTP/Stream validation, permission, or TLS policy. Encoded
+components and canonical text remain distinct from explicit query/form decoding.
+
 OS, network and database backends belong in standard-library or extension crates.
 They enforce capabilities, resource ownership and operation-specific limits.
 Process stdin payloads are staged in bounded temporary regular files; stdout and

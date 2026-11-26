@@ -1509,6 +1509,7 @@ dependencies = [
  "tempfile",
  "unicode-segmentation",
  "ureq",
+ "url",
  "zeroize",
 ]
 

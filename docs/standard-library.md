@@ -46,7 +46,7 @@ registered by default.
 ## Export index
 
 This reference covers 210 core functions and four default CLI SQLite functions
-(222 in total), plus 19 request-context Web/Session functions, native response/entry
+(226 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -85,7 +85,7 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Web (request context only) | `Web::request`, `Web::status`, `Web::header`, `Web::addHeader`, `Web::redirect`, `Web::write`, `Web::download`, `Web::cookie`, `Web::deleteCookie` | [Web requests](#web-requests) |
 | Session (request context only) | `Session::start`, `Session::id`, `Session::get`, `Session::has`, `Session::set`, `Session::remove`, `Session::all`, `Session::regenerate`, `Session::destroy`, `Session::close` | [Sessions](#sessions) |
 | Http | `Http::get`, `Http::post`, `Http::request`, `Http::download` | [HTTP](#http) |
-| Url | `Url::encodeComponent`, `Url::decodeComponent`, `Url::buildQuery`, `Url::parseQuery` | [URL and form encoding](#url-and-form-encoding) |
+| Url | `Url::encodeComponent`, `Url::decodeComponent`, `Url::buildQuery`, `Url::parseQuery`, `Url::parse`, `Url::serialize`, `Url::resolve`, `Url::isValid` | [URL and form encoding](#url-and-form-encoding) |
 | Form | `Form::encode`, `Form::decode` | [URL and form encoding](#url-and-form-encoding) |
 | Sqlite (CLI default) | `Sqlite::open`, `Sqlite::execute`, `Sqlite::query`, `Sqlite::close` | [SQLite](sqlite.md) |
 
@@ -1840,9 +1840,10 @@ echo Json::pretty($data) . "\n";
 
 ## URL and form encoding
 
-These pure helpers require no network or filesystem capabilities. They operate
-on UTF-8 text, preserve input collections, and check cancellation and result byte
-limits (including nested pair slots) before allocating growing outputs.
+All helpers in this section require no network or filesystem capabilities.
+The component/query/form codecs operate on UTF-8 text, preserve input collections,
+and check cancellation and result byte limits (including nested pair slots) before
+allocating growing outputs. Full-URL parser working bounds are described below.
 
 | Function | Contract |
 | --- | --- |
@@ -1897,6 +1898,95 @@ Scripta requires string parameters and does not implement PHP's nested-array or
 implicit scalar conversion rules. `Form::decode` preserves pairs instead of
 `parse_str`-style variable, name, or nesting transformations.
 
+### Full URL values
+
+| Function | Contract |
+| --- | --- |
+| `Url::parse(text: string): Url` | Parse an absolute URL into an immutable native value. Malformed input raises `UrlError`. |
+| `Url::serialize(url: Url): string` | Return its canonical URL string, including any credentials, query, and fragment. |
+| `Url::resolve(base: Url, reference: string): Url` | Resolve an absolute or relative reference against a parsed base, returning a new value. The base is unchanged. |
+| `Url::isValid(text: string): bool` | False for syntax errors under the same parsing contract; cancellation and resource limits still propagate. |
+
+Full URLs use the WHATWG URL model implemented by the Rust url crate. All schemes
+accepted by that parser are supported: HTTP/HTTPS, WS/WSS, FTP, file, custom
+hierarchical schemes, and opaque URLs such as mailto, data, urn, or javascript.
+This is syntactic parsing, with no network request, DNS lookup, filesystem access,
+or scheme allowlist. It grants no permissions and is not a connection or redirect
+safety check. HTTP/Stream APIs retain their existing URL validation, scheme,
+credential, capability, TLS, and resource policies. Pass `Url::serialize($url)`
+explicitly to string APIs; native Url values are not implicitly converted.
+
+To avoid silent input repair, these methods reject raw ASCII controls (U+0000–
+U+001F), space, DEL, backslashes, and incomplete/nonhex percent escapes with
+`UrlError`. Use `%20` for a space and `%5C` for a literal backslash. Other WHATWG
+normalization still applies: schemes and special-scheme hosts normalize case,
+Unicode special-scheme hosts use IDNA ASCII form, numeric IPv4 and IPv6 normalize,
+default ports disappear, and dot path components (including percent-encoded dot
+segments) collapse. For example, `https:example.test` normalizes to
+`https://example.test/`. Non-special authority hosts can preserve case and use
+percent encoding for Unicode. File URLs use URL rules on every OS, without
+conversion to native filesystem paths.
+
+Read-only Url properties describe the canonical parsed record:
+
+| Property | Value |
+| --- | --- |
+| `scheme` | Lowercase scheme string without `:`. |
+| `username` | Percent-encoded username string; empty when absent. |
+| `password` | Percent-encoded password string or null when absent. |
+| `host` | Host string without port, or null. IPv6 includes brackets. |
+| `port` | Int for a surviving explicit nondefault port (including 0), otherwise null. |
+| `effectivePort` | Explicit port, or a known default: HTTP/WS 80, HTTPS/WSS 443, FTP 21; null when unknown. |
+| `path` | Encoded path string, including the leading `/` for hierarchical paths where applicable. Opaque URLs expose their opaque path. |
+| `query` | Encoded query string without `?`, or null when absent; an explicit empty query is `""`. |
+| `fragment` | Encoded fragment string without `#`, or null when absent; an explicit empty fragment is `""`. |
+| `origin` | Canonical tuple-origin string, or null for an opaque origin (including file/custom schemes). A blob URL may derive a tuple origin from its inner URL. |
+| `canBeBase` | Bool describing hierarchical path support for relative path resolution. This is distinct from whether origin is null. |
+
+Credentials are accepted for parsing and returned by explicit properties and
+serialization. Empty userinfo may normalize away. Parser errors report a category
+without echoing URL contents, and native Debug output omits contents, including
+query tokens. Raw percent escapes retain their spelling; encoded `/`, `?`, `#`,
+and other delimiters remain encoded rather than becoming component boundaries.
+Encoded arbitrary bytes such as `%FF` remain encoded. Use the existing strict
+`Url::decodeComponent` explicitly when UTF-8 text is required; it may raise
+`EncodingError` for those bytes.
+
+Queries are not converted to maps, reordered, or deduplicated. Canonical escaping
+can change literal characters, but pair order, duplicates, empty segments, missing
+`=`, and literal `+` are retained. Use `Url::parseQuery($url->query)` for explicit
+percent-profile pairs or `Form::decode` for form-profile pairs, after checking for
+a null query. Those helpers keep their existing encoding and strict UTF-8 rules.
+
+Resolution supports path, root, authority, scheme, query, and fragment references;
+a reference may replace the base's scheme/host. An empty reference removes the
+base fragment. Opaque bases permit only limited references, such as fragment-only
+or absolute URLs; unsupported resolution raises `UrlError`. Invalid operations
+and resource failures preserve the base and failed-assignment destination.
+
+Each full-URL input/reference and canonical serialized result is limited to
+65536 UTF-8 bytes (`ResourceLimitError` above it). Native payload accounting
+includes fixed native state, serialized URL text, and cached origin text; output
+strings and objects also obey the runtime logical value-byte limit. `Url::isValid`
+requires only a bool result slot, while keeping the same hard input/canonical
+limits. These are not a process heap cap: the bounded synchronous parser allocates
+working storage before exact canonical output size is known. Minimum object and
+exact retained/output payloads are checked before publication. Input validation
+checks cancellation periodically; parser calls check before and after, including
+on invalid input. Cancellation cannot interrupt the bounded third-party parser
+itself. No partially constructed result is published on failure.
+
+Url values have shared native identity and immutable properties. Embedding hosts
+may share them across runtimes and retain them across execute calls; they have no
+owner/closed state or cleanup API. Forged native objects named Url raise
+`TypeError` in serialize/resolve. Compare serialized strings when canonical text
+equality is intended. Native objects are not JSON values; select scalar properties
+or serialize explicitly.
+
+The pure [URL handling example](../examples/url-handling.scripta) demonstrates
+IDNA, default ports, relative resolution, and duplicate query pairs without making
+requests: `scripta examples/url-handling.scripta`.
+
 ## Web requests
 
 The `scripta serve` host explicitly registers nine `Web` and ten `Session` functions per
@@ -1941,7 +2031,7 @@ connection metadata and `request_id: None` leave these properties unknown
 Connection metadata and request-ID dynamic strings count toward the request value
 budget. See [host logs and health checks](web-servers.md#logs-and-health-checks)
 for ID lifecycle and privacy rules.
-These properties do not add registered functions: export counts stay 207 default
+These properties do not add registered functions: export counts stay 226 default
 functions plus 19 request-context functions.
 
 It has these methods:

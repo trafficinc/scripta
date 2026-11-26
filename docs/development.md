@@ -74,6 +74,14 @@ refusal, permission failures with retry, cancellation while waiting, and the
 `examples/temporary-resources.scripta` with a controlled existing parent directory
 when reviewing this API.
 
+Full-URL behavior is covered by `crates/scr-stdlib/tests/full_url.rs`, alongside
+the retained component/query/form tests in `tests/url.rs`. Native exact byte budgets
+and cancellation checks live in `src/full_url.rs`; paths here are relative to
+`crates/scr-stdlib`. Coverage includes IDNA, IPv4/IPv6, default/nondefault ports,
+opaque and file URLs, credentials, encoded delimiters, duplicate queries,
+reference resolution, sharing, and unchanged HTTP permission/credential policy.
+`examples/url-handling.scripta` is a pure controlled-input review example.
+
 ## Local disk cleanup
 
 From the workspace root, preview removable build outputs and Python caches:

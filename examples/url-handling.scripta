@@ -1,0 +1,9 @@
+// Pure parsing and resolution: no HTTP request or filesystem access.
+$base = Url::parse("https://BÜCHER.example:443/reports/2026/index.html?tag=old#top");
+$resolved = Url::resolve($base, "../summary?tag=rust&tag=scripting#results");
+echo "Base: " . Url::serialize($base) . "\n";
+echo "Resolved: " . Url::serialize($resolved) . "\n";
+echo "Host: " . $resolved->host . "\n";
+echo "Port: " . str($resolved->effectivePort) . "\n";
+echo "Tags: " . Json::encode(Url::parseQuery($resolved->query)) . "\n";
+echo "Valid: " . str(Url::isValid(Url::serialize($resolved))) . "\n";

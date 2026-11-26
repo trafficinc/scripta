@@ -629,7 +629,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ),
         (
             "Url",
-            "encodeComponent decodeComponent buildQuery parseQuery",
+            "encodeComponent decodeComponent buildQuery parseQuery parse serialize resolve isValid",
         ),
         ("Form", "encode decode"),
         ("Sqlite", "open execute query close"),
@@ -671,7 +671,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 222);
+    assert_eq!(count, 226);
     for name in [
         "start",
         "id",
@@ -1157,4 +1157,26 @@ fn temporary_resource_example_locks_reads_and_cleans_its_owned_paths() {
         "Lock: exclusive\nContent: temporary work\nCleaned: true\n"
     );
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn full_url_example_normalizes_hosts_and_resolves_without_network_requests() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/url-handling.scripta");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg("run")
+        .arg(path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        success(output),
+        concat!(
+            "Base: https://xn--bcher-kva.example/reports/2026/index.html?tag=old#top\n",
+            "Resolved: https://xn--bcher-kva.example/reports/summary?tag=rust&tag=scripting#results\n",
+            "Host: xn--bcher-kva.example\nPort: 443\n",
+            "Tags: [[\"tag\",\"rust\"],[\"tag\",\"scripting\"]]\nValid: true\n"
+        )
+    );
 }

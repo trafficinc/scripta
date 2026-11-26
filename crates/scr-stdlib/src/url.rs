@@ -1,4 +1,6 @@
-//! Explicit UTF-8 component, query, and form codecs; no network access.
+//! Explicit URL values and UTF-8 component, query, and form codecs; no network access.
+#[path = "full_url.rs"]
+mod full_url;
 use crate::bytes::{grow, payload, resource};
 use scr_runtime::{
     MapKey, NativeError, NativeFunction, NativeResult, NativeSignature, NativeType, Runtime,
@@ -203,6 +205,7 @@ pub(crate) fn parse(context: &RuntimeContext<'_>, text: &str, form: bool) -> Nat
     Ok(Value::List(result))
 }
 pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
+    full_url::register(runtime)?;
     use NativeType::{Any, List, String as Text};
     for (name, input, output) in [
         ("Url::encodeComponent", Text, Text),
