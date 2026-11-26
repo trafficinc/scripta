@@ -101,6 +101,14 @@ value counts and numeric overflow preserve failed-assignment destinations.
 TOML reuses the locked parser. YAML uses yaml-rust2 event tokens with the encoding
 feature disabled, never its alias-expanding document loader.
 
+Date/duration tests are in `crates/scr-stdlib/tests/date_operations.rs`; native
+cancellation and exact scalar-budget tests are in `src/date_operations.rs`.
+They cover month-end/leap-day clamping, negative/pre-epoch arithmetic, DST gaps
+and overlaps, non-hour transitions, skipped dates, duration syntax/precision,
+and exact signed integer/timestamp/input limits. Existing timezone and logging
+regressions remain in `tests/system_date_log.rs`. The controlled
+`examples/date-arithmetic.scripta` requires no network or host timezone setting.
+
 ## Local disk cleanup
 
 From the workspace root, preview removable build outputs and Python caches:

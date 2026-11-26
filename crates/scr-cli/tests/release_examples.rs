@@ -612,7 +612,8 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             "System",
             "platform architecture hostname cpuUsage memoryUsage diskUsage uptime homeDirectory tempDirectory",
         ),
-        ("Date", "now format parse sleep"),
+        ("Date", "now format parse sleep addCalendar addSeconds diff"),
+        ("Duration", "parse"),
         ("Clock", "monotonicMs"),
         ("Log", "info warn error debug setFile"),
         ("Json", "encode decode pretty"),
@@ -677,7 +678,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 237);
+    assert_eq!(count, 241);
     for name in [
         "start",
         "id",
@@ -1239,5 +1240,22 @@ fn configuration_example_parses_controlled_documents_with_explicit_types() {
     assert_eq!(
         success(output),
         "TOML: worker, port 8080 (int)\nYAML: café, enabled true (bool)\nINI: 8080 (string), converted 8080 (int)\nUnsafe YAML rejected\n"
+    );
+}
+
+#[test]
+fn date_arithmetic_example_distinguishes_calendar_and_elapsed_days() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/date-arithmetic.scripta");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    let output = Command::new(env!("CARGO_BIN_EXE_scripta"))
+        .arg("run")
+        .arg(path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        success(output),
+        "Month end: 2024-02-29\nCalendar day: 82800 seconds\nElapsed day: 86400 seconds\nNegative duration: -5400 seconds\nNonexistent local time rejected\n"
     );
 }

@@ -44,11 +44,11 @@ pub(crate) fn resolve_timezone(name: &str) -> NativeResult<TimeZone> {
     let zone = if name.eq_ignore_ascii_case("UTC") {
         TimeZone::UTC
     } else if name == "local" {
-        TimeZone::try_system()
-            .map_err(|_| date_error("could not determine the local timezone"))?
+        TimeZone::try_system().map_err(|_| date_error("could not determine the local timezone"))?
     } else {
         // Always use bundled rules, even if another dependency enables system data.
-        TimeZoneDatabase::bundled().get(name)
+        TimeZoneDatabase::bundled()
+            .get(name)
             .map_err(|_| date_error("unknown IANA timezone name"))?
     };
     if zone.is_unknown() {

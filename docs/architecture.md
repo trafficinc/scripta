@@ -130,6 +130,12 @@ alias-expanding loader; INI has an explicit literal-string dialect. Shared limit
 account values, map keys and UTF-8 payloads before growing returned structures.
 No configuration format backend or dependency enters scr-runtime.
 
+Date arithmetic remains in scr-stdlib: Jiff supplies civil/calendar operations
+and bundled timezone resolution with explicit rejection of ambiguous destination
+wall times. Chrono retains existing UTC timestamp validation for elapsed-second
+addition and differences. A bounded, whole-second duration parser has no I/O or
+new dependency; calendar units remain distinct from fixed elapsed durations.
+
 OS, network and database backends belong in standard-library or extension crates.
 They enforce capabilities, resource ownership and operation-specific limits.
 Process stdin payloads are staged in bounded temporary regular files; stdout and

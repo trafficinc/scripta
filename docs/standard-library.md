@@ -45,8 +45,8 @@ registered by default.
 
 ## Export index
 
-This reference covers 233 core functions and four default CLI SQLite functions
-(237 in total), plus 19 request-context Web/Session functions, native response/entry
+This reference covers 237 core functions and four default CLI SQLite functions
+(241 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -74,7 +74,8 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Env | `Env::get`, `Env::set`, `Env::has`, `Env::remove`, `Env::all` | [Environment](#environment) |
 | Cli | `Cli::args`, `Cli::arg`, `Cli::has`, `Cli::option`, `Cli::isTerminal`, `Cli::prompt`, `Cli::readLine` | [CLI](#script-arguments-and-prompts) |
 | System | `System::platform`, `System::architecture`, `System::hostname`, `System::cpuUsage`, `System::memoryUsage`, `System::diskUsage`, `System::uptime`, `System::homeDirectory`, `System::tempDirectory` | [System](#system-information) |
-| Date | `Date::now`, `Date::format`, `Date::parse`, `Date::sleep` | [Dates](#dates) |
+| Date | `Date::now`, `Date::format`, `Date::parse`, `Date::sleep`, `Date::addCalendar`, `Date::addSeconds`, `Date::diff` | [Dates](#dates) |
+| Duration | `Duration::parse` | [Date and duration arithmetic](#date-and-duration-arithmetic) |
 | Clock | `Clock::monotonicMs` | [Monotonic timing](#monotonic-timing) |
 | Log | `Log::info`, `Log::warn`, `Log::error`, `Log::debug`, `Log::setFile` | [Logging](#local-logging) |
 | Json | `Json::encode`, `Json::decode`, `Json::pretty` | [JSON](#json) |
@@ -1891,6 +1892,60 @@ echo Date::format($now, "%Y-%m-%d %H:%M:%S %:z", "America/New_York") . "\n";
 See the [timezone example](../examples/timezones.scripta). Calendar formatting
 remains locale-independent, `Log` timestamps remain UTC, and `Clock::monotonicMs`
 remains the elapsed-time API.
+
+### Date and duration arithmetic
+
+| API | Behavior |
+| --- | --- |
+| `Date::addCalendar(timestamp: int, amount: int, unit: string, timezone: string optional): int` | Add signed calendar `"year"`, `"month"`, `"week"`, or `"day"` units, preserving local wall time. Omitted timezone is UTC; the same UTC/local/IANA selectors as formatting apply. |
+| `Date::addSeconds(timestamp: int, seconds: int): int` | Add signed elapsed seconds, with checked arithmetic and timestamp validation. |
+| `Date::diff(start: int, end: int): int` | Signed elapsed seconds, `end - start`; negative when end precedes start. Both timestamps are validated. |
+| `Duration::parse(text: string): int` | Parse the whole-second duration subset below into signed elapsed seconds. |
+
+Calendar months/years clamp the day to the last day of the target month: January
+31 plus one month becomes February 28 (29 in leap years); February 29 plus one
+year becomes February 28. This is not invertible. Each call applies its amount
+once: January 31 plus two months is March 31, while two successive one-month
+calls can produce March 28/29. A calendar week is seven calendar days. Calendar
+arithmetic uses bundled Jiff timezone rules and its timestamp/civil range (years
+-9999 through 9999, with timestamp boundary margins), even in UTC. Inputs,
+amounts, and results outside the supported range raise `RangeError`.
+
+A calendar day across a daylight-saving transition can span 23 or 25 elapsed
+hours. Destination wall times in a DST gap or overlap raise `DateError`; no
+implicit earlier/later offset or forward shift is selected. This also applies
+to historical skipped dates and non-hour transitions. Zero amount validates the
+timestamp, unit, and timezone but returns the same instant, including either
+known instant in an overlap. Invalid units or timezone selectors raise
+`DateError`. Explicit numeric offsets are not timezone selectors.
+
+Elapsed addition and differences ignore timezone and calendar units and use
+Chrono's existing wider UTC timestamp range, matching `Date::format` in UTC.
+Out-of-range input/result timestamps or integer overflow raise `RangeError`.
+All results have whole-second precision; no subsecond rounding occurs in these
+new operations. Existing `Date::parse` flooring behavior is unchanged. Use
+`Clock::monotonicMs` to measure execution time rather than wall-clock arithmetic.
+
+Duration syntax is exactly `[-]P[nD][T[nH][nM][nS]]`. Components are unsigned ASCII
+decimal integers in the indicated order, each appearing at most once. At least
+one component is required; if `T` appears, it must have at least one time component.
+The optional leading minus negates the entire duration. Examples: `PT0S`,
+`P2DT3H4M5S`, `-PT90M`. Components need not be normalized; `PT90M` is 5400 seconds.
+A duration day is always 86400 elapsed seconds. Whitespace, a leading plus,
+component signs, lowercase letters, fractions (including `.0`), calendar months,
+years, and weeks are rejected with `DurationError`. No precision is silently
+lost. The complete signed 64-bit second range is supported, including
+`-PT9223372036854775808S`; numeric overflow raises `RangeError`. Input is bounded
+to 128 UTF-8 bytes; exceeding it raises `ResourceLimitError` before parsing.
+
+These APIs require no capabilities or resource handles. They check cancellation,
+account the scalar result against the runtime logical value-byte budget, and
+preserve failed-assignment destinations and native error traces. Wrong argument
+types/counts, including explicit null timezone, raise `TypeError`.
+See the runnable [date arithmetic example](../examples/date-arithmetic.scripta),
+which demonstrates month-end clamping, calendar versus elapsed days, negative
+durations, and rejection of nonexistent local times without external inputs.
+
 
 ## Local logging
 
