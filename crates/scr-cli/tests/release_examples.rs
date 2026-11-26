@@ -625,7 +625,10 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
         ("Ini", "parse"),
         ("Html", "escape"),
         ("Password", "hash verify needsRehash"),
-        ("Http", "get post request download"),
+        (
+            "Http",
+            "get post request download multipart cookieJar closeCookieJar",
+        ),
         (
             "Socket",
             "connect listen accept bindDatagram read write receive sendTo shutdown close setBlocking setTimeout poll localAddress peerAddress setOption getOption",
@@ -681,7 +684,7 @@ fn health_example_runs_locally_and_reference_lists_all_exports() {
             count += 1;
         }
     }
-    assert_eq!(count, 245);
+    assert_eq!(count, 248);
     for name in [
         "start",
         "id",
@@ -1288,4 +1291,62 @@ fn interactive_process_example_exchanges_a_message_before_eof() {
         success(output),
         "Reply: echo:ping\nStderr received: true\nExit code: 0\n"
     );
+}
+
+#[test]
+fn http_conveniences_example_uses_explicit_cookies_retry_and_binary_multipart() {
+    let path = example("http-conveniences.scripta");
+    let source = fs::read_to_string(&path).unwrap();
+    scr_cli::pipeline::check(&source).unwrap();
+    assert_eq!(scr_cli::formatter::format(&source).unwrap(), source);
+    assert_eq!(
+        success(run("http-conveniences.scripta", &[])),
+        "Multipart body: bytes\nCookie jar closed: true\n"
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let worker = std::thread::spawn(move || {
+        for i in 0..3 {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut data = Vec::new();
+            let mut byte = [0];
+            while !data.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).unwrap();
+                data.push(byte[0]);
+            }
+            let headers = String::from_utf8_lossy(&data).to_ascii_lowercase();
+            let count = headers
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("content-length:")
+                        .map(|v| v.trim().parse::<usize>().unwrap())
+                })
+                .unwrap_or(0);
+            let start = data.len();
+            data.resize(start + count, 0);
+            stream.read_exact(&mut data[start..]).unwrap();
+            if i > 0 {
+                assert!(headers.contains("cookie: session=demo"));
+            }
+            if i == 2 {
+                assert!(headers.starts_with("post /upload "));
+                assert!(data.windows(2).any(|w| w == [0, 255]));
+            }
+            let status = if i == 0 {
+                "503 Service Unavailable"
+            } else {
+                "200 OK"
+            };
+            write!(stream,"HTTP/1.1 {status}\r\nContent-Length: 2\r\nConnection: close\r\nSet-Cookie: session=demo; Path=/\r\nRetry-After: 0\r\n\r\nok").unwrap();
+        }
+    });
+    let url = format!("http://{address}");
+    assert_eq!(
+        success(run("http-conveniences.scripta", &[url.as_ref()])),
+        "Multipart body: bytes\nGET status: 200\nPOST status: 200\nCookie jar closed: true\n"
+    );
+    worker.join().unwrap();
 }

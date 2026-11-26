@@ -45,8 +45,8 @@ registered by default.
 
 ## Export index
 
-This reference covers 241 core functions and four default CLI SQLite functions
-(245 in total), plus 19 request-context Web/Session functions, native response/entry
+This reference covers 244 core functions and four default CLI SQLite functions
+(248 in total), plus 19 request-context Web/Session functions, native response/entry
 properties, and local loading statements. No optional plugin,
 external language runtime, shell, or network is required to use the local APIs.
 Detailed signatures, return types, errors, permissions and limitations follow.
@@ -91,13 +91,13 @@ Detailed signatures, return types, errors, permissions and limitations follow.
 | Regex | `Regex::isMatch`, `Regex::findAll`, `Regex::replace`, `Regex::captures`, `Regex::capturesAll` | [Regex](#regex) |
 | Web (request context only) | `Web::request`, `Web::status`, `Web::header`, `Web::addHeader`, `Web::redirect`, `Web::write`, `Web::download`, `Web::cookie`, `Web::deleteCookie` | [Web requests](#web-requests) |
 | Session (request context only) | `Session::start`, `Session::id`, `Session::get`, `Session::has`, `Session::set`, `Session::remove`, `Session::all`, `Session::regenerate`, `Session::destroy`, `Session::close` | [Sessions](#sessions) |
-| Http | `Http::get`, `Http::post`, `Http::request`, `Http::download` | [HTTP](#http) |
+| Http | `Http::get`, `Http::post`, `Http::request`, `Http::download`, `Http::multipart`, `Http::cookieJar`, `Http::closeCookieJar` | [HTTP](#http) |
 | Url | `Url::encodeComponent`, `Url::decodeComponent`, `Url::buildQuery`, `Url::parseQuery`, `Url::parse`, `Url::serialize`, `Url::resolve`, `Url::isValid` | [URL and form encoding](#url-and-form-encoding) |
 | Form | `Form::encode`, `Form::decode` | [URL and form encoding](#url-and-form-encoding) |
 | Sqlite (CLI default) | `Sqlite::open`, `Sqlite::execute`, `Sqlite::query`, `Sqlite::close` | [SQLite](sqlite.md) |
 
 `DirEntry`, `ProcessResult`, `ProcessHandle`, `MemoryUsage`, `DiskUsage`,
-`HttpResponse`, `CsvReader`, `FileStream`, `ByteStream`, `DatagramSocket`, and `SocketListener` are read-only native objects whose properties
+`HttpResponse`, `HttpCookieJar`, `CsvReader`, `FileStream`, `ByteStream`, `DatagramSocket`, and `SocketListener` are read-only native objects whose properties
 and methods are listed in their module sections. Convert selected properties into ordinary maps before
 JSON encoding. `require` and `require_once` are statements, not native functions;
 see [local script loading](language-spec.md#local-script-loading). The built-in
@@ -560,7 +560,7 @@ Instruction/checkpoint budgets do not count Argon2's internal operations.
 `Html::escape(text: string): string` escapes plain UTF-8 text for HTML text nodes
 and ordinary quoted attribute values, such as `title`. It takes exactly one
 string; other types require explicit conversion and invalid signatures raise
-`TypeError`. It performs no I/O and requires no capabilities.
+`TypeError`. It performs no script-directed file/network access and requires no capabilities.
 
 | Input character | Output |
 | --- | --- |
@@ -2656,6 +2656,8 @@ Methods are case-sensitive HTTP tokens; CONNECT tunnels are unsupported.
 | `maxRedirects` | 5; nonnegative int, no higher than the host ceiling. Zero returns the original 3xx response without following it. |
 | `body` | Empty body; string or bytes for `Http::request`. |
 | `responseType` | `"text"` (default) or `"bytes"`. Text mode validates UTF-8 before returning; bytes mode retains arbitrary data. |
+| `cookieJar` | Optional explicit `HttpCookieJar`; memory-only, exact-origin profile below. Cannot combine with a Cookie header. |
+| `retry` | Optional strict map enabling bounded safe-method retries; details below. Absent means no retries. |
 
 Unknown options and invalid values raise `TypeError` before connecting. Headers
 are optional; omit `headers` or use `headers: []` for an empty set. Each request returns a read-only
@@ -2709,8 +2711,10 @@ ureq semantics: 301/302/303 may change POST to GET; 307/308 with a non-replayabl
 request body raise `RedirectError`. Authorization is removed on redirected
 requests by the client; custom headers can be forwarded, so callers should use
 `maxRedirects: 0` when sending sensitive custom headers to untrusted endpoints.
-No proxy is selected implicitly from the host environment; no cookie jar or
-transparent response decompression is installed. Native DNS resolution may be
+No proxy is selected implicitly from the host environment and no transparent
+response decompression is installed. Cookies are retained only when an explicit
+`cookieJar` is supplied. Requests without a jar/retry option keep the redirect
+behavior above; those opt-ins use the stricter rules below. Native DNS resolution may be
 subject to OS resolver scheduling. Cancellation is checked before/after blocking
 HTTP work; it cannot interrupt a pending socket operation before its timeout.
 
@@ -2752,6 +2756,121 @@ echo $data["status"] . "\n";
 See [local script loading](language-spec.md#local-script-loading) for reusable
 helpers and configuration files. HTTP never acts as a remote module loader.
 
+
+### Multipart request bodies
+
+`Http::multipart(parts: list, options: map optional): map` returns
+`["contentType" => string, "body" => bytes]`. Send explicitly with
+`Http::post($url, $form["body"], ["headers" => ["Content-Type" => $form["contentType"]]])`.
+It performs no script-directed file/network access and requires no capabilities. File data is supplied as bytes
+or text; use `File::readBytes` explicitly when reading a file under host policies.
+
+Each part is a map with `name: string` and `data: string or bytes`, plus optional
+`filename: string` and `contentType: string`. A content type requires a filename;
+file parts default to `application/octet-stream`. Fields use exact UTF-8 bytes
+for string data, and arbitrary bytes remain unchanged. List order and repeated
+names are preserved. Metadata is nonempty printable ASCII, at most 256 bytes,
+excluding quotes/backslashes/controls; filenames also reject slash, colon, and
+`.`/`..`. Content types accept only token/token, without parameters. Invalid or
+unknown part fields raise `MultipartError` without exposing their contents.
+
+Options are exactly `maxOutputBytes` (default/hard 8388608) and `maxParts`
+(default/hard 128), each a nonnegative int that can lower the ceiling to zero.
+Wrong types/unknown options raise `TypeError`; invalid ranges raise `RangeError`.
+Excess parts or complete encoded wire bytes raise `ResourceLimitError`. Even an
+empty multipart list has a closing boundary and therefore nonzero body length.
+The exact logical map/key/string/byte result budget is preflighted before body
+allocation. Bounded part-header/parser working storage is additional memory.
+Boundaries use OS entropy and are checked against payloads; entropy/collision
+failure raises `MultipartError`, with no predictable fallback. Iterative work
+checks cancellation. The body is bounded and replayable, not a streaming source.
+
+### Explicit HTTP cookie jars
+
+`Http::cookieJar(): HttpCookieJar` creates an empty in-memory jar;
+`Http::closeCookieJar(jar): null` clears it and is idempotent. Its only property
+is read-only `closed: bool`; there is no script value export, automatic persistence,
+global cookie store, or automatic logging. Creating/closing a jar needs no
+capability; HTTP use still requires `http.request`. Requests use the `cookieJar`
+option and reject an explicit Cookie header in the same options.
+
+Handles must be genuine and belong to the current runtime/registration;
+forged/foreign handles raise `TypeError`, and using a closed jar raises
+`CookieError`. Aliases share state; registration teardown clears host-retained
+jars. Each registration allows 64 open jars, each with at most 128 cookies,
+64 KiB logical record/string storage, and 4096 bytes per Set-Cookie field.
+Exceeding these ceilings raises `CookieLimitError`; runtime logical byte limits
+also apply, including before outgoing cookie-header allocation. A response's
+update is staged and committed atomically after validation/budget checks.
+
+The profile is deliberately host-only and **exact-origin**: scheme, canonical
+host and effective port must all match. Domain-bearing cookies are ignored;
+there is no sibling-host/domain/public-suffix matching or cookie sharing across
+ports or HTTP/HTTPS. Path defaults/matching follow directory boundaries; longer
+paths are sent first, with stable creation order for ties. Replacing a cookie
+with the same origin/path/name preserves its position. Max-Age overrides Expires;
+nonpositive ages/expired dates delete matching entries, and expiry is checked
+on use. Expires accepts supported HTTP dates, with pre-epoch RFC 2822 dates also
+recognized; invalid optional expiry attributes are ignored. Invalid cookies and
+duplicate attributes are ignored. This is a restricted client profile, not a
+browser-compatible implementation of every cookie feature.
+
+Secure cookies are accepted only from HTTPS and sent only over HTTPS. `__Secure-`
+requires Secure; `__Host-` additionally requires an explicit `Path=/` and no
+Domain. HttpOnly/SameSite attributes do not add browser script-access or initiating-
+site semantics to this server-side jar. There is no browser DOM or implicit
+cross-site request context. TLS verification remains enabled.
+
+Cookies update when response headers arrive, including redirects, retryable
+statuses, and responses whose body later fails. Later transfer or processing failures do not undo updates from earlier responses. This network session state is separate
+from failed-assignment behavior: the destination variable still remains unchanged.
+
+### Bounded retries and controlled redirects
+
+The optional `retry` map accepts only:
+
+| Key | Default | Range |
+| --- | --- | --- |
+| `maxRetries` | 0 | 0–5 extra attempts |
+| `backoffMs` | 100 | 0–30000 milliseconds |
+| `maxBackoffMs` | 30000 | 0–30000 milliseconds, at least backoffMs |
+
+Invalid keys/types/ranges raise `TypeError` before connecting. Positive retries
+require exact uppercase GET, HEAD or OPTIONS; POST/PUT/DELETE and other methods
+are rejected rather than guessing idempotency. Only pre-header `ConnectionError`
+and HTTP 408/429/500/502/503/504 are eligible. TLS, encoding, body/metadata limits,
+body-read failures, timeouts and permissions are not retried. Downloads retry
+only before body/file transfer, retaining no-clobber and staged-file cleanup.
+Stream request/upload APIs reject both retry and cookieJar options; their source
+readers are not implicitly replayed.
+
+Backoff doubles per retry up to maxBackoffMs, with no jitter. Retry-After accepts
+integer delta seconds or HTTP date and can lengthen the delay. If that delay
+exceeds maxBackoffMs or the remaining deadline, the current HTTP response is
+returned without another attempt; it is never retried earlier than requested.
+Exhausting attempts returns the final status response, or raises the last
+connection error. `timeoutMs` covers the entire enhanced operation, including
+attempts, redirects, discarded intermediate bodies, backoff and final body read.
+An exhausted total deadline raises `TimeoutError`. Waits check cancellation at
+approximately 5 ms intervals; in-progress OS I/O and DNS remain cooperative.
+`durationMs` includes retries/backoff and is frozen after final body reception.
+Response byte ceilings apply to intermediate bodies as well as the final body;
+they are per response, not a cumulative traffic quota over all attempts.
+
+Supplying a jar or retry map opts into controlled redirects. The redirect ceiling
+applies across all attempts combined and remains host-bounded; zero returns the original 3xx response. POST 301/302 and
+non-HEAD 303 switch to GET and drop the body; 307/308 preserve replayable buffered
+bodies on the same origin. Authorization and explicit Cookie headers are removed
+on every redirect; all custom headers are removed across origins. Cross-origin
+body forwarding, embedded credentials, unsupported schemes, and any HTTPS-to-HTTP
+downgrade are rejected with `RedirectError`. Cookies are selected afresh for the
+target origin/path. Retries restart at the original URL under the same total
+deadline; prior received cookies remain available for that origin.
+
+See [HTTP conveniences](../examples/http-conveniences.scripta). It constructs
+binary multipart data and opens/closes a jar without a URL; an optional explicit
+base URL demonstrates a retried GET and a separate multipart POST. Its CLI
+regression uses only a controlled local fixture.
 
 ## Distribution and resource behavior
 

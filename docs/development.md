@@ -118,6 +118,15 @@ executes `examples/process-interactive.scripta` against the controlled
 `tests/fixtures/process-interactive.scripta` child; no shell, public endpoint or
 external scripting runtime is required.
 
+HTTP convenience integration tests are in `crates/scr-stdlib/tests/http_conveniences.rs`;
+unit tests for cookie storage/budgets, multipart allocation/cancellation and retry
+policy live under `src/http/`. Fixtures bind localhost only and verify binary
+multipart framing, cookie path/origin scope, credential stripping, retry ceilings,
+Retry-After, cancellation/deadlines, verified TLS and download cleanup. Existing
+JSON/HTTP and binary-stream tests cover default behavior and non-replayable source
+rules. `examples/http-conveniences.scripta` runs without network arguments and is
+also executed against a controlled server by the CLI example suite.
+
 ## Local disk cleanup
 
 From the workspace root, preview removable build outputs and Python caches:

@@ -121,6 +121,14 @@ script coordination or escaped pipe readers from causing unbounded joins.
 Existing staged-input/capture calls retain their behavior; stream APIs use the
 public native interface and validate runtime ownership.
 
+Buffered HTTP conveniences remain in scr-stdlib. A bounded multipart codec
+constructs replayable bodies; explicit runtime-owned cookie jars use a bounded
+exact-origin, host-only profile with atomic per-response updates. Opt-in retries
+and manual redirects share a total deadline, bounded discarded bodies and strict
+credential forwarding rules. Source streams remain non-replayable and reject
+these options. Existing Rustls verification and download publication policies are
+shared. Wire dates reuse locked httpdate; no runtime backend dependency is added.
+
 Immutable full-URL values use a bounded WHATWG parser in scr-stdlib, reusing the
 locked url/IDNA dependencies. Their parsing and reference resolution perform no
 I/O and do not modify HTTP/Stream validation, permission, or TLS policy. Encoded

@@ -1,0 +1,13 @@
+// No URL: pure multipart construction and explicit jar lifetime only.
+$form = Http::multipart([["name" => "label", "data" => "demo"], ["name" => "file", "filename" => "data.bin", "data" => Hex::decode("00ff")]]);
+echo "Multipart body: " . type($form["body"]) . "\n";
+$jar = Http::cookieJar();
+$url = Cli::arg(0);
+if ($url !== null) {
+    $response = Http::get($url, ["cookieJar" => $jar, "retry" => ["maxRetries" => 1, "backoffMs" => 0]]);
+    echo "GET status: " . str($response->status) . "\n";
+    $uploaded = Http::post($url . "/upload", $form["body"], ["cookieJar" => $jar, "headers" => ["Content-Type" => $form["contentType"]]]);
+    echo "POST status: " . str($uploaded->status) . "\n";
+}
+Http::closeCookieJar($jar);
+echo "Cookie jar closed: " . str($jar->closed) . "\n";

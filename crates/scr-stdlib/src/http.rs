@@ -1,4 +1,7 @@
 //! Synchronous bounded HTTP with verified Rustls HTTPS and local response objects.
+mod conveniences;
+mod cookies;
+mod multipart;
 use crate::{
     bytes::{budget, grow, resource},
     filesystem::FilesystemPolicy,
@@ -151,6 +154,8 @@ struct Options {
     headers: Vec<(HeaderName, HeaderValue)>,
     body: Rc<[u8]>,
     binary: bool,
+    jar: Option<Value>,
+    retry: Option<conveniences::Retry>,
 }
 fn options(value: Option<&Value>, config: &HttpConfig) -> NativeResult<Options> {
     let mut result = Options {
@@ -160,6 +165,8 @@ fn options(value: Option<&Value>, config: &HttpConfig) -> NativeResult<Options> 
         headers: vec![],
         body: Rc::from([]),
         binary: false,
+        jar: None,
+        retry: None,
     };
     let entries = match value {
         None => return Ok(result),
@@ -173,6 +180,12 @@ fn options(value: Option<&Value>, config: &HttpConfig) -> NativeResult<Options> 
     };
     for (key, value) in entries {
         match (key, value) {
+            (MapKey::String(key), Value::NativeObject(_)) if key == "cookieJar" => {
+                result.jar = Some(value.clone());
+            }
+            (MapKey::String(key), _) if key == "retry" => {
+                result.retry = Some(conveniences::Retry::parse(value)?);
+            }
             (MapKey::String(key), Value::Int(ms)) if key == "timeoutMs" && *ms > 0 => {
                 result.timeout = Duration::from_millis(*ms as u64)
             }
@@ -254,9 +267,12 @@ pub(crate) fn register(
             "invalid host HTTP timeout or response limit",
         ));
     }
+    let jars = cookies::register(runtime)?;
+    multipart::register(runtime)?;
     for operation in ["get", "post", "request", "download"] {
         let policy = policy.clone();
         let config = config.clone();
+        let jars = jars.clone();
         let params = if operation == "get" {
             vec![NativeType::String]
         } else if operation == "post" {
@@ -343,50 +359,56 @@ pub(crate) fn register(
                             "HTTP CONNECT tunnels are not supported",
                         ));
                     }
-                    let mut builder = http::Request::builder().method(method).uri(uri.clone());
-                    for (key, value) in options.headers {
-                        builder = builder.header(key, value);
+                    let jar = options
+                        .jar
+                        .as_ref()
+                        .map(|value| jars.get(context, value))
+                        .transpose()?;
+                    if options
+                        .headers
+                        .iter()
+                        .any(|(name, _)| name == http::header::COOKIE)
+                        && jar.is_some()
+                    {
+                        return Err(NativeError::type_error(
+                            "cookieJar cannot combine with a Cookie header",
+                        ));
                     }
-                    let request = builder
-                        .body(options.body.as_ref())
-                        .map_err(|_| NativeError::type_error("invalid HTTP request"))?;
-                    // Measure client setup and the full transfer, including redirects.
-                    // Argument/request validation has already completed.
+                    conveniences::validate_method(&method, options.retry.as_ref())?;
                     let started = Instant::now();
-                    let agent: ureq::Agent = ureq::Agent::config_builder()
-                        .http_status_as_error(false)
-                        .timeout_global(Some(options.timeout))
-                        .max_redirects(options.redirects)
-                        .max_redirects_will_error(true)
-                        .https_only(uri.scheme_str() == Some("https"))
-                        .allow_non_standard_methods(true)
-                        .proxy(None)
-                        .build()
-                        .into();
-                    context.check_cancelled()?;
-                    let mut response = agent.run(request).map_err(failure)?;
+                    let enhanced = jar.is_some() || options.retry.is_some();
+                    let deadline = if enhanced {
+                        Some(started.checked_add(options.timeout).ok_or_else(|| {
+                            NativeError::type_error("HTTP deadline exceeds platform range")
+                        })?)
+                    } else {
+                        None
+                    };
+                    let mut response = if enhanced {
+                        conveniences::send(context, &method, &uri, &options, jar, started)?
+                    } else {
+                        let mut builder = http::Request::builder().method(method).uri(uri.clone());
+                        for (key, value) in &options.headers {
+                            builder = builder.header(key, value);
+                        }
+                        let request = builder
+                            .body(options.body.as_ref())
+                            .map_err(|_| NativeError::type_error("invalid HTTP request"))?;
+                        let agent: ureq::Agent = ureq::Agent::config_builder()
+                            .http_status_as_error(false)
+                            .timeout_global(Some(options.timeout))
+                            .max_redirects(options.redirects)
+                            .max_redirects_will_error(true)
+                            .https_only(uri.scheme_str() == Some("https"))
+                            .allow_non_standard_methods(true)
+                            .proxy(None)
+                            .build()
+                            .into();
+                        context.check_cancelled()?;
+                        agent.run(request).map_err(failure)?
+                    };
                     let status = response.status().as_u16();
-                    let mut headers = Vec::new();
-                    for key in response.headers().keys() {
-                        let values = response
-                            .headers()
-                            .get_all(key)
-                            .iter()
-                            .map(|value| {
-                                value
-                                    .to_str()
-                                    .map(|value| Value::String(value.into()))
-                                    .map_err(|_| {
-                                        NativeError::new(
-                                            "EncodingError",
-                                            "HTTP response header is not ASCII text",
-                                        )
-                                    })
-                            })
-                            .collect::<NativeResult<Vec<_>>>()?;
-                        headers.push((MapKey::String(key.as_str().into()), Value::List(values)));
-                    }
-                    let headers = Value::Map(headers);
+                    let headers = response_headers(context, response.headers())?;
                     if let Some(destination) = destination {
                         if !(200..300).contains(&status) {
                             return Err(NativeError::new(
@@ -399,7 +421,7 @@ pub(crate) fn register(
                             &policy,
                             &destination,
                             &mut response,
-                            options.limit,
+                            (options.limit, deadline),
                             status,
                             headers,
                         );
@@ -414,8 +436,9 @@ pub(crate) fn register(
                     let mut bytes = Vec::new();
                     let mut buffer = [0; 64 * 1024];
                     loop {
-                        context.check_cancelled()?;
+                        check_active(context, deadline)?;
                         let count = reader.read(&mut buffer).map_err(|e| failure(e.into()))?;
+                        check_active(context, deadline)?;
                         if count == 0 {
                             break;
                         }
@@ -445,6 +468,40 @@ pub(crate) fn register(
     }
     Ok(())
 }
+fn check_active(context: &RuntimeContext<'_>, deadline: Option<Instant>) -> NativeResult<()> {
+    context.check_cancelled()?;
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err(NativeError::new(
+            "TimeoutError",
+            "HTTP total deadline exceeded",
+        ));
+    }
+    Ok(())
+}
+
+fn response_headers(context: &RuntimeContext<'_>, source: &http::HeaderMap) -> NativeResult<Value> {
+    let mut headers = Vec::new();
+    let mut size = size_of::<Value>();
+    for key in source.keys() {
+        context.check_cancelled()?;
+        grow(
+            context,
+            &mut size,
+            size_of::<MapKey>() + key.as_str().len() + size_of::<Value>(),
+        )?;
+        let mut values = Vec::new();
+        for value in source.get_all(key) {
+            let value = value.to_str().map_err(|_| {
+                NativeError::new("EncodingError", "HTTP response header is not ASCII text")
+            })?;
+            grow(context, &mut size, size_of::<Value>() + value.len())?;
+            values.push(Value::String(value.into()));
+        }
+        headers.push((MapKey::String(key.as_str().into()), Value::List(values)));
+    }
+    Ok(Value::Map(headers))
+}
+
 fn string(value: &Value) -> &str {
     let Value::String(value) = value else {
         unreachable!()
@@ -472,10 +529,12 @@ fn download(
     policy: &FilesystemPolicy,
     path: &Path,
     response: &mut ureq::http::Response<ureq::Body>,
-    limit: u64,
+    limits: (u64, Option<Instant>),
     status: u16,
     headers: Value,
 ) -> NativeResult {
+    let (limit, deadline) = limits;
+    check_active(context, deadline)?;
     let parent = path
         .parent()
         .ok_or_else(|| NativeError::new("PathError", "download destination needs a parent"))?;
@@ -498,12 +557,13 @@ fn download(
         let mut buffer = [0; 64 * 1024];
         let mut count = 0u64;
         loop {
-            context.check_cancelled()?;
+            check_active(context, deadline)?;
             let size = reader.read(&mut buffer).map_err(|e| failure(e.into()))?;
+            check_active(context, deadline)?;
             if size == 0 {
                 break;
             }
-            context.check_cancelled()?;
+            check_active(context, deadline)?;
             temporary
                 .write_all(&buffer[..size])
                 .map_err(|e| NativeError::new("FilesystemError", e.to_string()))?;
@@ -513,6 +573,7 @@ fn download(
             .as_file()
             .sync_all()
             .map_err(|e| NativeError::new("FilesystemError", e.to_string()))?;
+        check_active(context, deadline)?;
         check_destination(context, policy, path)?;
         Ok(count)
     })();
@@ -580,6 +641,11 @@ pub(crate) fn open_stream(
     context.permissions.require("http.request")?;
     context.check_cancelled()?;
     let options = options(Some(value), config)?;
+    if options.jar.is_some() || options.retry.is_some() {
+        return Err(NativeError::type_error(
+            "stream requests do not support cookieJar or retry options",
+        ));
+    }
     let uri: http::Uri = url
         .parse()
         .map_err(|_| NativeError::type_error("invalid HTTP URL"))?;
@@ -669,4 +735,26 @@ pub(crate) fn open_stream(
         limit: options.limit,
         deadline,
     })
+}
+
+#[cfg(test)]
+fn with_context(test: impl FnOnce(&mut RuntimeContext<'_>)) {
+    let mut settings = scr_runtime::ContextOptions::default();
+    let mut input = std::io::empty();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+    test(&mut RuntimeContext {
+        working_directory: &mut settings.working_directory,
+        script_path: None,
+        cli_arguments: &[],
+        environment: &mut settings.environment,
+        input: &mut input,
+        output: &mut output,
+        error: &mut error,
+        runtime_identity: None,
+        cancellation: None,
+        permissions: &settings.permissions,
+        call_span: Default::default(),
+        max_value_bytes: None,
+    });
 }
