@@ -240,13 +240,13 @@ mod tests {
     fn key_byte_ceiling_is_exact_and_plus_one_falls_back_without_eviction() {
         let mut cache = MapIndexes::default();
         let mut values = entries(MIN_ENTRIES);
-        values[0].0 = MapKey::String("é".repeat((MAX_KEY_BYTES - 2) / 2) + "x");
+        values[0].0 = MapKey::String(("é".repeat((MAX_KEY_BYTES - 2) / 2) + "x").into());
         assert_eq!(
             cache.position(0, "m", &values, &Value::Int(1), true),
             Some(1)
         );
         assert_eq!(cache.bytes, MAX_KEY_BYTES);
-        values[0].0 = MapKey::String("é".repeat(MAX_KEY_BYTES / 2));
+        values[0].0 = MapKey::String("é".repeat(MAX_KEY_BYTES / 2).into());
         assert_eq!(cache.position(0, "n", &values, &Value::Int(1), true), None);
         assert_eq!(cache.bytes, MAX_KEY_BYTES);
         cache.position(0, "z", &entries(MIN_ENTRIES), &Value::Int(1), true);

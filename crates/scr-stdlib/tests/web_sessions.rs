@@ -402,9 +402,8 @@ fn store_rejects_symlinks_and_cleans_abandoned_atomic_staging_files() {
 #[test]
 fn session_logical_and_encoded_limits_preserve_records_at_the_boundary() {
     let mut store = Store::new();
-    store.config.max_bytes = 2 * std::mem::size_of::<scr_runtime::Value>()
-        + std::mem::size_of::<scr_runtime::MapKey>()
-        + 1;
+    store.config.max_bytes =
+        2 * std::mem::size_of::<scr_runtime::Value>() + scr_runtime::MapKey::LOGICAL_BYTES + 1;
     let id = store
         .execute(None, "Session::start();Session::set(\"k\",null);")
         .unwrap()

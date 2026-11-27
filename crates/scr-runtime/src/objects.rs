@@ -813,7 +813,7 @@ impl Runtime {
             }
             Value::Map(values) => {
                 for (key, value) in values {
-                    bytes = add(bytes, std::mem::size_of::<MapKey>())?;
+                    bytes = add(bytes, MapKey::LOGICAL_BYTES)?;
                     if let MapKey::String(key) = key {
                         bytes = add(bytes, key.len())?;
                     }

@@ -55,6 +55,41 @@ pub(super) fn eligible(entries: &[(Expr, Expr)]) -> bool {
 }
 
 impl Runtime {
+    fn map_key(&mut self, expression: &Expr, output: &mut dyn ScriptOutput) -> Result<MapKey> {
+        let mut literal = expression;
+        while let ExprKind::Grouped(inner) = &literal.kind {
+            literal = inner;
+        }
+        if let ExprKind::Literal(Literal::String(text)) = &literal.kind {
+            // Match literal-string validation at its own span, before the
+            // value expression, without first allocating an owned String.
+            if let Some(limit) = self.options.max_value_bytes {
+                let bytes = size_of::<Value>().checked_add(text.len());
+                let bytes = self.checked(
+                    bytes.ok_or_else(|| "value size overflow".into()),
+                    literal.span,
+                )?;
+                if bytes > limit {
+                    return self.fail("execution value byte limit exceeded", literal.span);
+                }
+            }
+            return Ok(MapKey::String(text.as_str().into()));
+        }
+        if let ExprKind::Variable(name) = &literal.kind {
+            if let Some((_, Value::String(text))) = self.environments.lookup(name, false) {
+                // Variable evaluation does not validate the string here. Copy
+                // its bytes once, before a value expression can change it.
+                return Ok(MapKey::String(text.as_str().into()));
+            }
+        }
+        let value = self.evaluate(expression, output)?;
+        self.operation(
+            MapKey::from_value(value)
+                .map_err(|_| ops::Error::Type("map keys must be int or string")),
+            expression.span,
+        )
+    }
+
     #[inline(never)]
     pub(super) fn map_literal(
         &mut self,
@@ -70,12 +105,7 @@ impl Runtime {
         }
         let mut map = Vec::new();
         for (key, value) in entries {
-            let key_value = self.evaluate(key, output)?;
-            let key = self.operation(
-                MapKey::from_value(key_value)
-                    .map_err(|_| ops::Error::Type("map keys must be int or string")),
-                key.span,
-            )?;
+            let key = self.map_key(key, output)?;
             let value = self.evaluate(value, output)?;
             if let Some((_, old)) = map.iter_mut().find(|(candidate, _)| candidate == &key) {
                 *old = value;
@@ -100,12 +130,7 @@ impl Runtime {
         for (key_expr, value_expr) in entries {
             // Preserve key validation before the value, per-entry effects, and
             // final value validation. The table never owns a Value or key text.
-            let key_value = self.evaluate(key_expr, output)?;
-            let key = self.operation(
-                MapKey::from_value(key_value)
-                    .map_err(|_| ops::Error::Type("map keys must be int or string")),
-                key_expr.span,
-            )?;
+            let key = self.map_key(key_expr, output)?;
             let value = self.evaluate(value_expr, output)?;
             if let Some((_, old)) = map
                 .iter_mut()

@@ -8,7 +8,7 @@ fn key(index: i64) -> MapKey {
     if index % 2 == 0 {
         MapKey::Int(index)
     } else {
-        MapKey::String(index.to_string())
+        MapKey::String(index.to_string().into())
     }
 }
 
@@ -23,7 +23,7 @@ fn main() {
             .iter()
             .map(|(key, _)| match key {
                 MapKey::Int(i) => Value::Int(*i),
-                MapKey::String(s) => Value::String(s.clone()),
+                MapKey::String(s) => Value::String(s.to_string()),
             })
             .collect();
         let values = (0..size).map(Value::Int).collect();

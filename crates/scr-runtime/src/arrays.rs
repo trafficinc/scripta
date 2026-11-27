@@ -138,15 +138,15 @@ impl Runtime {
             }
             Value::Map(items) => {
                 let key = self.operation(
-                    MapKey::from_value(needle.clone()).map_err(|_| {
-                        ops::Error::Type("map membership requires an int or string key")
-                    }),
+                    ops::IndexKey::from_value(needle).ok_or(ops::Error::Type(
+                        "map membership requires an int or string key",
+                    )),
                     span,
                 )?;
                 let mut found = false;
                 for (candidate, _) in items {
                     self.checkpoint(span)?;
-                    if candidate == &key {
+                    if key.matches(candidate) {
                         found = true;
                         break;
                     }

@@ -228,7 +228,7 @@ fn logical_result_budget_exact_and_one_byte_below() {
         + dir.path().join(".").join("a").to_str().unwrap().len()
         + keys
             .iter()
-            .map(|key| std::mem::size_of::<MapKey>() + key.len() + std::mem::size_of::<Value>())
+            .map(|key| MapKey::LOGICAL_BYTES + key.len() + std::mem::size_of::<Value>())
             .sum::<usize>();
     for (limit, success) in [(bytes, true), (bytes - 1, false)] {
         let mut rt = runtime(dir.path(), Some(limit), FilesystemPolicy::default());

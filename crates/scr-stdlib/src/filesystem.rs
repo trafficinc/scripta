@@ -408,7 +408,7 @@ fn all_entries(context: &RuntimeContext<'_>, path: &Path) -> NativeResult<Value>
     let fixed = std::mem::size_of::<Value>()
         + keys
             .iter()
-            .map(|key| std::mem::size_of::<MapKey>() + key.len() + std::mem::size_of::<Value>())
+            .map(|key| MapKey::LOGICAL_BYTES + key.len() + std::mem::size_of::<Value>())
             .sum::<usize>();
     let mut bytes = std::mem::size_of::<Value>();
     let mut rows = Vec::new();

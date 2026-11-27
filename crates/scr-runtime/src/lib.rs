@@ -36,6 +36,8 @@ mod literal_read;
 pub use list::List;
 mod map;
 pub use map::Map;
+mod map_key_text;
+pub use map_key_text::MapKeyText;
 mod map_builder;
 #[cfg(test)]
 mod map_builder_tests;

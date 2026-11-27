@@ -122,7 +122,7 @@ fn node(
                 }
                 let (event, mark) = next(parser, budget)?;
                 let value = node(parser, budget, event, mark, depth + 1)?;
-                items.push((MapKey::String(name), value));
+                items.push((MapKey::String(name.into()), value));
             }
             Ok(Value::map(items))
         }

@@ -664,9 +664,7 @@ fn all_entries_enforces_exact_logical_output_budget() {
         + keys
             .iter()
             .map(|key| {
-                std::mem::size_of::<scr_runtime::MapKey>()
-                    + key.len()
-                    + std::mem::size_of::<Value>()
+                scr_runtime::MapKey::LOGICAL_BYTES + key.len() + std::mem::size_of::<Value>()
             })
             .sum::<usize>();
     for (limit, succeeds) in [(needed, true), (needed - 1, false)] {

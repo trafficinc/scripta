@@ -5,7 +5,7 @@ use scr_runtime::{MapKey, NativeError, NativeResult, RuntimeContext, Value};
 use std::mem::size_of;
 
 const SLOT: usize = size_of::<Value>();
-const KEY: usize = size_of::<MapKey>();
+const KEY: usize = MapKey::LOGICAL_BYTES;
 
 // Captures within one match can be nested and visited in nonmonotonic group
 // order. Sort/deduplicate their endpoints, then scan the input forward once
@@ -171,7 +171,7 @@ fn record(
         checkpoint()?;
         if let Some(name) = name {
             named.push((
-                MapKey::String(copy_text(name, checkpoint)?),
+                MapKey::String(copy_text(name, checkpoint)?.into()),
                 group(captures.get(index), &positions, checkpoint)?,
             ));
         }

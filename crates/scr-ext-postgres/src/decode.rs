@@ -112,7 +112,7 @@ pub(crate) fn convert(
             size = size.saturating_add(mem::size_of::<Value>()).saturating_add(
                 columns
                     .len()
-                    .saturating_mul(mem::size_of::<(MapKey, Value)>()),
+                    .saturating_mul(MapKey::LOGICAL_BYTES + mem::size_of::<Value>()),
             );
         }
         for (index, (raw, column)) in row.iter().zip(columns).enumerate() {
@@ -140,7 +140,7 @@ pub(crate) fn convert(
         for (raw, column) in row.iter().zip(columns) {
             checkpoint()?;
             map.push((
-                MapKey::String(column.name.clone()),
+                MapKey::String(column.name.as_str().into()),
                 cell(raw, column, budget.cell)?,
             ));
         }

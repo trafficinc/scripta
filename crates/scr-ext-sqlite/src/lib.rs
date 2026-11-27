@@ -547,7 +547,7 @@ fn operation(
                         ));
                     }
                 };
-                values.push((MapKey::String(name.clone()), value));
+                values.push((MapKey::String(name.as_str().into()), value));
             }
             result.push(Value::map(values));
         }

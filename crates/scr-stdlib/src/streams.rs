@@ -998,7 +998,7 @@ fn datagram(
         bytes::budget(
             context,
             5 * size_of::<Value>()
-                + 4 * size_of::<MapKey>()
+                + 4 * MapKey::LOGICAL_BYTES
                 + "dataaddressporttruncated".len()
                 + 45
                 + size,

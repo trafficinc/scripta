@@ -301,7 +301,7 @@ fn row_budget(
         .filter(|n| *n <= options.output)
         .ok_or_else(|| limit("expanded archive exceeds maxOutputBytes"))?;
     let fixed = size_of::<Value>()
-        + 2 * (size_of::<MapKey>() + size_of::<Value>())
+        + 2 * (MapKey::LOGICAL_BYTES + size_of::<Value>())
         + "path".len()
         + "data".len();
     bytes::grow(context, logical, fixed)?;
@@ -795,7 +795,7 @@ mod tests {
                     Value::Bytes([0u8, 255, 1].as_slice().into()),
                 ),
             ])]);
-            let decoded_budget = 4 * size_of::<Value>() + 2 * size_of::<MapKey>() + 8 + 1 + 3;
+            let decoded_budget = 4 * size_of::<Value>() + 2 * MapKey::LOGICAL_BYTES + 8 + 1 + 3;
             for format in [Format::Zip, Format::Tar] {
                 context.max_value_bytes = None;
                 let options = Options::parse(None, format, "encode").unwrap();

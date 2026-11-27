@@ -103,7 +103,7 @@ fn endpoint_value(address: SocketAddr) -> Value {
 fn endpoint_budget(context: &RuntimeContext<'_>) -> NativeResult<()> {
     bytes::budget(
         context,
-        3 * size_of::<Value>() + 2 * size_of::<MapKey>() + 11 + 45,
+        3 * size_of::<Value>() + 2 * MapKey::LOGICAL_BYTES + 11 + 45,
     )
 }
 struct OpenOptions {
@@ -564,7 +564,7 @@ fn poll_handles(
         return Err(error("poll requires at least one socket"));
     }
     let mut watched: Vec<Watched> = vec![];
-    let mut cost = 3 * size_of::<Value>() + 2 * size_of::<MapKey>() + 16;
+    let mut cost = 3 * size_of::<Value>() + 2 * MapKey::LOGICAL_BYTES + 16;
     for (values, reading) in [(read, true), (write, false)] {
         for value in values {
             context.check_cancelled()?;

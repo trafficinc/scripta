@@ -73,7 +73,10 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
                             .environment
                             .iter()
                             .map(|(key, value)| {
-                                Ok((MapKey::String(text(key)?), Value::String(text(value)?)))
+                                Ok((
+                                    MapKey::String(text(key)?.into()),
+                                    Value::String(text(value)?),
+                                ))
                             })
                             .collect::<NativeResult<Vec<_>>>()?;
                         entries.sort_by(|left, right| match (&left.0, &right.0) {

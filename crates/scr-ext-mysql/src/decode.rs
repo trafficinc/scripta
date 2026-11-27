@@ -306,7 +306,7 @@ pub(crate) fn convert(
             add(&mut total, mem::size_of::<Value>(), budget.bytes)?;
             add(&mut total, value.bytes(), budget.bytes)?;
             if !matches!(selection, Selection::Column(_)) {
-                add(&mut total, mem::size_of::<MapKey>(), budget.bytes)?;
+                add(&mut total, MapKey::LOGICAL_BYTES, budget.bytes)?;
                 add(&mut total, names[index].len(), budget.bytes)?;
             }
         }
@@ -344,7 +344,7 @@ pub(crate) fn convert(
                 column,
             )?
             .value()?;
-            entries.push((MapKey::String(copy_text(names[index])?), value));
+            entries.push((MapKey::String(copy_text(names[index])?.into()), value));
         }
         output.push(Value::map(entries));
     }
@@ -562,7 +562,7 @@ mod tests {
     fn output_and_cell_budgets_cover_exact_and_limit_plus_one_with_utf8_bytes() {
         let columns = vec![column(b"x", T::MYSQL_TYPE_VAR_STRING, 45, 0)];
         let rows = vec![row(&columns, vec![M::Bytes("é".as_bytes().to_vec())])];
-        let exact = 2 * mem::size_of::<Value>() + mem::size_of::<MapKey>() + 1 + 2;
+        let exact = 2 * mem::size_of::<Value>() + MapKey::LOGICAL_BYTES + 1 + 2;
         let all_exact = exact + mem::size_of::<Value>();
         for (bytes, succeeds) in [(all_exact, true), (all_exact - 1, false)] {
             let result = convert(

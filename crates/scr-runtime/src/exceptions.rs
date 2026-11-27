@@ -312,7 +312,7 @@ impl Runtime {
             );
             bytes = bytes
                 .saturating_add(std::mem::size_of::<Value>())
-                .saturating_add(4 * (std::mem::size_of::<MapKey>() + std::mem::size_of::<Value>()))
+                .saturating_add(4 * (MapKey::LOGICAL_BYTES + std::mem::size_of::<Value>()))
                 .saturating_add("functionfilelinecolumn".len())
                 .saturating_add(strings);
             if self

@@ -404,7 +404,7 @@ fn measure(
         }
         Value::Map(entries) => {
             for (key, value) in entries {
-                *total = total.saturating_add(std::mem::size_of::<MapKey>());
+                *total = total.saturating_add(MapKey::LOGICAL_BYTES);
                 if let MapKey::String(s) = key {
                     *total = total.saturating_add(s.len());
                 }
@@ -437,7 +437,7 @@ fn stored(value: &Value) -> Stored {
                     (
                         match k {
                             MapKey::Int(i) => Key::Int(*i),
-                            MapKey::String(s) => Key::String(s.clone()),
+                            MapKey::String(s) => Key::String(s.to_string()),
                         },
                         stored(v),
                     )
@@ -462,7 +462,7 @@ fn value(stored: Stored) -> Value {
                     (
                         match k {
                             Key::Int(i) => MapKey::Int(i),
-                            Key::String(s) => MapKey::String(s),
+                            Key::String(s) => MapKey::String(s.into()),
                         },
                         value(v),
                     )
@@ -725,7 +725,7 @@ pub fn register(
                         };
                         let index = entries
                             .iter()
-                            .position(|(k, _)| k == &MapKey::String(key.clone()));
+                            .position(|(k, _)| matches!(k, MapKey::String(text) if text == key));
                         if name == "get" {
                             return Ok(index
                                 .map(|i| entries[i].1.clone())
@@ -747,7 +747,7 @@ pub fn register(
                         } else if let Some(index) = index {
                             candidate[index].1 = args[1].clone();
                         } else {
-                            candidate.push((MapKey::String(key.clone()), args[1].clone()));
+                            candidate.push((MapKey::String(key.as_str().into()), args[1].clone()));
                         }
                         let candidate = Value::Map(candidate);
                         let encoded = encode(&candidate, &state.config, context)?;

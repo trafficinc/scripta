@@ -82,7 +82,7 @@ impl Budget<'_, '_> {
         self.add(payload)
     }
     fn key(&mut self, key: &str) -> NativeResult<()> {
-        self.add(size_of::<MapKey>())?;
+        self.add(MapKey::LOGICAL_BYTES)?;
         self.add(key.len())
     }
 }
@@ -144,7 +144,7 @@ fn toml_value(
             for (key, item) in items {
                 budget.key(&key)?;
                 let value = toml_value(budget, item, depth + 1)?;
-                values.push((MapKey::String(key), value));
+                values.push((MapKey::String(key.into()), value));
             }
             Value::map(values)
         }
@@ -163,7 +163,7 @@ fn ini_parse(budget: &mut Budget<'_, '_>, text: &str) -> NativeResult<Value> {
     budget.value(0, 0)?;
     budget.key("")?;
     budget.value(1, 0)?;
-    let mut sections = vec![(MapKey::String(String::new()), Value::map(Vec::new()))];
+    let mut sections = vec![(MapKey::String(String::new().into()), Value::map(Vec::new()))];
     let mut section_names = BTreeSet::new();
     let mut keys = BTreeSet::new();
     for (index, raw) in text.split_inclusive('\n').enumerate() {
@@ -307,21 +307,21 @@ mod tests {
                 (
                     "Toml",
                     "a=['é']",
-                    3 * size_of::<Value>() + size_of::<MapKey>() + 3,
+                    3 * size_of::<Value>() + MapKey::LOGICAL_BYTES + 3,
                 ),
                 (
                     "Yaml",
                     "a: [é]",
-                    3 * size_of::<Value>() + size_of::<MapKey>() + 3,
+                    3 * size_of::<Value>() + MapKey::LOGICAL_BYTES + 3,
                 ),
                 (
                     "Ini",
                     "a=é",
-                    3 * size_of::<Value>() + 2 * size_of::<MapKey>() + 3,
+                    3 * size_of::<Value>() + 2 * MapKey::LOGICAL_BYTES + 3,
                 ),
                 ("Yaml", "null", size_of::<Value>()),
                 ("Toml", "", size_of::<Value>()),
-                ("Ini", "", 2 * size_of::<Value>() + size_of::<MapKey>()),
+                ("Ini", "", 2 * size_of::<Value>() + MapKey::LOGICAL_BYTES),
             ] {
                 let options = |n| {
                     Value::map(vec![(

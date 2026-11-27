@@ -34,10 +34,10 @@ fn convert(value: &Value, depth: usize) -> NativeResult<Json> {
                         "JSON object keys must be strings; convert integer keys explicitly",
                     ));
                 };
-                if object.contains_key(key) {
+                if object.contains_key(key.as_str()) {
                     return Err(error("duplicate JSON object key"));
                 }
-                object.insert(key.clone(), convert(value, depth + 1)?);
+                object.insert(key.to_string(), convert(value, depth + 1)?);
             }
             Json::Object(object)
         }
@@ -80,7 +80,7 @@ fn from_raw(raw: &RawValue, depth: usize) -> NativeResult<Value> {
             Value::Map(
                 items
                     .into_iter()
-                    .map(|(k, v)| Ok((MapKey::String(k), from_raw(&v, depth + 1)?)))
+                    .map(|(k, v)| Ok((MapKey::String(k.into()), from_raw(&v, depth + 1)?)))
                     .collect::<NativeResult<_>>()?,
             )
         }

@@ -196,7 +196,7 @@ fn zero_width_matches_follow_existing_find_all_and_no_match_is_null_or_empty_lis
 
 #[test]
 fn exact_nested_budgets_include_named_duplicates_keys_slots_and_nulls() {
-    let single = 16 * size_of::<Value>() + 12 * size_of::<MapKey>() + 54;
+    let single = 16 * size_of::<Value>() + 12 * MapKey::LOGICAL_BYTES + 54;
     for (all, input, required) in [
         (false, "é", single),
         (true, "é é", size_of::<Value>() + single * 2),
@@ -243,7 +243,7 @@ fn exact_nested_budgets_include_named_duplicates_keys_slots_and_nulls() {
 
 #[test]
 fn first_capture_stays_bounded_while_nested_and_repeated_output_can_exceed_budget() {
-    let single = 7 * size_of::<Value>() + 5 * size_of::<MapKey>() + 24;
+    let single = 7 * size_of::<Value>() + 5 * MapKey::LOGICAL_BYTES + 24;
     let mut first = runtime(Some(single));
     first
         .set_global("input", Value::String("x ".repeat(16)))

@@ -95,7 +95,7 @@ fn large_map_hints_verify_positions_after_writes_and_replacement() {
         let entries: Vec<_> = (0..64)
             .map(|i| {
                 (
-                    MapKey::String(format!("key{}", (i + round) % 64)),
+                    MapKey::String(format!("key{}", (i + round) % 64).into()),
                     Value::Int(i),
                 )
             })

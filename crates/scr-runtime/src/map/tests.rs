@@ -205,7 +205,7 @@ fn exact_limits_cancellation_and_failed_destinations_match_eager_map_clones() {
         exact - 1,
         exact,
         exact + 1,
-        exact + size_of::<MapKey>() + 2 * size_of::<Value>(),
+        exact + MapKey::LOGICAL_BYTES + 2 * size_of::<Value>(),
         1024,
     ] {
         options.push(RuntimeOptions {

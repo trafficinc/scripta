@@ -11,7 +11,7 @@ fn value(input: &Json) -> Value {
         Json::Object(items) => Value::Map(
             items
                 .iter()
-                .map(|(k, v)| (MapKey::String(k.clone()), value(v)))
+                .map(|(k, v)| (MapKey::String(k.as_str().into()), value(v)))
                 .collect(),
         ),
         _ => panic!("unsupported fixture value"),
@@ -28,7 +28,7 @@ fn output(input: &Value) -> Json {
                 .map(|(k, v)| {
                     let key = match k {
                         MapKey::Int(n) => json!(n),
-                        MapKey::String(s) => json!(s),
+                        MapKey::String(s) => json!(s.as_str()),
                     };
                     json!([key, output(v)])
                 })

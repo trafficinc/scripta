@@ -62,7 +62,7 @@ pub(crate) fn header_bytes(headers: &Value) -> usize {
                 let Value::List(values) = values else {
                     unreachable!()
                 };
-                size_of::<MapKey>()
+                MapKey::LOGICAL_BYTES
                     + key.len()
                     + size_of::<Value>()
                     + values
@@ -487,7 +487,7 @@ fn response_headers(context: &RuntimeContext<'_>, source: &http::HeaderMap) -> N
         grow(
             context,
             &mut size,
-            size_of::<MapKey>() + key.as_str().len() + size_of::<Value>(),
+            MapKey::LOGICAL_BYTES + key.as_str().len() + size_of::<Value>(),
         )?;
         let mut values = Vec::new();
         for value in source.get_all(key) {
@@ -543,7 +543,7 @@ fn download(
     let result_size = size_of::<Value>()
         + header_bytes(&headers)
         + 2 * size_of::<Value>()
-        + 3 * size_of::<MapKey>()
+        + 3 * MapKey::LOGICAL_BYTES
         + "status".len()
         + "headers".len()
         + "bytesWritten".len();
@@ -715,7 +715,7 @@ pub(crate) fn open_stream(
         grow(
             context,
             &mut cost,
-            size_of::<MapKey>() + key.as_str().len() + size_of::<Value>(),
+            MapKey::LOGICAL_BYTES + key.as_str().len() + size_of::<Value>(),
         )?;
         for value in response.headers().get_all(key) {
             let value = value.to_str().map_err(|_| {

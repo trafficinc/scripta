@@ -8,7 +8,7 @@ fn entries(count: usize) -> Vec<(MapKey, Value)> {
             let key = if i % 2 == 0 {
                 MapKey::Int((i / 2) as i64)
             } else {
-                MapKey::String((i / 2).to_string())
+                MapKey::String((i / 2).to_string().into())
             };
             (key, Value::Int(i as i64))
         })
@@ -35,7 +35,7 @@ fn typed_keys_empty_maps_and_threshold_boundaries_keep_logical_sizes() {
     ] {
         let entries = entries(count);
         let expected = size_of::<Value>()
-            + entries.len() * (size_of::<MapKey>() + size_of::<Value>())
+            + entries.len() * (MapKey::LOGICAL_BYTES + size_of::<Value>())
             + entries
                 .iter()
                 .map(|(key, _)| match key {
@@ -94,7 +94,7 @@ fn unicode_long_keys_nested_maps_bytes_and_depth_limits_match_hashing() {
         let pairs = (0..count)
             .map(|i| {
                 (
-                    MapKey::String(format!("{}世界{i}", "prefix".repeat(64))),
+                    MapKey::String(format!("{}世界{i}", "prefix".repeat(64)).into()),
                     Value::list(vec![
                         Value::Bytes(Rc::from([0_u8, 255])),
                         Value::String("é東京".into()),
@@ -154,7 +154,7 @@ impl NativeObject for Observed {
         let inner = Value::map(vec![(MapKey::String("inner".into()), Value::Int(1))]);
         assert_eq!(
             inner.measure(0, None).unwrap(),
-            2 * size_of::<Value>() + size_of::<MapKey>() + 5
+            2 * size_of::<Value>() + MapKey::LOGICAL_BYTES + 5
         );
         self.bytes.get()
     }
@@ -279,7 +279,7 @@ fn generated_maps_match_hashed_validation_in_both_walkers() {
                 let key = if random & 1 == 0 {
                     MapKey::Int(number as i64)
                 } else {
-                    MapKey::String(format!("世界{number}"))
+                    MapKey::String(format!("世界{number}").into())
                 };
                 let value = if random % 31 == 0 {
                     Value::Float(f64::INFINITY)

@@ -169,7 +169,7 @@ fn encode(
         return Err(resource("multipart output exceeds limit"));
     }
     let mut total = 3 * size_of::<Value>()
-        + 2 * size_of::<MapKey>()
+        + 2 * MapKey::LOGICAL_BYTES
         + "contentType".len()
         + "body".len()
         + content_type.len();
@@ -230,7 +230,7 @@ mod tests {
                 panic!()
             };
             let needed = 3 * size_of::<Value>()
-                + 2 * size_of::<MapKey>()
+                + 2 * MapKey::LOGICAL_BYTES
                 + "contentType".len()
                 + "body".len()
                 + kind.len()

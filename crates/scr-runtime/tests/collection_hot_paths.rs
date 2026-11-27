@@ -117,7 +117,7 @@ fn replacements_destructuring_growth_and_reused_parameter_scopes_keep_current_va
 #[test]
 fn cached_map_updates_keep_exact_budgets_and_failed_destinations() {
     let slot = std::mem::size_of::<Value>();
-    let key = std::mem::size_of::<MapKey>();
+    let key = MapKey::LOGICAL_BYTES;
     let exact = slot + SIZE * (slot + key);
     for limit in [exact, exact + slot + key] {
         let mut runtime = Runtime::with_options(RuntimeOptions {

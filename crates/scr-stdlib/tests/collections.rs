@@ -385,12 +385,12 @@ fn generated_results_fail_without_changing_destinations_or_inputs() {
     let list = ints(&(0..32).collect::<Vec<_>>());
     let left_map = Value::Map(
         (0..16)
-            .map(|i| (MapKey::String(format!("a{i}")), Value::Int(i)))
+            .map(|i| (MapKey::String(format!("a{i}").into()), Value::Int(i)))
             .collect(),
     );
     let right_map = Value::Map(
         (0..16)
-            .map(|i| (MapKey::String(format!("b{i}")), Value::Int(i)))
+            .map(|i| (MapKey::String(format!("b{i}").into()), Value::Int(i)))
             .collect(),
     );
     for expression in [
@@ -597,7 +597,7 @@ fn map_operations_preserve_typed_keys_and_duplicate_insertion_positions() {
 
 #[test]
 fn indexed_maps_preserve_order_with_many_typed_keys_and_partial_overlap() {
-    let keys = |i: i64| [MapKey::Int(i), MapKey::String(i.to_string())];
+    let keys = |i: i64| [MapKey::Int(i), MapKey::String(i.to_string().into())];
     let right_value = |i: i64| {
         if i % 3 == 0 {
             Value::Null
@@ -671,12 +671,15 @@ fn indexed_maps_preserve_order_with_many_typed_keys_and_partial_overlap() {
 #[test]
 fn indexed_construction_keeps_first_positions_and_last_values_after_many_duplicates() {
     let expected_keys: Vec<_> = (-64..64)
-        .flat_map(|i| [MapKey::Int(i), MapKey::String(i.to_string())])
-        .chain([MapKey::String(String::new()), MapKey::String("東京".into())])
+        .flat_map(|i| [MapKey::Int(i), MapKey::String(i.to_string().into())])
+        .chain([
+            MapKey::String(String::new().into()),
+            MapKey::String("東京".into()),
+        ])
         .collect();
     let as_value = |key: &MapKey| match key {
         MapKey::Int(i) => Value::Int(*i),
-        MapKey::String(s) => Value::String(s.clone()),
+        MapKey::String(s) => Value::String(s.to_string()),
     };
     // Repeat all keys in the opposite order, using separately owned strings.
     let keys: Vec<_> = expected_keys

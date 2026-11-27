@@ -25,7 +25,7 @@ pub trait NativeObject: fmt::Debug {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MapKey {
     Int(i64),
-    String(String),
+    String(crate::MapKeyText),
 }
 
 const SMALL_MAP_KEYS: usize = 16;
@@ -57,10 +57,14 @@ pub(crate) fn with_hashed_map_validation<T>(run: impl FnOnce() -> T) -> T {
 }
 
 impl MapKey {
+    /// Logical slot charge, preserving the original owned-string key layout.
+    /// Shared text changes physical storage, not per-value quota boundaries.
+    pub const LOGICAL_BYTES: usize = std::mem::size_of::<String>();
+
     pub(crate) fn from_value(value: Value) -> Result<Self, String> {
         match value {
             Value::Int(value) => Ok(Self::Int(value)),
-            Value::String(value) => Ok(Self::String(value)),
+            Value::String(value) => Ok(Self::String(value.into())),
             _ => Err("map keys must be int or string".into()),
         }
     }
@@ -68,7 +72,7 @@ impl MapKey {
     pub(crate) fn value(&self) -> Value {
         match self {
             Self::Int(value) => Value::Int(*value),
-            Self::String(value) => Value::String(value.clone()),
+            Self::String(value) => Value::String(value.as_str().to_owned()),
         }
     }
 }
@@ -315,7 +319,7 @@ impl Value {
                                 return Err("duplicate host map key".into());
                             }
                             add = add
-                                .checked_add(std::mem::size_of::<MapKey>())
+                                .checked_add(MapKey::LOGICAL_BYTES)
                                 .ok_or("value size overflow")?;
                             if let MapKey::String(key) = key {
                                 add = add.checked_add(key.len()).ok_or("value size overflow")?;
@@ -345,7 +349,7 @@ fn measure_small_map(entries: &[(MapKey, Value)]) -> Result<usize, String> {
             return Err("duplicate host map key".into());
         }
         add = add
-            .checked_add(size_of::<MapKey>())
+            .checked_add(MapKey::LOGICAL_BYTES)
             .ok_or("value size overflow")?;
         if let MapKey::String(key) = key {
             add = add.checked_add(key.len()).ok_or("value size overflow")?;

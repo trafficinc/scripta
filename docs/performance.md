@@ -26,5 +26,3 @@ in ignored benchmark JSON files.
 These are workload/API comparisons, not an overall language ranking or native
 validation of other platforms.
 
-
-

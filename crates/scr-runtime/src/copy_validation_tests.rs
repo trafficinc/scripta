@@ -87,7 +87,7 @@ fn copied_lists_invalidate_previous_map_hints_and_keep_name_slot_fallback() {
                 "destination",
                 Value::Map(
                     (0..120)
-                        .map(|i| (MapKey::String(format!("key{i}")), Value::Int(i)))
+                        .map(|i| (MapKey::String(format!("key{i}").into()), Value::Int(i)))
                         .collect(),
                 ),
             )

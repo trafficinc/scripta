@@ -28,7 +28,7 @@ fn budget(context: &InvocationContext<'_>, size: usize) -> Result<usize> {
 fn key_size(context: &InvocationContext<'_>, key: &MapKey) -> Result<usize> {
     add(
         context,
-        size_of::<MapKey>(),
+        MapKey::LOGICAL_BYTES,
         match key {
             MapKey::String(text) => text.len(),
             _ => 0,
@@ -151,7 +151,7 @@ fn map_transform(
         context.checkpoint()?;
         let key_value = match key {
             MapKey::Int(value) => Value::Int(*value),
-            MapKey::String(value) => Value::String(value.clone()),
+            MapKey::String(value) => Value::String(value.to_string()),
         };
         let value = context.invoke_owned(callback.clone(), [item.clone(), key_value])?;
         let output = if filter {
@@ -197,7 +197,7 @@ fn reduce(context: &mut InvocationContext<'_>, args: &[Value]) -> InvocationResu
                 context.checkpoint()?;
                 let key = match key {
                     MapKey::Int(key) => Value::Int(*key),
-                    MapKey::String(key) => Value::String(key.clone()),
+                    MapKey::String(key) => Value::String(key.to_string()),
                 };
                 accumulator =
                     context.invoke_owned(callback.clone(), [accumulator, item.clone(), key])?;

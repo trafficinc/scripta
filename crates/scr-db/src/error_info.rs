@@ -108,7 +108,7 @@ impl Record {
             + fields
                 .iter()
                 .map(|(key, value)| {
-                    mem::size_of::<MapKey>()
+                    MapKey::LOGICAL_BYTES
                         + mem::size_of::<Value>()
                         + key.len()
                         + value.map_or(0, str::len)
@@ -123,7 +123,7 @@ impl Record {
             .map_err(|_| limit())?;
         for (key, value) in fields {
             entries.push((
-                MapKey::String(copy(key)?),
+                MapKey::String(copy(key)?.into()),
                 match value {
                     Some(s) => Value::String(copy(s)?),
                     None => Value::Null,
@@ -170,7 +170,7 @@ mod tests {
         assert_eq!(record.sql_state, None);
         assert_eq!(record.driver_code, None);
         let output = record.value(None).unwrap();
-        let size = 6 * mem::size_of::<Value>() + 5 * mem::size_of::<MapKey>() + 42 + 7 + 10 + 1024;
+        let size = 6 * mem::size_of::<Value>() + 5 * MapKey::LOGICAL_BYTES + 42 + 7 + 10 + 1024;
         for (budget, succeeds) in [(size, true), (size - 1, false)] {
             let mut runtime = scr_runtime::Runtime::with_options(scr_runtime::RuntimeOptions {
                 max_value_bytes: Some(budget),

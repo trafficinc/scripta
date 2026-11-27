@@ -26,7 +26,7 @@ fn budget(context: &RuntimeContext<'_>, bytes: usize) -> NativeResult<usize> {
 
 fn key_bytes(key: &MapKey) -> NativeResult<usize> {
     add(
-        size_of::<MapKey>(),
+        MapKey::LOGICAL_BYTES,
         match key {
             MapKey::String(s) => s.len(),
             _ => 0,
@@ -279,7 +279,7 @@ fn map_call(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> NativeR
                 context.check_cancelled()?;
                 result.push(match key {
                     MapKey::Int(v) => Value::Int(*v),
-                    MapKey::String(v) => Value::String(v.clone()),
+                    MapKey::String(v) => Value::String(v.to_string()),
                 });
             }
             Ok(Value::list(result))
@@ -315,7 +315,7 @@ impl<'a> Key<'a> {
             Self::Text(s) => s.len(),
             Self::Int(_) => 0,
         };
-        add(size_of::<MapKey>(), text)
+        add(MapKey::LOGICAL_BYTES, text)
     }
 
     fn owned(self) -> MapKey {
@@ -348,7 +348,7 @@ impl Output<'_> {
         let mut bytes = size_of::<Value>();
         match self {
             Self::Value(v) => return measure(context, v, depth),
-            Self::Key(k) => bytes = add(bytes, k.bytes()? - size_of::<MapKey>())?,
+            Self::Key(k) => bytes = add(bytes, k.bytes()? - MapKey::LOGICAL_BYTES)?,
             Self::List(values) => {
                 for value in values {
                     bytes = budget(context, add(bytes, value.bytes(context, depth + 1)?)?)?;
@@ -370,9 +370,9 @@ impl Output<'_> {
         context.check_cancelled()?;
         Ok(match self {
             Self::Value(v) => (*v).clone(),
-            Self::Key(k) => match k.owned() {
-                MapKey::Int(i) => Value::Int(i),
-                MapKey::String(s) => Value::String(s),
+            Self::Key(k) => match k {
+                Key::Int(i) => Value::Int(*i),
+                Key::Text(s) => Value::String((*s).to_owned()),
             },
             Self::List(values) => {
                 let mut result = Vec::new();
@@ -950,7 +950,7 @@ mod tests {
     #[test]
     fn collection_outputs_account_for_nested_values_keys_and_empty_results() {
         let slot = size_of::<Value>();
-        let key = size_of::<MapKey>();
+        let key = MapKey::LOGICAL_BYTES;
         let cases = [
             (
                 "List",
@@ -1162,7 +1162,7 @@ mod tests {
                 })
                 .collect(),
         );
-        let required = 2 * size_of::<Value>() + size_of::<MapKey>();
+        let required = 2 * size_of::<Value>() + MapKey::LOGICAL_BYTES;
         for (name, args) in [
             (
                 "combine",
@@ -1184,7 +1184,7 @@ mod tests {
             );
         }
         let args = [Value::map(vec![
-            (MapKey::String("x".repeat(1024)), integer.clone()),
+            (MapKey::String("x".repeat(1024).into()), integer.clone()),
             (MapKey::String("x".into()), integer),
         ])];
         assert_eq!(

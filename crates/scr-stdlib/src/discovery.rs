@@ -177,7 +177,7 @@ fn walk(
             let fixed = size_of::<Value>()
                 + KEYS
                     .iter()
-                    .map(|k| size_of::<MapKey>() + k.len() + size_of::<Value>())
+                    .map(|k| MapKey::LOGICAL_BYTES + k.len() + size_of::<Value>())
                     .sum::<usize>();
             bytes = bytes
                 .checked_add(fixed)

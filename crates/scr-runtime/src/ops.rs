@@ -136,6 +136,13 @@ pub(crate) enum IndexKey<'a> {
 }
 
 impl<'a> IndexKey<'a> {
+    fn owned(self) -> crate::MapKey {
+        match self {
+            Self::Int(value) => crate::MapKey::Int(value),
+            Self::String(text) => crate::MapKey::String(text.into()),
+        }
+    }
+
     pub fn from_value(value: &'a Value) -> Option<Self> {
         match value {
             Value::Int(value) => Some(Self::Int(*value)),
@@ -253,7 +260,9 @@ pub(crate) fn set_index(
                 set_index(item, rest, replacement, append)
             } else if rest.is_empty() && !append {
                 entries.push((
-                    crate::MapKey::from_value(key.clone()).expect("validated map key"),
+                    IndexKey::from_value(key)
+                        .expect("validated map key")
+                        .owned(),
                     replacement,
                 ));
                 Ok(())
