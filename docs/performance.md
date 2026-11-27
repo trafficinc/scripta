@@ -41,6 +41,10 @@ and verified ordered-map position hints. General evaluation handles unsupported 
 logical resource accounting remains independent of physical sharing. See
 [runtime ownership and limits](architecture.md#execution-hot-paths-and-limits).
 
+Single indexed reads such as `$row["rank"]` borrow literal keys from the AST and
+avoid temporary assignment-path storage. Reads with dynamic keys, nested paths,
+receiver roots, or explicit value-byte budgets retain ordinary evaluation.
+
 Comprehensions reuse bounded uncaptured scope storage and share immutable binding
 names. Discarded string appends also reuse their buffer across non-reentrant
 native calls whose arguments cannot write script bindings. Ordinary single-field

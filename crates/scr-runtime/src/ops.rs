@@ -126,10 +126,30 @@ pub(crate) fn binary(op: BinaryOp, left: Value, right: Value) -> Result<Value> {
 }
 
 pub(crate) fn key_matches(key: &crate::MapKey, value: &Value) -> bool {
-    match (key, value) {
-        (crate::MapKey::Int(a), Value::Int(b)) => a == b,
-        (crate::MapKey::String(a), Value::String(b)) => a == b,
-        _ => false,
+    IndexKey::from_value(value).is_some_and(|value| value.matches(key))
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum IndexKey<'a> {
+    Int(i64),
+    String(&'a str),
+}
+
+impl<'a> IndexKey<'a> {
+    pub fn from_value(value: &'a Value) -> Option<Self> {
+        match value {
+            Value::Int(value) => Some(Self::Int(*value)),
+            Value::String(value) => Some(Self::String(value)),
+            _ => None,
+        }
+    }
+
+    pub fn matches(self, key: &crate::MapKey) -> bool {
+        match (self, key) {
+            (Self::Int(a), crate::MapKey::Int(b)) => a == *b,
+            (Self::String(a), crate::MapKey::String(b)) => a == b,
+            _ => false,
+        }
     }
 }
 fn valid_key(key: &Value) -> Result<()> {
@@ -144,18 +164,31 @@ pub(crate) fn index(value: &Value, key: &Value) -> Result<Value> {
     index_ref(value, key).cloned()
 }
 pub(crate) fn index_ref<'a>(value: &'a Value, key: &Value) -> Result<&'a Value> {
+    if let Some(key) = IndexKey::from_value(key) {
+        return index_ref_key(value, key);
+    }
+    Err(Error::Type(match value {
+        Value::List(_) => "list index must be an int",
+        Value::Map(_) => "map keys must be int or string",
+        _ => "index access requires a list or map",
+    }))
+}
+
+pub(crate) fn index_ref_key<'a>(value: &'a Value, key: IndexKey<'_>) -> Result<&'a Value> {
     match value {
-        Value::List(items) => items
-            .get(list_index(key, items.len())?)
-            .ok_or(Error::Index("list index out of bounds")),
-        Value::Map(entries) => {
-            valid_key(key)?;
-            entries
-                .iter()
-                .find(|(candidate, _)| key_matches(candidate, key))
-                .map(|(_, value)| value)
-                .ok_or(Error::Index("map key not found"))
+        Value::List(items) => {
+            let IndexKey::Int(key) = key else {
+                return Err(Error::Type("list index must be an int"));
+            };
+            items
+                .get(integer_index(key, items.len())?)
+                .ok_or(Error::Index("list index out of bounds"))
         }
+        Value::Map(entries) => entries
+            .iter()
+            .find(|(candidate, _)| key.matches(candidate))
+            .map(|(_, value)| value)
+            .ok_or(Error::Index("map key not found")),
         _ => Err(Error::Type("index access requires a list or map")),
     }
 }
@@ -164,10 +197,14 @@ fn list_index(value: &Value, len: usize) -> Result<usize> {
     let Value::Int(value) = value else {
         return Err(Error::Type("list index must be an int"));
     };
-    let index = if *value < 0 {
-        len as i128 + *value as i128
+    integer_index(*value, len)
+}
+
+fn integer_index(value: i64, len: usize) -> Result<usize> {
+    let index = if value < 0 {
+        len as i128 + value as i128
     } else {
-        *value as i128
+        value as i128
     };
     usize::try_from(index).map_err(|_| Error::Index("list index out of bounds"))
 }

@@ -113,6 +113,12 @@ execution limits retain their existing validation.
 Prepared arithmetic and boolean operations use an inline success path; the
 diagnostic converter is kept in a cold error path with the original source span.
 
+Single indexed reads with a variable root and a literal integer or string key
+borrow the key from the AST and clone only the selected value, without building
+an assignment path. Grouped roots and keys use the same path. Large maps retain
+verified position hints. Dynamic keys, nested paths, receiver roots, and explicit
+value-byte budgets retain ordinary evaluation and its validation order.
+
 Comprehensions share immutable binding names and recycle bounded uncaptured
 scope storage. Read-only int/bool/null expressions can use compact plans and
 direct input slots. Iterations retain scope accounting and instruction checks;

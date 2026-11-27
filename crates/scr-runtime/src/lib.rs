@@ -31,6 +31,7 @@ mod float_loop;
 mod integer_loop;
 mod invocation;
 mod list;
+mod literal_read;
 pub use list::List;
 mod map;
 pub use map::Map;
@@ -159,6 +160,10 @@ pub struct Runtime {
     force_compact_frames: bool,
     environments: Environments,
     map_indexes: std::cell::RefCell<map_index::MapIndexes>,
+    #[cfg(test)]
+    disable_literal_reads: bool,
+    #[cfg(test)]
+    literal_reads_executed: usize,
     exception_classes:
         std::cell::RefCell<std::collections::HashMap<String, Rc<objects::ScriptClass>>>,
     stack: Vec<error::ActiveFrame>,
@@ -1121,11 +1126,14 @@ impl Runtime {
                 self.validate_value(&value, 0, expr.span)?;
                 Ok(value)
             }
-            ExprKind::IndexAccess(_, _) if borrowable(expr) => {
-                let place = self.place(expr, output)?;
-                self.read_place(&place, expr.span)
-            }
             ExprKind::IndexAccess(base, index) => {
+                if let Some(result) = self.literal_index_read(base, index, expr.span) {
+                    return result;
+                }
+                if borrowable(expr) {
+                    let place = self.place(expr, output)?;
+                    return self.read_place(&place, expr.span);
+                }
                 let base = self.evaluate(base, output)?;
                 let index = self.evaluate(index, output)?;
                 self.operation(ops::index(&base, &index), expr.span)

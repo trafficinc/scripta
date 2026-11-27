@@ -1,5 +1,5 @@
 //! Bounded hints for verified positions in ordered map entry storage.
-use crate::{MapKey, Value};
+use crate::{MapKey, Value, ops::IndexKey};
 use std::collections::{HashMap, VecDeque};
 
 const MIN_ENTRIES: usize = 64;
@@ -21,11 +21,10 @@ struct Index {
     strings: HashMap<String, usize>,
 }
 impl Index {
-    fn position(&self, key: &Value) -> Option<usize> {
+    fn position(&self, key: IndexKey<'_>) -> Option<usize> {
         match key {
-            Value::Int(key) => self.integers.get(key).copied(),
-            Value::String(key) => self.strings.get(key.as_str()).copied(),
-            _ => None,
+            IndexKey::Int(key) => self.integers.get(&key).copied(),
+            IndexKey::String(key) => self.strings.get(key).copied(),
         }
     }
     fn build(scope: usize, name: &str, entries: &[(MapKey, Value)]) -> Option<Self> {
@@ -104,7 +103,18 @@ impl MapIndexes {
         key: &Value,
         build: bool,
     ) -> Option<usize> {
-        if !eligible_size(entries.len()) || !matches!(key, Value::Int(_) | Value::String(_)) {
+        self.position_key(scope, name, entries, IndexKey::from_value(key)?, build)
+    }
+
+    pub fn position_key(
+        &mut self,
+        scope: usize,
+        name: &str,
+        entries: &[(MapKey, Value)],
+        key: IndexKey<'_>,
+        build: bool,
+    ) -> Option<usize> {
+        if !eligible_size(entries.len()) {
             return None;
         }
         if let Some(at) = self
@@ -116,7 +126,7 @@ impl MapIndexes {
             if let Some(position) = index.position(key).filter(|&p| {
                 entries
                     .get(p)
-                    .is_some_and(|(stored, _)| crate::ops::key_matches(stored, key))
+                    .is_some_and(|(stored, _)| key.matches(stored))
             }) {
                 let index = self.indexes.remove(at).expect("cached map index");
                 self.indexes.push_back(index);
