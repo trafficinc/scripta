@@ -28,6 +28,34 @@ pub enum MapKey {
     String(String),
 }
 
+const SMALL_MAP_KEYS: usize = 16;
+
+#[cfg(test)]
+thread_local! {
+    static HASHED_MAP_VALIDATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[inline]
+pub(crate) fn small_map_validation(length: usize) -> bool {
+    #[cfg(test)]
+    if HASHED_MAP_VALIDATION.get() {
+        return false;
+    }
+    length <= SMALL_MAP_KEYS
+}
+
+#[cfg(test)]
+pub(crate) fn with_hashed_map_validation<T>(run: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            HASHED_MAP_VALIDATION.set(self.0);
+        }
+    }
+    let _restore = Restore(HASHED_MAP_VALIDATION.replace(true));
+    run()
+}
+
 impl MapKey {
     pub(crate) fn from_value(value: Value) -> Result<Self, String> {
         match value {
@@ -277,18 +305,23 @@ impl Value {
                 }
                 Self::List(values) => pending.extend(values.iter().map(|v| (v, depth + 1))),
                 Self::Map(entries) => {
-                    let mut keys = std::collections::HashSet::with_capacity(entries.len());
-                    for (key, value) in entries {
-                        if !keys.insert(key) {
-                            return Err("duplicate host map key".into());
+                    if small_map_validation(entries.len()) {
+                        add = measure_small_map(entries)?;
+                        pending.extend(entries.iter().map(|(_, value)| (value, depth + 1)));
+                    } else {
+                        let mut keys = std::collections::HashSet::with_capacity(entries.len());
+                        for (key, value) in entries {
+                            if !keys.insert(key) {
+                                return Err("duplicate host map key".into());
+                            }
+                            add = add
+                                .checked_add(std::mem::size_of::<MapKey>())
+                                .ok_or("value size overflow")?;
+                            if let MapKey::String(key) = key {
+                                add = add.checked_add(key.len()).ok_or("value size overflow")?;
+                            }
+                            pending.push((value, depth + 1));
                         }
-                        add = add
-                            .checked_add(std::mem::size_of::<MapKey>())
-                            .ok_or("value size overflow")?;
-                        if let MapKey::String(key) = key {
-                            add = add.checked_add(key.len()).ok_or("value size overflow")?;
-                        }
-                        pending.push((value, depth + 1));
                     }
                 }
                 _ => {}
@@ -301,3 +334,26 @@ impl Value {
         Ok(bytes)
     }
 }
+
+// Keep the original hashed loop in the visitor; isolate only the bounded
+// pairwise path so scalar/list traversal does not inherit its working state.
+#[inline(never)]
+fn measure_small_map(entries: &[(MapKey, Value)]) -> Result<usize, String> {
+    let mut add = size_of::<Value>();
+    for (index, (key, _)) in entries.iter().enumerate() {
+        if entries[..index].iter().any(|(seen, _)| seen == key) {
+            return Err("duplicate host map key".into());
+        }
+        add = add
+            .checked_add(size_of::<MapKey>())
+            .ok_or("value size overflow")?;
+        if let MapKey::String(key) = key {
+            add = add.checked_add(key.len()).ok_or("value size overflow")?;
+        }
+    }
+    Ok(add)
+}
+
+#[cfg(test)]
+#[path = "map_validation_tests.rs"]
+mod map_validation_tests;
