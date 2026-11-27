@@ -12,7 +12,7 @@ import zipfile
 from promote_release import GitHub, JSON_LIMIT, SHA, WORKFLOW, require_dispatch, tag_path, workspace_version
 from publish_release import prepare, publish, release_kind
 from validate_native import TARGETS, digest
-from release_assets import validation_directory
+from release_assets import public_assets, validation_directory
 from workflow_build import verify_saved_assets
 
 
@@ -111,8 +111,16 @@ def recheck(api, selection):
 def prepare_saved(api, selection, assets, output):
     recheck(api, selection)
     # Actions retains local validation beside public assets, never in release downloads.
+    if not assets.is_dir() or assets.is_symlink():
+        raise ValueError('Saved build must be a regular directory')
+    entries = {path.name for path in assets.iterdir()}
+    if (not {'assets', 'assets-validation'}.issubset(entries)
+            or entries - {'assets', 'assets-validation', 'assets-notes.md'}):
+        raise ValueError('Saved build must contain separate assets and local validation directories')
     assets = assets / 'assets'
     record = validation_directory(assets) / 'release-manifest.json'
+    if record.is_symlink() or not record.is_file() or record.stat().st_size > JSON_LIMIT:
+        raise ValueError('Build manifest is missing, unsafe or exceeds its size limit')
     with record.open('rb') as stream:
         content = stream.read(JSON_LIMIT + 1)
     if len(content) > JSON_LIMIT:
@@ -162,6 +170,7 @@ def ensure_tag(api, manifest, create=True):
 
 def publish_build(api, selection, manifest, output, notes, environment, publisher=publish):
     require_dispatch(environment)
+    public_assets(output, manifest['version'])
     if environment.get('GITHUB_REPOSITORY') != selection['repository']:
         raise ValueError('Selected build belongs to another repository')
     recheck(api, selection)

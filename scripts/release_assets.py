@@ -1,5 +1,6 @@
 """Public runtime package policy; validation metadata lives outside release assets."""
 import hashlib
+import gzip
 import io
 from pathlib import Path, PurePosixPath
 import re
@@ -35,10 +36,11 @@ def runtime_file(name, windows=False):
     leaf = parts[-1].lower()
     return (parts[1:3] == ('rust', 'licenses')
             or name == 'third-party/rust/COPYRIGHT-library.html'
-            or (len(parts) == 3 and leaf.startswith(('license', 'copying', 'notice', 'unlicense', 'declared-license'))))
+            or (len(parts) == 3 and (leaf.startswith(('license', 'copying', 'notice', 'unlicense', 'declared-license'))
+                or leaf.endswith(('-license', '-license.md', '-license.txt')))))
 
 
-def inspect_package(path, version, target):
+def _inspect_package(path, version, target):
     """Check bounded regular entries and allow only executables and legal notices."""
     windows = target.endswith('windows-msvc')
     prefix = f'scripta-{version}-{target}/'
@@ -72,7 +74,11 @@ def inspect_package(path, version, target):
                 with archive.open(entry) as stream:
                     add(entry.filename, entry.file_size, stream, mode)
     else:
-        with tarfile.open(path, 'r:gz') as archive:
+        with gzip.open(path, 'rb') as stream:
+            raw = stream.read(MAX_BYTES + 4 * 1024 * 1024 + 1)
+        if len(raw) > MAX_BYTES + 4 * 1024 * 1024:
+            raise ValueError('Unpacked runtime archive exceeds its size limit')
+        with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as archive:
             for entry in archive:
                 if not entry.isfile():
                     raise ValueError('Public package entries must be regular files')
@@ -88,13 +94,26 @@ def inspect_package(path, version, target):
             'files': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}
 
 
+def inspect_package(path, version, target):
+    try:
+        if path.stat().st_size > MAX_BYTES * 2:
+            raise ValueError('Runtime archive exceeds its size limit')
+        return _inspect_package(path, version, target)
+    except (zipfile.BadZipFile, tarfile.TarError, OSError) as error:
+        raise ValueError('Invalid runtime package archive') from error
+
+
 def public_assets(assets, version, *, inspect=True):
+    if not assets.is_dir() or assets.is_symlink():
+        raise ValueError('Public assets must be a regular directory')
     names = package_names(version)
     expected = set(names.values()) | {'SHA256SUMS'}
     if ({p.name for p in assets.iterdir()} != expected
             or any(not p.is_file() or p.is_symlink() for p in assets.iterdir())):
         raise ValueError('Release assets must contain only three platform packages and SHA256SUMS')
     hashes = {}
+    if (assets / 'SHA256SUMS').stat().st_size > 65536:
+        raise ValueError('Source checksums exceed their size limit')
     for line in (assets / 'SHA256SUMS').read_bytes().decode('ascii').splitlines():
         match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9._-]+)', line)
         if not match or match[2] in hashes:
@@ -103,6 +122,8 @@ def public_assets(assets, version, *, inspect=True):
     if set(hashes) != set(names.values()):
         raise ValueError('Source checksums must cover exactly the three platform packages')
     for target, name in names.items():
+        if (assets / name).stat().st_size > MAX_BYTES * 2:
+            raise ValueError('Runtime archive exceeds its size limit')
         if digest(assets / name) != hashes[name]:
             raise ValueError('Source asset checksum mismatch: ' + name)
         if inspect:

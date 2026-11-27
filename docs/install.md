@@ -4,16 +4,14 @@
 
 Select a release from [GitHub Releases](https://github.com/trafficinc/scripta/releases)
 and choose the archive for your OS and architecture. Consult the
-[platform baselines](compatibility.md) and the selected release's native records
+[platform baselines](compatibility.md) and the selected release's notes
 for its tested environment.
 
-Download the platform archive, `SHA256SUMS`, and `validation-evidence.zip` from
-that same release. `SHA256SUMS` covers the three platform packages and the evidence
-ZIP. Individual `.sha256` files, native/smoke records, logs, and the release
-manifest are bundled inside the ZIP; they are not separate release downloads.
-The commands below select the checksum entry for the archive being installed,
-so other platform archives need not be downloaded. They require exactly one
-matching checksum entry and stop before extraction if verification fails.
+Download your platform archive and `SHA256SUMS` from that same release.
+Checksums cover the three platform archives. Validation reports, smoke results,
+logs and internal manifests are retained with the build, not released.
+The commands below require exactly one checksum entry for your archive and stop
+before extraction if verification fails; other platform archives are not needed.
 
 A checksum checks file integrity; obtain both the archive and checksums from a
 trusted release source. Consult that release's notes for signing or notarization
@@ -21,23 +19,24 @@ details. Packages are not publisher-signed or notarized and do not include an
 MSI, PKG, automatic updater, or privileged installer. Installation uses per-user
 paths and ordinary archive tools.
 
-The extracted directory contains the standalone executable, LICENSE, dependency
-notices, examples, runnable playgrounds and their fixtures, reference
-documentation, and release.json with file hashes.
-Every standard platform package includes bundled SQLite; no extra database
-package, server, or installed SQLite library is required. The primary executable is `scripta` (`scripta.exe` on Windows). Archives also
-include an identical compatibility executable named `scr` (`scr.exe`). Put the
-primary executable on PATH; optionally copy the compatibility executable beside
-it if older commands or shebangs need `scr`. Both use the same implementation.
-Only the executable needs to be on PATH. Python, Node.js, PHP, Docker, Rust, Cargo,
-and a network connection are not needed to run local scripts after installation.
-Archive extraction/checksum utilities are installation tools, not interpreter
-runtime dependencies.
+The extracted directory contains the primary `scripta` executable, identical
+compatibility `scr` command (`.exe` on Windows), LICENSE and dependency notices.
+SQLite is compiled in; no separate SQLite installation is needed. Required OS
+system libraries are supplied by the platform. Current packages need no additional
+non-system runtime libraries. Docs, examples, playground files and validation
+metadata are available in the source repository rather than the binary archive.
+Only the executables need to be on PATH. Python, Node.js, PHP, Docker, Rust and
+Cargo are not required to run local scripts; extraction/checksum utilities are
+installation tools.
 
-Developer documentation links to benchmark harnesses in the source repository;
-raw benchmark JSON measurements remain local and are ignored by Git. Benchmark
-tooling and measurements are not included in the binary archive; runnable
-examples and playground fixtures are included.
+To try a script, save this as `hello.scripta` in your working directory:
+
+```scripta
+echo "Hello, Scripta!\n";
+```
+
+Then run `scripta run hello.scripta`. The optional `scr` executable is needed only
+for existing commands or shebangs that use that name.
 
 ## Optional local browser playground
 
@@ -72,7 +71,7 @@ mkdir -p "$HOME/.local/bin"
 install -m 755 "$package/scripta" "$HOME/.local/bin/scripta"
 export PATH="$HOME/.local/bin:$PATH"
 scripta version --verbose
-scripta run "$package/examples/hello.scripta"
+scripta --help
 ```
 
 Add the PATH export to your shell startup file if needed. Check the glibc/platform
@@ -110,7 +109,7 @@ mkdir -p "$HOME/.local/bin"
 install -m 755 "$package/scripta" "$HOME/.local/bin/scripta"
 export PATH="$HOME/.local/bin:$PATH"
 scripta version --verbose
-scripta run "$package/examples/hello.scripta"
+scripta --help
 ```
 
 A downloaded executable may require approval through macOS security settings.

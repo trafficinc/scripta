@@ -1,11 +1,9 @@
 """Manual candidate build defaults, version preflight, and artifact integrity."""
-import hashlib
 import json
 import re
 from pathlib import Path
 import tempfile
 import unittest
-import zipfile
 from unittest.mock import Mock
 
 import workflow_build as build

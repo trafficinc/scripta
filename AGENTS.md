@@ -138,12 +138,15 @@ tests, dependency inspection, archive verification and extracted-package smoke.
 Debug tests/lints alone do not establish release support. Update
 `docs/compatibility.md` only with the required native evidence.
 
-Build all three release platforms and publish downloads only after every native
-test/package job succeeds and publication is explicitly requested. Upload exactly five assets:
-three platform packages, all including SQLite; `SHA256SUMS`; and
-`validation-evidence.zip`. Bundle individual checksums, native/smoke records, logs
-and the release manifest inside the evidence ZIP, not as separate assets. Minimal
-`--no-default-features` builds remain source-only.
+Build all three release platforms and publish only after every native test/package
+job succeeds and publication is explicitly requested. Public releases contain
+exactly four assets: three SQLite-enabled platform archives and `SHA256SUMS`.
+Each archive contains only `scripta`, the compatible `scr` command (with `.exe`
+on Windows), required non-system runtime libraries, and license notices. Exclude
+docs, examples, playground files, logs, validation records and internal manifests.
+Keep reports, smoke results, logs and manifests in local build outputs or internal
+CI artifacts, separate from public assets. Do not build or publish an evidence ZIP.
+Minimal `--no-default-features` builds remain source-only.
 
 Workspace-version tags publish normal releases; validation/RC/other tags publish
 prereleases. Do not replace published assets or move existing tags.

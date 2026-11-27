@@ -197,6 +197,8 @@ class ReleaseTests(unittest.TestCase):
                 def run(arguments, **kwargs):
                     calls.append(arguments)
                     if arguments[2] == 'view':
+                        if arguments[arguments.index('--json') + 1] == 'assets':
+                            return subprocess.CompletedProcess(arguments, 0, json.dumps({'assets':[{'name':p.name} for p in output.iterdir()]}), '')
                         return subprocess.CompletedProcess(arguments, 0 if draft_exists else 1, '{"isDraft": true}', '')
                     return subprocess.CompletedProcess(arguments, 0, '', '')
                 publish('owner/repo', manifest,

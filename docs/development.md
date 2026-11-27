@@ -353,3 +353,23 @@ Runtime limits and redaction are documented in the
 [standard-library reference](standard-library.md#distribution-and-resource-behavior);
 collector roots and resource ownership are described in
 [architecture](architecture.md#execution-hot-paths-and-limits).
+
+## Release package outputs
+
+Release archives contain the interpreter, compatible command and legal notices;
+SQLite is compiled in. Runtime dependencies are checked natively before publication.
+Docs, examples, playground files and validation metadata stay outside the archive.
+The archive builder writes `.package.json`, checksums and smoke records beside the
+archive for local verification. Smoke probes are generated in a temporary extracted
+directory, never shipped to users.
+
+`scripts/publish_release.py` stages only the three platform archives and SHA256SUMS.
+It retains native records, logs and the release manifest in a separate sibling
+`<output>-validation` directory. Native Actions build artifacts retain these
+internal files for later verification; GitHub Releases receive only the four files
+in `assets`. No validation-evidence ZIP is built or published.
+
+Saved-build publishing revalidates the records and archive contents before creating
+a release. Manual promotion additionally needs `--validation PATH` pointing to the
+retained local validation directory for the source candidate. Missing/expired
+records require a new validated build; checksums alone cannot replace native checks.

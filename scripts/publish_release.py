@@ -118,16 +118,12 @@ def prepare(inputs, output, revision, tag, version, promoted_from=None, built_fr
     (output / 'SHA256SUMS').write_bytes(''.join(checksums).encode('utf-8'))
     public_assets(output, version)
     notes = [f'Scripta {version}', '', f'Tag: `{tag}`', f'Source: `{revision}`', '',
-             'Native validation passed on Linux x86-64, Windows x86-64, and macOS 15 Apple Silicon.',
-             'Default/all-feature debug/dist suites, minimal-build compatibility tests, Clippy, dependency inspection, archive verification,',
-             'offline extracted-package smoke, and identical-input repacking passed.', '',
              'Download the single archive for your platform; SQLite is included by default.',
              'Archives contain `scripta` and legacy `scr` commands; no Rust installation is required.',
              'SHA256SUMS verifies the three platform packages.',
              'Candidates have no publisher signatures or macOS notarization.']
     if promoted_from is not None:
         notes += ['', 'Platform archives promoted byte-for-byte from `' + promoted_from['tag'] + '`.',
-                  'Native validation: ' + promoted_from['run_url'],
                   'Only local release metadata and SHA256SUMS were regenerated.']
     if built_from is not None:
         notes += ['', 'Platform archives reused byte-for-byte from a saved native build.',
@@ -140,13 +136,18 @@ def prepare(inputs, output, revision, tag, version, promoted_from=None, built_fr
 
 def publish(repository, manifest, output, notes, run=subprocess.run):
     public_assets(output, manifest['version'])
+    expected = {path.name for path in output.iterdir()}
     tag = manifest['tag']
     def gh(*arguments, check=True):
         return run(['gh', 'release', *arguments, '--repo', repository],
                    check=check, capture_output=True, text=True)
-    existing = gh('view', tag, '--json', 'isDraft,url', check=False)
-    if existing.returncode == 0 and not json.loads(existing.stdout)['isDraft']:
-        raise ValueError('This tag already has a published release; use a new tag instead of replacing it')
+    existing = gh('view', tag, '--json', 'isDraft,url,assets', check=False)
+    if existing.returncode == 0:
+        current = json.loads(existing.stdout)
+        if not current['isDraft']:
+            raise ValueError('This tag already has a published release; use a new tag instead of replacing it')
+        if any(asset['name'] not in expected for asset in current.get('assets', [])):
+            raise ValueError('Existing draft contains unexpected assets; remove them before resuming')
     flags = ['--title', 'Scripta ' + tag, '--notes-file', str(notes)]
     if existing.returncode:
         gh('create', tag, '--verify-tag', '--target', manifest['source_revision'], '--draft',
@@ -154,6 +155,9 @@ def publish(repository, manifest, output, notes, run=subprocess.run):
     else:
         gh('edit', tag, *flags)
     gh('upload', tag, *[str(path) for path in sorted(output.iterdir())], '--clobber')
+    uploaded = json.loads(gh('view', tag, '--json', 'assets').stdout).get('assets', [])
+    if len(uploaded) != len(expected) or {asset['name'] for asset in uploaded} != expected:
+        raise ValueError('Draft asset inventory differs; release remains unpublished')
     gh('edit', tag, '--draft=false', '--prerelease=' + str(manifest['prerelease']).lower(),
        '--latest=' + str(not manifest['prerelease']).lower())
     return gh('view', tag, '--json', 'url').stdout

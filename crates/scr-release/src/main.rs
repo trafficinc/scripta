@@ -174,6 +174,21 @@ fn supplemental_notices(
     }
     Ok(entries.len())
 }
+fn license_file(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [
+        "license",
+        "copying",
+        "notice",
+        "unlicense",
+        "declared-license",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix))
+        || ["-license", "-license.md", "-license.txt"]
+            .iter()
+            .any(|suffix| lower.ends_with(suffix))
+}
 fn notices(
     files: &mut BTreeMap<String, Vec<u8>>,
     target: &str,
@@ -270,12 +285,7 @@ fn notices(
         for entry in fs::read_dir(directory)? {
             let entry = entry?;
             let filename = entry.file_name().to_string_lossy().into_owned();
-            let lower = filename.to_ascii_lowercase();
-            if entry.file_type()?.is_file()
-                && ["license", "copying", "notice", "unlicense"]
-                    .iter()
-                    .any(|prefix| lower.starts_with(prefix))
-            {
+            if entry.file_type()?.is_file() && license_file(&filename) {
                 files.insert(
                     format!("third-party/{name}-{version}/{filename}"),
                     fs::read(entry.path())?,
@@ -380,7 +390,15 @@ fn package(
     temporary.persist(&path).map_err(|e| e.error)?;
     // Maintainer-only metadata stays beside the archive, never inside it.
     manifest["archive_sha256"] = json!(digest(&bytes));
-    fs::write(path.with_file_name(format!("{}.package.json", path.file_name().ok_or("missing archive name")?.to_string_lossy())), serde_json::to_vec_pretty(&manifest)?)?;
+    fs::write(
+        path.with_file_name(format!(
+            "{}.package.json",
+            path.file_name()
+                .ok_or("missing archive name")?
+                .to_string_lossy()
+        )),
+        serde_json::to_vec_pretty(&manifest)?,
+    )?;
     fs::write(
         path.with_file_name(format!(
             "{}.sha256",
@@ -580,39 +598,100 @@ fn read_verified(path: &Path) -> Result<(String, Value, BTreeMap<String, Vec<u8>
     Ok((prefix, manifest, files))
 }
 fn runtime_file(name: &str, windows: bool) -> bool {
-    let binaries = if windows { ["scripta.exe", "scr.exe"] } else { ["scripta", "scr"] };
-    if binaries.contains(&name) || matches!(name, "LICENSE" | "THIRD_PARTY_NOTICES.txt") { return true; }
+    let binaries = if windows {
+        ["scripta.exe", "scr.exe"]
+    } else {
+        ["scripta", "scr"]
+    };
+    if binaries.contains(&name) || matches!(name, "LICENSE" | "THIRD_PARTY_NOTICES.txt") {
+        return true;
+    }
     let parts: Vec<_> = name.split('/').collect();
-    if parts.len() < 3 || parts[0] != "third-party" || parts.iter().any(|part| matches!(part.to_ascii_lowercase().as_str(), "docs" | "examples" | "playground" | "logs" | "validation")) { return false; }
+    if parts.len() < 3
+        || parts[0] != "third-party"
+        || parts.iter().any(|part| {
+            matches!(
+                part.to_ascii_lowercase().as_str(),
+                "docs" | "examples" | "playground" | "logs" | "validation"
+            )
+        })
+    {
+        return false;
+    }
     let lower = name.to_ascii_lowercase();
-    if lower.ends_with(".json") || lower.ends_with(".log") { return false; }
-    (parts[1] == "rust" && parts[2] == "licenses") || name == "third-party/rust/COPYRIGHT-library.html" || (parts.len() == 3 && ["license", "copying", "notice", "unlicense", "declared-license"].iter().any(|prefix| parts[2].to_ascii_lowercase().starts_with(prefix)))
+    if lower.ends_with(".json") || lower.ends_with(".log") {
+        return false;
+    }
+    (parts[1] == "rust" && parts[2] == "licenses")
+        || name == "third-party/rust/COPYRIGHT-library.html"
+        || (parts.len() == 3 && license_file(parts[2]))
 }
-fn read_runtime_package(path: &Path, files: BTreeMap<String, Vec<u8>>) -> Result<(String, Value, BTreeMap<String, Vec<u8>>)> {
+fn read_runtime_package(
+    path: &Path,
+    files: BTreeMap<String, Vec<u8>>,
+) -> Result<(String, Value, BTreeMap<String, Vec<u8>>)> {
     let first = files.keys().next().ok_or("empty release archive")?;
     let base = first.split('/').next().ok_or("missing release prefix")?;
-    let target = TARGETS.iter().find(|target| base.ends_with(&format!("-{target}"))).ok_or("invalid runtime package target")?;
-    let version = base.strip_prefix("scripta-").and_then(|s| s.strip_suffix(&format!("-{target}"))).filter(|s| !s.is_empty()).ok_or("invalid runtime package version")?;
+    let target = TARGETS
+        .iter()
+        .find(|target| base.ends_with(&format!("-{target}")))
+        .ok_or("invalid runtime package target")?;
+    let version = base
+        .strip_prefix("scripta-")
+        .and_then(|s| s.strip_suffix(&format!("-{target}")))
+        .filter(|s| !s.is_empty())
+        .ok_or("invalid runtime package version")?;
     let prefix = format!("{base}/");
-    let (binary, alias) = if target.contains("windows") { ("scripta.exe", "scr.exe") } else { ("scripta", "scr") };
+    let (binary, alias) = if target.contains("windows") {
+        ("scripta.exe", "scr.exe")
+    } else {
+        ("scripta", "scr")
+    };
     let mut inventory = BTreeMap::new();
     for (name, data) in &files {
-        let relative = name.strip_prefix(&prefix).ok_or("runtime package has mixed roots")?;
-        if !runtime_file(relative, target.contains("windows")) { return Err(fail("unexpected runtime package file")); }
+        let relative = name
+            .strip_prefix(&prefix)
+            .ok_or("runtime package has mixed roots")?;
+        if !runtime_file(relative, target.contains("windows")) {
+            return Err(fail("unexpected runtime package file"));
+        }
         inventory.insert(relative.to_owned(), digest(data));
     }
     for name in [binary, alias, "LICENSE", "THIRD_PARTY_NOTICES.txt"] {
-        if !inventory.contains_key(name) { return Err(fail("runtime package file missing")); }
+        if !inventory.contains_key(name) {
+            return Err(fail("runtime package file missing"));
+        }
     }
-    if files[&format!("{prefix}{binary}")].is_empty() || inventory[binary] != inventory[alias] { return Err(fail("compatibility executable differs")); }
-    let mut manifest = json!({"format":2,"version":version,"target":target,"binary":binary,"compatibility_binary":alias,"binary_sha256":inventory[binary],"files":inventory});
-    let sidecar = path.with_file_name(format!("{}.package.json", path.file_name().ok_or("missing archive name")?.to_string_lossy()));
+    if files[&format!("{prefix}{binary}")].is_empty() || inventory[binary] != inventory[alias] {
+        return Err(fail("compatibility executable differs"));
+    }
+    let mut manifest = json!({"format":2,"extensions":["sqlite"],"version":version,"target":target,"binary":binary,"compatibility_binary":alias,"binary_sha256":inventory[binary],"files":inventory});
+    let sidecar = path.with_file_name(format!(
+        "{}.package.json",
+        path.file_name()
+            .ok_or("missing archive name")?
+            .to_string_lossy()
+    ));
     if sidecar.exists() {
         let external: Value = serde_json::from_slice(&fs::read(sidecar)?)?;
-        for key in ["format", "version", "target", "binary", "compatibility_binary", "binary_sha256", "files"] {
-            if external[key] != manifest[key] { return Err(fail("local package metadata differs from archive")); }
+        for key in [
+            "format",
+            "version",
+            "target",
+            "binary",
+            "compatibility_binary",
+            "binary_sha256",
+            "files",
+        ] {
+            if external[key] != manifest[key] {
+                return Err(fail("local package metadata differs from archive"));
+            }
         }
-        if external["archive_sha256"] != digest(&fs::read(path)?) || ![json!([]), json!(["sqlite"])].contains(&external["extensions"]) { return Err(fail("invalid local package metadata")); }
+        if external["archive_sha256"] != digest(&fs::read(path)?)
+            || ![json!([]), json!(["sqlite"])].contains(&external["extensions"])
+        {
+            return Err(fail("invalid local package metadata"));
+        }
         manifest = external;
     }
     Ok((prefix, manifest, files))
@@ -672,14 +751,38 @@ fn smoke(path: &Path) -> Result<()> {
     let directory = temporary.path().join(prefix.trim_end_matches('/'));
     if manifest["format"] == 2 {
         for (name, source) in [
-            ("examples/hello.scripta", include_str!("../../../examples/hello.scripta")),
-            ("examples/variables.scripta", include_str!("../../../examples/variables.scripta")),
-            ("examples/loops.scripta", include_str!("../../../examples/loops.scripta")),
-            ("examples/functions.scripta", include_str!("../../../examples/functions.scripta")),
-            ("examples/sqlite.scripta", include_str!("../../../examples/sqlite.scripta")),
-            ("examples/timezones.scripta", include_str!("../../../examples/timezones.scripta")),
-            ("examples/lib/helpers.scripta", include_str!("../../../examples/lib/helpers.scripta")),
-            ("playground/collections.scripta", include_str!("../../../playground/collections.scripta")),
+            (
+                "examples/hello.scripta",
+                include_str!("../../../examples/hello.scripta"),
+            ),
+            (
+                "examples/variables.scripta",
+                include_str!("../../../examples/variables.scripta"),
+            ),
+            (
+                "examples/loops.scripta",
+                include_str!("../../../examples/loops.scripta"),
+            ),
+            (
+                "examples/functions.scripta",
+                include_str!("../../../examples/functions.scripta"),
+            ),
+            (
+                "examples/sqlite.scripta",
+                include_str!("../../../examples/sqlite.scripta"),
+            ),
+            (
+                "examples/timezones.scripta",
+                include_str!("../../../examples/timezones.scripta"),
+            ),
+            (
+                "examples/lib/helpers.scripta",
+                include_str!("../../../examples/lib/helpers.scripta"),
+            ),
+            (
+                "playground/collections.scripta",
+                include_str!("../../../playground/collections.scripta"),
+            ),
         ] {
             let probe = directory.join(name);
             fs::create_dir_all(probe.parent().ok_or("missing probe directory")?)?;
@@ -936,6 +1039,62 @@ mod tests {
         );
         fs::write(archive, b"changed")?;
         assert!(checksums(dir.path(), true).is_err());
+        Ok(())
+    }
+    #[test]
+    fn runtime_packages_exclude_documentation_and_validation_and_require_notices() -> Result<()> {
+        for target in TARGETS {
+            let (binary, alias) = if target.contains("windows") {
+                ("scripta.exe", "scr.exe")
+            } else {
+                ("scripta", "scr")
+            };
+            let base = format!("scripta-{VERSION}-{target}");
+            let directory = tempfile::tempdir()?;
+            let path = directory.path().join(if target.contains("windows") {
+                "package.zip"
+            } else {
+                "package.tar.gz"
+            });
+            let mut files = BTreeMap::from([
+                (binary.to_owned(), b"runtime".to_vec()),
+                (alias.to_owned(), b"runtime".to_vec()),
+                ("LICENSE".into(), b"MIT".to_vec()),
+                ("THIRD_PARTY_NOTICES.txt".into(), b"notices".to_vec()),
+                ("third-party/example-1/LICENSE".into(), b"MIT".to_vec()),
+            ]);
+            fs::write(
+                &path,
+                archive(&files, &base, target.contains("windows"), 0)?,
+            )?;
+            assert_eq!(read_verified(&path)?.1["format"], 2);
+            for name in [
+                "README.md",
+                "docs/install.md",
+                "examples/hello.scripta",
+                "playground/demo.scripta",
+                "release.json",
+                "logs/build.log",
+                "validation-evidence.zip",
+                "smoke.json",
+                "third-party/example-1/provenance.json",
+                "third-party/example-1/LICENSE.log",
+            ] {
+                files.insert(name.into(), b"internal".to_vec());
+                fs::write(
+                    &path,
+                    archive(&files, &base, target.contains("windows"), 0)?,
+                )?;
+                assert!(read_verified(&path).is_err(), "{name}");
+                files.remove(name);
+            }
+            files.remove("LICENSE");
+            fs::write(
+                &path,
+                archive(&files, &base, target.contains("windows"), 0)?,
+            )?;
+            assert!(read_verified(&path).is_err());
+        }
         Ok(())
     }
 }

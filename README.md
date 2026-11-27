@@ -198,13 +198,14 @@ hash against `SHA256SUMS`, and extract it.
 See [installation and uninstallation](docs/install.md) for checksums, PATH setup,
 and platform security prompts.
 
-Run these from the extracted package directory. Each package includes `examples/`:
+Run these from the extracted package directory. Save the greeting shown above
+as `hello.scripta`; examples and documentation remain in the source repository:
 
 | System | Inspect the executable | Run a script |
 | --- | --- | --- |
-| macOS | `./scripta version --verbose` | `./scripta run examples/hello.scripta` |
-| Linux | `./scripta version --verbose` | `./scripta run examples/hello.scripta` |
-| Windows (PowerShell) | `.\scripta.exe version --verbose` | `.\scripta.exe run .\examples\hello.scripta` |
+| macOS | `./scripta version --verbose` | `./scripta run hello.scripta` |
+| Linux | `./scripta version --verbose` | `./scripta run hello.scripta` |
+| Windows (PowerShell) | `.\scripta.exe version --verbose` | `.\scripta.exe run .\hello.scripta` |
 
 You can keep the interpreter anywhere and give it an absolute script path. In
 PowerShell, invoke a quoted executable path with `&`, for example:

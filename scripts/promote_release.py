@@ -2,18 +2,15 @@
 """Verify a published validation candidate and promote its archives without builds."""
 import argparse
 import base64
-import hashlib
 import json
 import os
 import re
 import shutil
-import stat
 import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-import zipfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from publish_release import TARGETS, digest, prepare, publish, release_kind
 from release_assets import package_names, public_assets, validation_directory
@@ -139,14 +136,20 @@ def validated_run(api, repository, run_id, source_tag, revision):
             or run.get('head_repository', {}).get('full_name', '').lower() != repository.lower()):
         raise ValueError('Source run must be successful native validation of this exact tag and commit')
     jobs = api.get('/actions/runs/' + str(run_id) + '/jobs?per_page=100')
-    expected = set(TARGETS) | {'Publish release downloads'}
-    # Historical candidates predate the separate artifact-assembly job.
-    if any(job.get('name') == 'Assemble validated downloads' for job in jobs.get('jobs', [])):
+    items = jobs.get('jobs', [])
+    names = {job.get('name') for job in items}
+    expected = set(TARGETS)
+    if 'Assemble validated downloads' in names:
         expected.add('Assemble validated downloads')
-    if (jobs.get('total_count') != len(expected) or len(jobs.get('jobs', [])) != len(expected)
-            or {job.get('name') for job in jobs['jobs']} != expected
-            or any(job.get('status') != 'completed' or job.get('conclusion') != 'success' for job in jobs['jobs'])):
-        raise ValueError('All three native jobs and candidate publication must have passed')
+    if 'Publish release downloads' in names:
+        expected.add('Publish release downloads')
+    if (len(expected) == len(TARGETS) or jobs.get('total_count') != len(expected)
+            or len(items) != len(expected) or names != expected
+            or any(job.get('status') != 'completed'
+                   or job.get('conclusion') not in (('success', 'skipped')
+                       if job.get('name') == 'Publish release downloads' and 'Assemble validated downloads' in names else ('success',))
+                   for job in items)):
+        raise ValueError('All three native jobs and artifact assembly/publication must have passed')
     return run
 
 
@@ -175,15 +178,19 @@ def checked_evidence(source, source_tag, revision, version, destination, *, prer
             total += size
             if size > (JSON_LIMIT if name.endswith('.json') else EVIDENCE_LIMIT) or total > UNPACKED_LIMIT:
                 raise ValueError('Local validation entry exceeds size limit')
-            members.append(name)
-    if not required.issubset(members):
+            members.append((name, size))
+    if not required.issubset({name for name, _ in members}):
         raise ValueError('Local validation is incomplete')
     unpacked = destination / 'evidence'
     unpacked.mkdir()
-    for name in members:
+    for name, size in members:
         output = unpacked / name
         output.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(validation / name, output)
+        with (validation / name).open('rb') as stream:
+            content = stream.read(size + 1)
+        if len(content) != size:
+            raise ValueError('Local validation changed during verification')
+        output.write_bytes(content)
 
     manifest = json.loads((unpacked / 'release-manifest.json').read_bytes())
     if (manifest.get('tag') != source_tag or manifest.get('source_revision') != revision
@@ -225,6 +232,8 @@ def checked_evidence(source, source_tag, revision, version, destination, *, prer
 
 
 def prepare_promotion(api, repository, source_tag, run_id, release_tag, output, validation=None):
+    if validation is None or not validation.is_dir() or validation.is_symlink():
+        raise ValueError('Retained local validation records are required for promotion')
     if output.exists():
         raise ValueError('Choose a fresh promotion output directory')
     revision = resolve_tag(api, source_tag)
@@ -299,6 +308,7 @@ def require_dispatch(environment):
 
 def promote(api, repository, manifest, output, notes, environment, publisher=publish):
     require_dispatch(environment)
+    public_assets(output, manifest['version'])
     source = manifest['promoted_from']
     if resolve_tag(api, source['tag']) != manifest['source_revision']:
         raise ValueError('Validation tag changed during preparation')

@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-import zipfile
 from unittest.mock import Mock, patch
 
 import publish_build as saved

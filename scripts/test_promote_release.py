@@ -172,6 +172,15 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(manifest['source_revision'], REVISION)
         self.assertEqual(self.api.posts, [])
 
+    def test_current_build_only_run_can_be_promoted_with_retained_local_records(self):
+        run = self.api.responses['/actions/runs/123']
+        run.update(event='workflow_dispatch', head_branch='main')
+        jobs = self.api.responses['/actions/runs/123/jobs?per_page=100']
+        jobs['jobs'][-1]['name'] = 'Assemble validated downloads'
+        manifest, _ = self.prepare()
+        self.assertEqual(manifest['source_revision'], REVISION)
+        self.assertEqual(self.api.posts, [])
+
     def test_new_assembly_job_must_pass_and_duplicate_or_extra_jobs_are_rejected(self):
         jobs = self.api.responses['/actions/runs/123/jobs?per_page=100']
         original = copy.deepcopy(jobs)
