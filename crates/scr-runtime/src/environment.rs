@@ -581,6 +581,24 @@ impl Environments {
         None
     }
 
+    // Captured calls start at their defining environment after parameters have
+    // been resolved by the plan. Like an ordinary function boundary, stop before
+    // globals; the caller's active lexical chain is unrelated to the callee's.
+    pub fn capture_value(&self, environment: usize, name: &str) -> Option<&Value> {
+        let mut id = Some(environment);
+        while let Some(current) = id {
+            if current == 0 {
+                return None;
+            }
+            let scope = self.scope(current);
+            if let Some(value) = scope.variables.get(name) {
+                return Some(value);
+            }
+            id = scope.parent;
+        }
+        None
+    }
+
     pub fn find(&self, name: &str, function: bool) -> Option<usize> {
         self.lookup(name, function).map(|(scope, _)| scope)
     }

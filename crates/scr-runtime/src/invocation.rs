@@ -152,7 +152,7 @@ impl InvocationContext<'_> {
         };
         values.extend_from_slice(arguments);
         self.runtime
-            .call_callable(callable, values, self.span, self.output)
+            .call_captured_callable(callable, values, self.span, self.output)
             .map_err(|signal| InvocationError { signal })
     }
 
@@ -173,7 +173,7 @@ impl InvocationContext<'_> {
         };
         values.extend(arguments);
         self.runtime
-            .call_callable(callable, values, self.span, self.output)
+            .call_captured_callable(callable, values, self.span, self.output)
             .map_err(|signal| InvocationError { signal })
     }
 

@@ -3,9 +3,10 @@ use crate::{Result, Runtime, Value, float_loop::Number, value::UserDeclaration};
 use scr_ast::{BinaryOp, Expr, ExprKind, Literal, StatementKind, TypeAnnotation, UnaryOp};
 use scr_diagnostics::Span;
 
-const MAX_PARAMETERS: usize = 8;
+pub(super) const MAX_PARAMETERS: usize = 8;
 const MAX_NODES: usize = 64;
 const MAX_DEPTH: usize = 16;
+const MAX_CAPTURE_NAME_BYTES: usize = 4096;
 
 #[derive(Clone, Copy)]
 enum Annotation {
@@ -81,8 +82,60 @@ pub(super) struct Plan {
     scope_independent: bool,
 }
 
+struct Inputs<'a, 'b> {
+    declaration: &'a UserDeclaration,
+    captures: Option<&'b mut Vec<String>>,
+}
+
+impl Inputs<'_, '_> {
+    fn resolve(&mut self, name: &str) -> Option<usize> {
+        let parameters = &self.declaration.parameters;
+        if let Some(index) = parameters.iter().position(|p| p.binding.name == name) {
+            return Some(index);
+        }
+        let captures = self.captures.as_deref_mut()?;
+        if name == "this" {
+            return None;
+        }
+        let index = if let Some(index) = captures.iter().position(|capture| capture == name) {
+            index
+        } else {
+            if parameters.len() + captures.len() >= MAX_PARAMETERS {
+                return None;
+            }
+            let bytes = captures.iter().try_fold(name.len(), |bytes, capture| {
+                bytes.checked_add(capture.len())
+            })?;
+            if bytes > MAX_CAPTURE_NAME_BYTES {
+                return None;
+            }
+            captures.push(name.into());
+            captures.len() - 1
+        };
+        Some(parameters.len() + index)
+    }
+}
+
 impl Plan {
     pub(super) fn compile(declaration: &UserDeclaration) -> Option<Box<Self>> {
+        Self::compile_inputs(declaration, None)
+    }
+
+    pub(super) fn compile_captured(
+        declaration: &UserDeclaration,
+    ) -> Option<(Box<Self>, Box<[String]>)> {
+        let mut captures = Vec::new();
+        let plan = Self::compile_inputs(declaration, Some(&mut captures))?;
+        if captures.is_empty() || !plan.scope_independent {
+            return None;
+        }
+        Some((plan, captures.into_boxed_slice()))
+    }
+
+    fn compile_inputs(
+        declaration: &UserDeclaration,
+        captures: Option<&mut Vec<String>>,
+    ) -> Option<Box<Self>> {
         if declaration.parameters.len() > MAX_PARAMETERS
             || declaration.parameters.iter().enumerate().any(|(i, p)| {
                 p.default.is_some()
@@ -101,7 +154,16 @@ impl Plan {
         let StatementKind::Return(Some(expression)) = &statement.kind else {
             return None;
         };
-        let expression = Self::leaf(declaration, expression, &mut 0, 0)?;
+        let mut inputs = Inputs {
+            declaration,
+            captures,
+        };
+        let expression = Self::leaf(&mut inputs, expression, &mut 0, 0)?;
+        let input_count = declaration.parameters.len()
+            + inputs
+                .captures
+                .as_ref()
+                .map_or(0, |captures| captures.len());
         let mut parameters = [Annotation::None; MAX_PARAMETERS];
         for (slot, parameter) in parameters.iter_mut().zip(&declaration.parameters) {
             *slot = Annotation::compile(&parameter.annotation);
@@ -116,7 +178,7 @@ impl Plan {
         Some(Box::new(Self {
             expression,
             integer,
-            parameter_count: declaration.parameters.len() as u8,
+            parameter_count: input_count as u8,
             checkpoint: statement.span,
             parameters,
             returning,
@@ -125,7 +187,7 @@ impl Plan {
     }
 
     fn leaf(
-        declaration: &UserDeclaration,
+        inputs: &mut Inputs<'_, '_>,
         expr: &Expr,
         nodes: &mut usize,
         depth: usize,
@@ -136,7 +198,7 @@ impl Plan {
                 if *nodes > MAX_NODES || depth > MAX_DEPTH {
                     return None;
                 }
-                Self::leaf(declaration, inner, nodes, depth + 1)
+                Self::leaf(inputs, inner, nodes, depth + 1)
             }
             ExprKind::Binary(
                 left,
@@ -153,23 +215,18 @@ impl Plan {
                     return None;
                 }
                 Some(Leaf::Comparison {
-                    left: Self::expression(declaration, left, nodes, depth + 1)?,
+                    left: Self::expression(inputs, left, nodes, depth + 1)?,
                     op: *op,
-                    right: Self::expression(declaration, right, nodes, depth + 1)?,
+                    right: Self::expression(inputs, right, nodes, depth + 1)?,
                     span: expr.span,
                 })
             }
-            _ => Some(Leaf::Numeric(Self::expression(
-                declaration,
-                expr,
-                nodes,
-                depth,
-            )?)),
+            _ => Some(Leaf::Numeric(Self::expression(inputs, expr, nodes, depth)?)),
         }
     }
 
     fn expression(
-        declaration: &UserDeclaration,
+        inputs: &mut Inputs<'_, '_>,
         expr: &Expr,
         nodes: &mut usize,
         depth: usize,
@@ -183,18 +240,13 @@ impl Plan {
             ExprKind::Literal(Literal::Float(v)) if v.is_finite() => {
                 Numeric::Literal(Number::Float(*v))
             }
-            ExprKind::Variable(name) => Numeric::Parameter(
-                declaration
-                    .parameters
-                    .iter()
-                    .position(|p| p.binding.name == *name)?,
-            ),
+            ExprKind::Variable(name) => Numeric::Parameter(inputs.resolve(name)?),
             ExprKind::Grouped(inner) => {
-                return Self::expression(declaration, inner, nodes, depth + 1);
+                return Self::expression(inputs, inner, nodes, depth + 1);
             }
             ExprKind::Unary(op @ (UnaryOp::Positive | UnaryOp::Negative), inner) => Numeric::Unary(
                 *op,
-                Box::new(Self::expression(declaration, inner, nodes, depth + 1)?),
+                Box::new(Self::expression(inputs, inner, nodes, depth + 1)?),
                 expr.span,
             ),
             ExprKind::Binary(
@@ -206,9 +258,9 @@ impl Plan {
                 | BinaryOp::Remainder),
                 right,
             ) => Numeric::Binary(
-                Box::new(Self::expression(declaration, left, nodes, depth + 1)?),
+                Box::new(Self::expression(inputs, left, nodes, depth + 1)?),
                 *op,
-                Box::new(Self::expression(declaration, right, nodes, depth + 1)?),
+                Box::new(Self::expression(inputs, right, nodes, depth + 1)?),
                 expr.span,
             ),
             _ => return None,
@@ -464,6 +516,34 @@ impl Plan {
             )?;
             Ok(value)
         })())
+    }
+}
+
+impl Plan {
+    pub(super) fn invoke_captured_inputs(
+        &self,
+        runtime: &mut Runtime,
+        declaration: &UserDeclaration,
+        values: &[Value],
+        arguments: &[Number; MAX_PARAMETERS],
+    ) -> Result<Value> {
+        for (kind, (parameter, value)) in self
+            .parameters
+            .iter()
+            .zip(declaration.parameters.iter().zip(values))
+        {
+            kind.check(runtime, &parameter.annotation, value, parameter.span, false)?;
+        }
+        runtime.checkpoint(self.checkpoint)?;
+        let value = self.evaluate(arguments, runtime)?;
+        self.returning.check(
+            runtime,
+            &declaration.return_type,
+            &value,
+            declaration.name_span,
+            true,
+        )?;
+        Ok(value)
     }
 }
 

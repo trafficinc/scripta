@@ -1,7 +1,9 @@
 //! Bounded straight-line scalar methods; unsupported entry states do no work.
 use crate::{
     AssignmentOp, BinaryOp, Expr, ExprKind, Result, Runtime, StatementKind, Value,
-    compact_call::Expression, objects::ScriptObject, value::UserDeclaration,
+    compact_call::Expression,
+    objects::ScriptObject,
+    value::{SpecialCall, UserDeclaration},
 };
 use scr_diagnostics::Span;
 
@@ -170,10 +172,12 @@ impl Runtime {
         }
         // Reject unsupported bodies/defaults/variadics before scanning arguments
         // or receiver identities. Eligible arities are bounded by PARAMETERS.
-        let plan = declaration
-            .method_call
-            .get_or_init(|| Plan::compile(declaration))
-            .as_deref()?;
+        let cached = declaration
+            .special_call
+            .get_or_init(|| Plan::compile(declaration).map(SpecialCall::Method));
+        let Some(SpecialCall::Method(plan)) = cached else {
+            return None;
+        };
         if arguments.iter().any(|value| !Expression::scalar(value)) {
             return None;
         }

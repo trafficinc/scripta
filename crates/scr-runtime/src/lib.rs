@@ -11,6 +11,7 @@ mod block_scope_tests;
 mod call_reuse_tests;
 #[cfg(test)]
 mod call_setup_tests;
+mod captured_call;
 mod compact_call;
 #[cfg(test)]
 mod compact_call_tests;
@@ -176,6 +177,10 @@ pub struct Runtime {
     compact_stack: Option<Box<compact_call::Stack>>,
     #[cfg(test)]
     disable_call_reuse: bool,
+    #[cfg(test)]
+    disable_captured_calls: bool,
+    #[cfg(test)]
+    captured_calls_executed: usize,
     #[cfg(test)]
     disable_shared_parameter_names: bool,
     #[cfg(test)]
@@ -1218,7 +1223,7 @@ impl Runtime {
             return self.fail("call requires a callable value", span);
         };
         let values = self.evaluate_arguments(args, span, output)?;
-        self.call_callable(callable, values, span, output)
+        self.call_captured_callable(callable, values, span, output)
     }
 
     fn call_callable(
@@ -1228,6 +1233,34 @@ impl Runtime {
         span: Span,
         output: &mut dyn ScriptOutput,
     ) -> Result<Value> {
+        self.call_function(callable.0.as_ref(), values, span, output)
+    }
+
+    #[inline(always)]
+    fn call_captured_callable(
+        &mut self,
+        callable: Callable,
+        mut values: Vec<Value>,
+        span: Span,
+        output: &mut dyn ScriptOutput,
+    ) -> Result<Value> {
+        if matches!(callable.0.as_ref(), Function::User { environment, receiver: None, .. } if *environment != 0)
+        {
+            if let Some(result) = self.captured_call(callable.0.as_ref(), &values, span) {
+                values.clear();
+                #[cfg(not(test))]
+                let reuse = true;
+                #[cfg(test)]
+                let reuse = !self.disable_call_reuse;
+                if reuse
+                    && (1..=MAX_ARGUMENT_CAPACITY).contains(&values.capacity())
+                    && self.argument_buffers.len() < MAX_ARGUMENT_BUFFERS
+                {
+                    self.argument_buffers.push(values);
+                }
+                return result;
+            }
+        }
         self.call_function(callable.0.as_ref(), values, span, output)
     }
 

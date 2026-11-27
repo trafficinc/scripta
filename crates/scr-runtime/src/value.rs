@@ -48,6 +48,13 @@ impl MapKey {
 #[derive(Clone)]
 pub struct Callable(pub(crate) Rc<Function>);
 
+// Receivers and captured free functions are mutually exclusive. Sharing this
+// cold cache keeps additional plan slots out of every function declaration.
+pub(crate) enum SpecialCall {
+    Method(Box<crate::method_plan::Plan>),
+    Captured(Box<crate::captured_call::Plan>),
+}
+
 // Runtime-owned immutable declaration metadata; public ASTs remain unchanged.
 pub(crate) struct UserDeclaration {
     ast: FunctionDeclaration,
@@ -57,7 +64,7 @@ pub(crate) struct UserDeclaration {
     pub numeric_seen: std::cell::Cell<bool>,
     pub prepared_call: std::cell::OnceCell<Option<Box<crate::prepared_call::Plan>>>,
     pub compact_call: std::cell::OnceCell<Option<Box<crate::compact_call::Plan>>>,
-    pub method_call: std::cell::OnceCell<Option<Box<crate::method_plan::Plan>>>,
+    pub special_call: std::cell::OnceCell<Option<SpecialCall>>,
     parameter_names: std::cell::OnceCell<Box<[Rc<String>]>>,
     receiver_name: std::cell::OnceCell<Rc<String>>,
 }
@@ -74,7 +81,7 @@ impl UserDeclaration {
             numeric_seen: std::cell::Cell::new(false),
             prepared_call: std::cell::OnceCell::new(),
             compact_call: std::cell::OnceCell::new(),
-            method_call: std::cell::OnceCell::new(),
+            special_call: std::cell::OnceCell::new(),
             parameter_names: std::cell::OnceCell::new(),
             receiver_name: std::cell::OnceCell::new(),
             ast,
