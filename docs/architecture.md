@@ -75,3 +75,9 @@ the ordinary ordering. Byte-budgeted and unsupported targets use general places.
 Compiled scalar literal and input-read expressions return directly without
 initializing an operand stack. Scalar guards and surrounding method/function
 validation, checkpoints, scopes and field writes retain their ordinary ordering.
+
+Scalar method plans may cache up to eight verified field positions for one weak
+class identity on large layouts (at least 64 fields). Smaller layouts retain
+ordinary name resolution. Initialized single-scalar-field writes reuse the
+method entry guards, preserving field annotations and the pre-write checkpoint;
+byte quotas, snapshots and unsupported receivers keep ordinary assignment.

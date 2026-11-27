@@ -100,6 +100,170 @@ fn literal_and_input_returns_preserve_types_field_updates_and_bound_receivers() 
 }
 
 #[test]
+fn cached_field_positions_follow_shared_methods_across_layouts_without_retaining_classes() {
+    let (mut fast, mut reference) = pair(RuntimeOptions::default());
+    crate::test_support::compare_source(
+        &mut fast,
+        &mut reference,
+        &format!(
+            "class A{{$x=0;$pad=11;{padding}function next():int{{$this->x+=1;return $this->x;}}}}\
+             class B{{{padding}$pad=22;$x=100;function next():int{{$this->x+=1;return $this->x;}}}}",
+            padding = (0..super::CACHED_LAYOUT_FIELDS - 2)
+                .map(|i| format!("$f{i}={i};"))
+                .collect::<String>(),
+        ),
+    )
+    .unwrap();
+    let mut held = Vec::new();
+    let mut classes = Vec::new();
+    for runtime in [&mut fast, &mut reference] {
+        let declarations = &mut runtime.environments.scope_mut(0).classes;
+        let method = declarations["A"].declaration.methods[0].clone();
+        // Host-built runtime declarations may share a body across layouts.
+        Rc::get_mut(declarations.get_mut("B").unwrap())
+            .unwrap()
+            .declaration
+            .methods[0] = method.clone();
+        held.push(method);
+        classes.extend([
+            Rc::downgrade(&declarations["A"]),
+            Rc::downgrade(&declarations["B"]),
+        ]);
+    }
+    crate::test_support::compare_source(
+        &mut fast,
+        &mut reference,
+        "$a=new A();$b=new B();\
+         $seen=[$a->next(),$b->next(),$a->next(),$b->next(),$a->next(),$b->next()];\
+         $fields=[$a->x,$b->x,$a->pad,$b->pad];",
+    )
+    .unwrap();
+    assert_eq!(fast.method_plans_executed, 6);
+    assert_eq!(
+        fast.get_global("fields"),
+        Some(&Value::list(vec![
+            Value::Int(3),
+            Value::Int(103),
+            Value::Int(11),
+            Value::Int(22)
+        ]))
+    );
+    crate::test_support::compare_source(&mut fast, &mut reference, "$a=null;$b=null;").unwrap();
+    for runtime in [&mut fast, &mut reference] {
+        runtime.environments.scope_mut(0).classes.clear();
+        runtime.collect_garbage();
+    }
+    assert!(classes.iter().all(|class| class.upgrade().is_none()));
+    std::hint::black_box(held);
+}
+
+fn scalar_field_state(runtime: &Runtime) -> (Value, usize) {
+    let Value::NativeObject(object) = runtime.get_global("c").unwrap() else {
+        panic!("script object")
+    };
+    let instance = object
+        .as_any()
+        .unwrap()
+        .downcast_ref::<objects::ScriptObject>()
+        .unwrap();
+    (
+        runtime
+            .environments
+            .scope(instance.scope)
+            .variables
+            .get("x")
+            .unwrap()
+            .clone(),
+        object.payload_bytes(),
+    )
+}
+
+#[test]
+fn scalar_field_writes_keep_payloads_aliases_and_promoted_bindings() {
+    for hashed in [false, true] {
+        let (mut fast, mut reference) = pair(RuntimeOptions::default());
+        if hashed {
+            fast.environments.force_hash_bindings();
+            reference.environments.force_hash_bindings();
+        }
+        crate::test_support::compare_source(
+            &mut fast,
+            &mut reference,
+            "class C{$x=null;function store($v){$this->x=$v;return $this->x;}}$c=new C();$alias=$c;",
+        )
+        .unwrap();
+        let payload = scalar_field_state(&fast).1;
+        for value in ["7", "true", "null", "-2"] {
+            crate::test_support::compare_source(
+                &mut fast,
+                &mut reference,
+                &format!("$seen=$c->store({value});$observed=$alias->x;"),
+            )
+            .unwrap();
+            assert_eq!(scalar_field_state(&fast), scalar_field_state(&reference));
+            assert_eq!(scalar_field_state(&fast).1, payload);
+        }
+        assert_eq!(fast.method_plans_executed, 4);
+        assert_eq!(fast.get_global("observed"), Some(&Value::Int(-2)));
+    }
+}
+
+#[test]
+fn warm_scalar_writes_preserve_failure_state_and_exact_step_scope_and_byte_limits() {
+    for limit_kind in 0..3 {
+        for limit in 0_usize..if limit_kind == 2 { 3 } else { 12 } {
+            let (mut fast, mut reference) = pair(RuntimeOptions::default());
+            crate::test_support::compare_source(
+                &mut fast,
+                &mut reference,
+                "class C{$x:int=7;function next():int{$this->x+=1;return $this->x;}\
+                 function invalid(){$this->x=true;return $this->x;}}$c=new C();$warm=$c->next();",
+            )
+            .unwrap();
+            let source = match limit_kind {
+                0 => {
+                    fast.options.instruction_limit = Some(limit.try_into().unwrap());
+                    reference.options.instruction_limit = Some(limit.try_into().unwrap());
+                    "$seen='kept';$seen=$c->next();"
+                }
+                1 => {
+                    fast.options.max_scopes = Some(limit);
+                    reference.options.max_scopes = Some(limit);
+                    "$seen='kept';$seen=$c->next();"
+                }
+                _ => {
+                    let exact = fast.get_global("c").unwrap().measure(0, None).unwrap();
+                    let bytes = exact - 1 + limit;
+                    fast.options.max_value_bytes = Some(bytes);
+                    reference.options.max_value_bytes = Some(bytes);
+                    "$seen='kept';$seen=$c->next();"
+                }
+            };
+            let _ = crate::test_support::compare_source(&mut fast, &mut reference, source);
+            assert_eq!(scalar_field_state(&fast), scalar_field_state(&reference));
+            fast.options.instruction_limit = None;
+            reference.options.instruction_limit = None;
+            fast.options.max_scopes = None;
+            reference.options.max_scopes = None;
+            fast.options.max_value_bytes = None;
+            reference.options.max_value_bytes = None;
+            let before = scalar_field_state(&fast);
+            assert!(
+                crate::test_support::compare_with_recovery(
+                    &mut fast,
+                    &mut reference,
+                    "$seen='kept';$seen=$c->invalid();",
+                    "$recovered=1;"
+                )
+                .is_err()
+            );
+            assert_eq!(scalar_field_state(&fast), before);
+            assert_eq!(fast.get_global("seen"), Some(&Value::String("kept".into())));
+        }
+    }
+}
+
+#[test]
 fn unsupported_method_states_fall_back_before_any_writes() {
     for source in [
         "class C{$x=0;$missing:int;function f(){$this->x=9;return $this->missing;}}$c=new C();try{$c->f();}catch(PropertyError $e){}$seen=$c->x;",

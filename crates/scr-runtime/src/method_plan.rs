@@ -2,13 +2,18 @@
 use crate::{
     AssignmentOp, BinaryOp, Expr, ExprKind, Result, Runtime, StatementKind, Value,
     compact_call::Expression,
-    objects::ScriptObject,
+    objects::{ScriptClass, ScriptObject},
     value::{SpecialCall, UserDeclaration},
 };
 use scr_diagnostics::Span;
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
 
 const PARAMETERS: usize = 8;
 const FIELDS: usize = 8;
+const CACHED_LAYOUT_FIELDS: usize = 64;
 const STATEMENTS: usize = 16;
 const NODES: usize = 256;
 const DEPTH: usize = 16;
@@ -29,6 +34,12 @@ enum Step {
 pub(crate) struct Plan {
     fields: Box<[String]>,
     steps: Box<[Step]>,
+    positions: RefCell<Option<FieldPositions>>,
+}
+
+struct FieldPositions {
+    class: Weak<ScriptClass>,
+    slots: [usize; FIELDS],
 }
 
 fn field<'a>(expression: &'a Expr, fields: &mut Vec<String>) -> Option<&'a str> {
@@ -152,7 +163,31 @@ impl Plan {
         Some(Box::new(Self {
             fields: fields.into(),
             steps: steps.into(),
+            positions: RefCell::new(None),
         }))
+    }
+
+    fn field_positions(&self, class: &Rc<ScriptClass>) -> Option<[usize; FIELDS]> {
+        let mut slots = [0; FIELDS];
+        if let Some(cached) = self.positions.borrow().as_ref() {
+            // The weak allocation identity cannot be reused while cached. It
+            // retains neither the class value nor any receiver or environment.
+            if cached.class.as_ptr() == Rc::as_ptr(class) {
+                return Some(cached.slots);
+            }
+        }
+        for (slot, name) in slots.iter_mut().zip(&self.fields) {
+            *slot = class
+                .declaration
+                .fields
+                .iter()
+                .position(|field| field.binding.name == *name)?;
+        }
+        *self.positions.borrow_mut() = Some(FieldPositions {
+            class: Rc::downgrade(class),
+            slots,
+        });
+        Some(slots)
     }
 }
 
@@ -193,9 +228,19 @@ impl Runtime {
         if !instance.class.parent.get().is_some_and(Option::is_none)
             || instance.exception.borrow().is_some()
             || instance.requires_snapshot.get()
+            || !Rc::ptr_eq(&instance.class.owner, &self.identity)
         {
             return None;
         }
+        let single_field = instance.class.declaration.fields.len() == 1;
+        // Short layout walks are cheaper than maintaining a class hint.
+        let positions = if instance.class.declaration.fields.len() < CACHED_LAYOUT_FIELDS
+            || plan.fields.is_empty()
+        {
+            None
+        } else {
+            Some(plan.field_positions(&instance.class)?)
+        };
         let mut inputs: [Value; PARAMETERS + FIELDS] = std::array::from_fn(|_| Value::Null);
         for (input, value) in inputs.iter_mut().zip(arguments) {
             *input = value.clone();
@@ -203,12 +248,23 @@ impl Runtime {
         // All referenced fields must already exist and be scalar. Otherwise
         // ordinary evaluation preserves missing-field errors and earlier writes.
         for (index, name) in plan.fields.iter().enumerate() {
-            let slot = instance
-                .class
-                .declaration
-                .fields
-                .iter()
-                .position(|f| f.binding.name == *name)?;
+            let slot = if let Some(positions) = &positions {
+                let slot = positions[index];
+                instance
+                    .class
+                    .declaration
+                    .fields
+                    .get(slot)
+                    .filter(|field| field.binding.name == *name)?;
+                slot
+            } else {
+                instance
+                    .class
+                    .declaration
+                    .fields
+                    .iter()
+                    .position(|field| field.binding.name == *name)?
+            };
             let value = self
                 .environments
                 .scope(instance.scope)
@@ -255,14 +311,19 @@ impl Runtime {
                                     *target,
                                 )?;
                             }
-                            // Keep the ordinary transactional field setter and
-                            // its annotation, payload and instruction checks.
-                            self.set_object_field(
-                                object,
-                                &plan.fields[*field],
-                                value.clone(),
-                                *target,
-                            )?;
+                            let fixed_scalar = single_field && Expression::scalar(&value);
+                            #[cfg(test)]
+                            let fixed_scalar = fixed_scalar && !self.force_field_snapshot;
+                            if fixed_scalar {
+                                self.set_scalar_method_field(instance, value.clone(), *target)?;
+                            } else {
+                                self.set_object_field(
+                                    object,
+                                    &plan.fields[*field],
+                                    value.clone(),
+                                    *target,
+                                )?;
+                            }
                             inputs[arguments.len() + field] = value;
                         }
                         Step::Return { value, span } => {
@@ -286,6 +347,33 @@ impl Runtime {
             )?;
             Ok(value)
         })())
+    }
+
+    // Entry guards prove a runtime-owned, non-exception, snapshot-free object
+    // with one initialized scalar field and no byte quota. Like the setter's
+    // fixed-scalar branch, this write cannot change its logical payload size.
+    fn set_scalar_method_field(
+        &mut self,
+        instance: &ScriptObject,
+        value: Value,
+        span: Span,
+    ) -> Result<()> {
+        let field = &instance.class.declaration.fields[0];
+        let previous = self.environments.current;
+        self.environments.current = instance.class.environment;
+        let annotation = self.annotation(&field.annotation, &value, span, false);
+        self.environments.current = previous;
+        annotation?;
+        self.checkpoint(span)?;
+        // Reborrow storage after the checkpoint/collector, preserving the
+        // name check for promoted or non-positional binding stores.
+        *self
+            .environments
+            .scope_mut(instance.scope)
+            .variables
+            .get_slot_mut(0, &field.binding.name)
+            .expect("guarded initialized scalar field") = value;
+        Ok(())
     }
 }
 
