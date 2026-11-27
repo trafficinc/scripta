@@ -55,6 +55,51 @@ fn scalar_methods_preserve_field_aliases_arguments_bound_receivers_and_return_ch
 }
 
 #[test]
+fn literal_and_input_returns_preserve_types_field_updates_and_bound_receivers() {
+    let source = "class C{$x:int=0;$flag:bool=false;\
+        function store($n:int):int{$this->x=($n);return ($this->x);}\
+        function setFlag($flag:bool):bool{$this->flag=$flag;return ($flag);}\
+        function constant():int{return (42);}\
+        function nothing(){return null;}}\
+        $c=new C();$bound=$c->store;$a=$bound(7);$b=$c->setFlag(true);\
+        $d=$c->constant();$e=$c->nothing();$f=$c->store(9);\
+        $seen=[$a,$b,$d,$e,$f,$c->x,$c->flag];";
+    let (mut fast, mut reference) = pair(RuntimeOptions::default());
+    crate::test_support::compare_source(&mut fast, &mut reference, source).unwrap();
+    assert_eq!(fast.method_plans_executed, 5);
+    assert_eq!(
+        fast.get_global("seen"),
+        Some(&Value::list(vec![
+            Value::Int(7),
+            Value::Bool(true),
+            Value::Int(42),
+            Value::Null,
+            Value::Int(9),
+            Value::Int(9),
+            Value::Bool(true),
+        ]))
+    );
+    for expression in ["42", "true", "null", "$this->x"] {
+        let source = format!(
+            "class C{{$x=7;function invalid():string{{return {expression};}}}}\
+             $c=new C();$seen='kept';$seen=$c->invalid();"
+        );
+        let (mut fast, mut reference) = pair(RuntimeOptions::default());
+        assert!(
+            crate::test_support::compare_with_recovery(
+                &mut fast,
+                &mut reference,
+                &source,
+                "$recovered=1;",
+            )
+            .is_err()
+        );
+        assert_eq!(fast.get_global("seen"), Some(&Value::String("kept".into())));
+        assert_eq!(fast.method_plans_executed, 1);
+    }
+}
+
+#[test]
 fn unsupported_method_states_fall_back_before_any_writes() {
     for source in [
         "class C{$x=0;$missing:int;function f(){$this->x=9;return $this->missing;}}$c=new C();try{$c->f();}catch(PropertyError $e){}$seen=$c->x;",

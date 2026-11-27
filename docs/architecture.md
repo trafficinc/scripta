@@ -71,3 +71,7 @@ syntax instead of allocating an owned path. Root resolution and compound-value
 snapshots precede RHS evaluation; the write rechecks the current binding and map
 hint afterward. Replacement validation, retained results and handle owners keep
 the ordinary ordering. Byte-budgeted and unsupported targets use general places.
+
+Compiled scalar literal and input-read expressions return directly without
+initializing an operand stack. Scalar guards and surrounding method/function
+validation, checkpoints, scopes and field writes retain their ordinary ordering.

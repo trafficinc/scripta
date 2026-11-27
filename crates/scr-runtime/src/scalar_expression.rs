@@ -58,6 +58,19 @@ impl Expression {
     }
 
     pub fn evaluate_inputs(&self, runtime: &Runtime, inputs: &[Value]) -> Result<Value> {
+        // A compiled literal or input read has no operations, errors or ticks.
+        // Return it directly instead of initializing the bounded operand stack.
+        if let [Instruction { code, operand }] = self.code.as_ref() {
+            match code {
+                Code::Constant => return Ok(self.constants[*operand as usize].value()),
+                Code::Local => {
+                    return Ok(Scalar::from_value(&inputs[*operand as usize])
+                        .expect("guarded scalar inputs")
+                        .value());
+                }
+                _ => {}
+            }
+        }
         let mut values = [Scalar::Null; STACK];
         let mut top = 0;
         let mut ip = 0;
