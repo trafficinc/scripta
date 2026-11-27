@@ -1,149 +1,126 @@
 # Scripta repository guidance
 
-## Project and sources of truth
+## Project and references
 
-Scripta is a standalone scripting language implemented in Rust. Run commands
-from the workspace root. Use the toolchain in `rust-toolchain.toml`; preserve the
-workspace's declared minimum Rust version and `unsafe_code = "forbid"` policy.
+Scripta is a standalone scripting language implemented in Rust. Work from the
+workspace root using `rust-toolchain.toml`; preserve the declared minimum Rust
+version and `unsafe_code = "forbid"` policy.
 
-Read the relevant existing implementation and tests before changing behavior.
-Use these documents for context, keeping them aligned with code changes:
+Read relevant implementation and tests before changing behavior. Keep affected
+references aligned: `docs/language-spec.md` (semantics), `docs/standard-library.md`
+(APIs/policies), `docs/architecture.md` (design), `docs/development.md` (workflows),
+and `docs/writing-extensions.md` (native integration).
 
-- `docs/language-spec.md`: grammar, types, evaluation, and error semantics.
-- `docs/standard-library.md`: exported APIs, permissions, and resource limits.
-- `docs/architecture.md`: crate boundaries and runtime design.
-- `docs/development.md`: development and validation workflows.
-- `docs/writing-extensions.md`: native registration and extension patterns.
+Preserve unrelated working-tree edits. Do not commit, publish or release unless
+requested. Keep temporary task status out of this file.
 
 ## Code ownership
 
-- `crates/scr-ast`, `scr-lexer`, `scr-parser`, and `scr-diagnostics`: syntax,
-  parsing, source locations, and diagnostics.
-- `crates/scr-runtime`: values, evaluation, scopes, callables, native interfaces,
-  cancellation, and execution limits. Keep standard-library backends out of it.
-- `crates/scr-stdlib`: registered automation APIs and their host policies.
-- `crates/scr-cli`: commands, formatting, packages, and executable integration.
-- `crates/scr-ext-sqlite`: SQLite implementation; CLI feature `sqlite` is enabled by default.
-- `crates/scr-release`: distribution packaging and dependency notices.
-- `examples/` and `playground/`: runnable scripts; shared fixtures live in
-  `tests/fixtures/`.
+All crates below live in `crates/`:
 
-## Implementation expectations
+- `scr-ast`, `scr-lexer`, `scr-parser`, `scr-diagnostics`: syntax and diagnostics.
+- `scr-runtime`: values, scopes, evaluation, objects, native interfaces and limits;
+  keep standard-library backends out of it.
+- `scr-stdlib`: automation APIs and host policies.
+- `scr-db`: shared database API and runtime-owned handles.
+- `scr-ext-sqlite`, `scr-ext-mysql`, `scr-ext-postgres`: database backends;
+  CLI SQLite is default-enabled, MySQL/PostgreSQL optional.
+- `scr-web`: HTTP supervision and interpreter workers.
+- `scr-cli`: commands, formatting, packages and executable integration.
+- `scr-release`: packaging and dependency notices.
 
-- Preserve strict types and explicit conversions. Strings are valid UTF-8;
-  `bytes` holds arbitrary binary data. Existing string length and substring
-  positions count Unicode scalars; grapheme operations are explicit.
-- Use the public native registration interface for standard-library features.
-  Validate signatures, options, ranges, resource ownership, and closed state.
-- Reuse filesystem policies and capability checks. Preserve TLS verification,
-  HTTP ceilings, and existing overwrite/symlink rules.
-- Bound growing outputs before allocation where practical. Account for byte
-  payloads and collection slots; logical value limits are not a process heap cap.
-- Check cancellation during iterative native work. Use Rust RAII for cleanup;
-  script cleanup may be bypassed on cancellation or fatal execution limits.
-- Preserve error kinds, source spans, stack traces, and failed-assignment
-  behavior. Keep error messages useful without exposing credentials.
-- Follow existing patterns; keep changes focused. Justify new dependencies and
-  preserve minimum Rust compatibility. Update `Cargo.lock` intentionally.
-- Update affected API references, export-reference checks, and runnable examples
-  when public behavior changes. Syntax checks alone do not prove runtime behavior.
-- Preserve unrelated working-tree edits. Do not commit, publish, or perform a
-  release unless requested. Avoid recording temporary task status in this file.
+Runnable scripts live in `examples/` and `playground/`; shared fixtures in
+`tests/fixtures/`.
 
-## Tests and validation
+## Implementation rules
 
-Choose tests by the behavior changed. Add regression tests for meaningful bugs,
-new behavior, failure handling, and boundaries; avoid tests that only repeat the
-implementation. Documentation-only changes generally need link/path checks and
-`git diff --check`, not a full Rust test run.
+- Preserve strict types and explicit conversions: UTF-8 strings, binary bytes,
+  Unicode-scalar string positions, and explicit grapheme operations.
+- Use public native registration. Validate signatures, options, ranges, resource
+  ownership and closed state. Reuse filesystem policies/capabilities; preserve
+  TLS verification, HTTP ceilings and overwrite/symlink rules.
+- Bound growing outputs before allocation where practical, accounting for byte
+  payloads and collection slots. Logical value limits are not a heap cap.
+- Check cancellation during iterative native work. Use RAII; cancellation and
+  fatal limits may bypass script cleanup.
+- Preserve error kinds, spans, traces and failed-assignment behavior. Never expose
+  credentials in errors.
+- Follow existing patterns and keep changes focused. Justify dependencies,
+  preserve minimum Rust compatibility and update Cargo.lock intentionally.
+- Update affected API references, export-reference checks and runnable examples
+  when public behavior changes.
+- Preserve `.gitattributes` LF rules for build/release inputs, including `*.py`
+  and Cargo.lock, plus byte-exact fixture exceptions. Text-processing scripts must
+  handle LF/CRLF; preserve existing endings in targeted edits and test both forms
+  with explicit byte fixtures.
 
-Start with the affected crate or integration target, for example:
+## Validation
 
-```sh
-cargo test -p scr-runtime --locked
-cargo test -p scr-parser --test robustness --locked
-cargo test -p scr-stdlib --test data_handling --locked
-cargo test -p scr-stdlib --test filesystem --locked
-cargo test -p scr-stdlib --test json_http_modules --locked
-cargo test -p scr-cli --test release_examples --features sqlite --locked
-```
+Keep validation guidance here. Choose checks by the behavior changed:
 
-Unit tests are in crate source modules. Cargo integration tests are in each
-crate's `tests/` directory. Root `tests/language/` and `tests/integration/` are
-organizational documentation, not automatically discovered Cargo test targets.
+- **Documentation:** check links/paths and `git diff --check`; generally no Rust tests.
+- **Code:** start with affected crate/integration tests. Cover meaningful behavior,
+  failures and boundaries, not tests that merely mirror implementation.
+- **Cross-crate, public API, dependency or feature changes:** after focused tests,
+  run formatting, full default/all-feature tests and all-target/all-feature Clippy.
+- **Releases:** additionally complete the native evidence requirements below.
 
-For code changes that cross crates, alter public APIs, change dependencies, or
-affect feature wiring, run the full checks after focused tests pass:
+Use the native `TARGET` from the platform table for build, test and Clippy commands.
+Verify `rustc -vV` reports that host; cross-compilation is not native validation.
+Explicit targets retain Windows static-CRT settings in `.cargo/config.toml`.
+Set `MACOSX_DEPLOYMENT_TARGET=15.0` for macOS builds. SQLite requires a C compiler.
 
 ```sh
+cargo test -p scr-runtime --locked --target TARGET
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo test --workspace --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked --target TARGET -- -D warnings
+cargo test --workspace --locked --target TARGET
+cargo test --workspace --all-features --locked --target TARGET
+cargo test -p scr-stdlib --lib collections --locked --target TARGET
+cargo test -p scr-stdlib --test collections --locked --target TARGET
 git diff --check
 ```
 
-Use `cargo fmt --all` to apply Rust formatting. Keep default-feature behavior
-working too; test it separately when optional-feature behavior changes. SQLite
-builds require a C compiler. Add `--offline` when dependencies are already cached;
-do not use it for an intentional first-time dependency fetch.
+Use `cargo fmt --all` to apply formatting. Test default features separately when
+optional features change. Use `--offline` for cached dependencies, not intentional
+first fetches. After merges, rebases or version bumps, run `cargo metadata --locked`;
+correct stale workspace versions without changing dependency pins. Retain `--locked`
+in CI.
 
-Important test coverage and environment details:
+Unit tests live in crate source modules; integration targets in each crate's
+`tests/`. Root `tests/language/` and `tests/integration/` are organizational only.
+Runtime tests protect type/error semantics, limits, memory, functions and cleanup;
+stdlib tests cover host/data APIs; CLI tests cover execution, diagnostics, formatting,
+packages, extensions and examples.
 
-- `scr-runtime/tests`: type/error semantics, resource limits, memory lifecycle,
-  functions, and cleanup. Runtime changes should preserve these invariants.
-- `scr-stdlib/tests`: filesystem, process, HTTP/TLS, streams, CSV, bytes, regex,
-  and Unicode behavior. Use temporary directories and local fixtures.
-- `scr-cli/tests`: complete language execution, exit codes, diagnostics,
-  formatting snapshots, packages, optional extensions, and release examples.
-- HTTP tests bind localhost sockets; process tests spawn fixture children.
-  Sandbox restrictions can block these operations. Report the restriction and
-  use the environment's approval mechanism when needed; do not weaken or skip
-  assertions just to make sandbox failures pass.
-- Tests should not depend on public HTTP endpoints. Preserve platform guards;
-  successful macOS validation does not establish Windows or Linux correctness.
-- For resource changes, cover exact limits and limit-plus-one, cancellation,
-  cleanup, and unchanged destinations after failure where relevant.
+Use temporary/local fixtures, never public HTTP endpoints. Socket/process tests
+may require sandbox approval: report restrictions and use the approval mechanism.
+Never weaken/skip assertions to bypass sandbox or platform failures. Preserve
+platform guards. Resource changes need exact/plus-one limits, cancellation,
+cleanup and unchanged destinations after failure where relevant.
 
-For changed `.scripta` examples, check formatting and syntax, then execute them with
-controlled inputs. `scripta check` does not execute code or validate runtime types:
+For changed `.scripta` examples, run CLI `fmt --check`, `check` and `run` with
+controlled inputs via `cargo run -p scr-cli --locked --target TARGET -- ...`.
+Syntax checks do not execute code or validate runtime types.
 
-```sh
-cargo run -p scr-cli --locked -- check examples/data-handling.scripta
-cargo run -p scr-cli --locked -- fmt --check examples/data-handling.scripta
-cargo run -p scr-cli --locked -- run examples/data-handling.scripta
-```
+Report changes, actual checks and limitations. Record revision, compiler, native
+OS/architecture and results. Unavailable platforms remain pending; macOS success
+proves neither Linux nor Windows. Do not claim unrun checks passed or repeat
+passing checks without new changes or unresolved failures.
 
 ## Public naming
 
-Use `scripta` as the primary command and `.scripta` for new source files. `.scta`
-is a shorthand; retain the `scr` command and `.scr` file compatibility. Keep
-internal `scr-*` crate names and existing `SCR_*` configuration names. Use
-tag-free source for new scripts; keep optional `<?scripta` and legacy `<?scr`
-accepted, and preserve existing opening spellings or tag absence when formatting.
-New project manifests explicitly declare `main.scripta`; omitted entries in
-legacy manifests still resolve to `main.scr`. Preserve historical validation
-receipts and hashes when updating names.
+Use `scripta` and `.scripta` for new commands/scripts; retain `.scta`, `scr` and
+`.scr` compatibility. Keep internal `scr-*` crates and existing `SCR_*` names.
+New scripts are tag-free; accept optional `<?scripta` and legacy `<?scr`, preserving
+opening spellings or tag absence when formatting. New manifests declare
+`main.scripta`; omitted legacy entries resolve to `main.scr`. Preserve historical
+validation receipts and hashes when renaming.
 
-## Cross-platform validation
+## Native platforms and releases
 
-Keep validation guidance in this file. Do not create GitHub Actions workflows
-unless the user explicitly requests them.
-Keep existing workflow triggers unchanged. Do not publish releases, replace
-published assets, or move tags without an explicit user request.
-Build Linux x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon;
-publish release downloads only after every native test/package job succeeds.
-Keep release downloads compact: exactly four platform packages, all with SQLite,
-`SHA256SUMS`, and one `validation-evidence.zip` (six uploaded assets). Keep minimal
-`--no-default-features` builds available from source, not as separate downloads. Bundle
-individual checksums, native/smoke records, logs, and the release manifest inside
-the evidence ZIP; do not upload these as separate release assets. Version tags matching the workspace
-publish normal releases; validation/RC/other tags publish prereleases. Do not
-replace already published assets or move existing tags.
-
-macOS support is limited to Apple Silicon (M-series) Macs. Do not add Intel
-macOS release targets or require Intel validation.
-
-Validate natively on the candidate platform baselines when hosts are available:
+Do not create GitHub Actions workflows without explicit instruction; leave
+existing triggers unchanged. Validate natively on these baselines when available:
 
 | Native host | Rust target |
 | --- | --- |
@@ -152,34 +129,18 @@ Validate natively on the candidate platform baselines when hosts are available:
 | macOS 15 ARM64 | `aarch64-apple-darwin` |
 | Windows Server 2022 x86-64 | `x86_64-pc-windows-msvc` |
 
-- Preserve `.gitattributes` LF rules for build/release inputs, including `*.py`
-  and `Cargo.lock`, and its byte-exact fixture exceptions. Scripts that parse or
-  edit text files must handle LF and CRLF input; preserve existing line endings
-  when making targeted edits. Test both forms with explicit byte fixtures rather
-  than relying on the test host's default newline conversion.
-- After merges, rebases, or version bumps, run `cargo metadata --locked` to check
-  manifest/lockfile consistency across all workspace members. Keep `--locked` in
-  CI; correct stale workspace package versions without updating dependency pins.
-- Use the pinned toolchain and verify that the compiler host from `rustc -vV`
-  matches the target. Cross-compilation is not native validation.
-- Pass an explicit `--target` to build, test, and Clippy commands, especially on
-  Windows to retain `.cargo/config.toml` static-CRT settings. For macOS builds,
-  set `MACOSX_DEPLOYMENT_TARGET=15.0`.
-- Run focused collection resource-limit tests (`cargo test -p scr-stdlib --lib
-  collections --locked --target TARGET`) and collection behavior tests
-  (`cargo test -p scr-stdlib --test collections --locked --target TARGET`),
-  replacing TARGET with the native triple above.
-- Run formatting, full workspace tests with default and all features, and
-  all-target/all-feature Clippy with warnings denied. Do not suppress platform
-  failures or weaken assertions to make validation pass.
-- Record the tested revision, compiler, native OS/architecture, and results.
-  When native hosts are unavailable, report validation as pending; successful
-  local macOS tests do not establish Linux or Windows correctness.
-- Debug tests and lint checks do not establish release support. Native evidence
-  must include dist-profile tests, dependency inspection, archive verification,
-  and extracted-package smoke.
-  Update `docs/compatibility.md` only with the required native evidence.
+macOS support is Apple Silicon only: do not add Intel targets or require Intel
+validation. Each native audit requires the validation checks above, dist-profile
+tests, dependency inspection, archive verification and extracted-package smoke.
+Debug tests/lints alone do not establish release support. Update
+`docs/compatibility.md` only with the required native evidence.
 
-Report what changed, the checks actually run, and any remaining limitations.
-Do not claim unrun tests or untested platforms passed. Once relevant checks pass,
-repeat them only when new changes or unresolved failures justify another run.
+Build all four platforms and publish downloads only after every native test/package
+job succeeds and publication is explicitly requested. Upload exactly six assets:
+four platform packages, all including SQLite; `SHA256SUMS`; and
+`validation-evidence.zip`. Bundle individual checksums, native/smoke records, logs
+and the release manifest inside the evidence ZIP, not as separate assets. Minimal
+`--no-default-features` builds remain source-only.
+
+Workspace-version tags publish normal releases; validation/RC/other tags publish
+prereleases. Do not replace published assets or move existing tags.

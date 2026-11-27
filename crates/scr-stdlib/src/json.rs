@@ -1,7 +1,9 @@
 //! Explicit JSON conversion; object keys never silently change type.
 use scr_runtime::{
-    MapKey, NativeError, NativeFunction, NativeResult, NativeSignature, NativeType, Runtime, Value,
+    MapKey, MapKeyText, NativeError, NativeFunction, NativeResult, NativeSignature, NativeType,
+    Runtime, Value,
 };
+use serde::{Deserialize, Deserializer, de::Visitor};
 use serde_json::{Number, Value as Json, value::RawValue};
 use std::collections::BTreeMap;
 fn error(message: impl Into<String>) -> NativeError {
@@ -55,6 +57,26 @@ fn syntax_error(error: serde_json::Error) -> NativeError {
         error.column()
     ))
 }
+
+// Deserialize text directly into the final key storage. Escaped text borrows
+// serde_json's temporary unescape buffer only until visit_str returns.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct ObjectKey(MapKeyText);
+impl<'de> Deserialize<'de> for ObjectKey {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct KeyVisitor;
+        impl Visitor<'_> for KeyVisitor {
+            type Value = ObjectKey;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a string")
+            }
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Self::Value, E> {
+                Ok(ObjectKey(text.into()))
+            }
+        }
+        deserializer.deserialize_str(KeyVisitor)
+    }
+}
 fn from_raw(raw: &RawValue, depth: usize) -> NativeResult<Value> {
     if depth > 128 {
         return Err(error("JSON decoding exceeds 128 nesting levels"));
@@ -66,7 +88,7 @@ fn from_raw(raw: &RawValue, depth: usize) -> NativeResult<Value> {
         b'f' => Value::Bool(false),
         b'"' => Value::String(serde_json::from_str(text).map_err(syntax_error)?),
         b'[' => {
-            let items: Vec<Box<RawValue>> = serde_json::from_str(text).map_err(syntax_error)?;
+            let items: Vec<&RawValue> = serde_json::from_str(text).map_err(syntax_error)?;
             Value::List(
                 items
                     .iter()
@@ -75,12 +97,12 @@ fn from_raw(raw: &RawValue, depth: usize) -> NativeResult<Value> {
             )
         }
         b'{' => {
-            let items: BTreeMap<String, Box<RawValue>> =
+            let items: BTreeMap<ObjectKey, &RawValue> =
                 serde_json::from_str(text).map_err(syntax_error)?;
             Value::Map(
                 items
                     .into_iter()
-                    .map(|(k, v)| Ok((MapKey::String(k.into()), from_raw(&v, depth + 1)?)))
+                    .map(|(k, v)| Ok((MapKey::String(k.0), from_raw(v, depth + 1)?)))
                     .collect::<NativeResult<_>>()?,
             )
         }
@@ -100,8 +122,8 @@ fn from_raw(raw: &RawValue, depth: usize) -> NativeResult<Value> {
 pub(crate) fn decode(value: &str) -> NativeResult {
     // RawValue validates syntax while retaining exact numeric tokens. Decoding
     // objects separately also preserves keys used internally by serde_json.
-    let raw: Box<RawValue> = serde_json::from_str(value).map_err(syntax_error)?;
-    from_raw(&raw, 0)
+    let raw: &RawValue = serde_json::from_str(value).map_err(syntax_error)?;
+    from_raw(raw, 0)
 }
 pub(crate) fn encode(value: &Value, pretty: bool) -> NativeResult<String> {
     let json = convert(value, 0)?;
@@ -145,15 +167,5 @@ pub(crate) fn register(runtime: &mut Runtime) -> NativeResult<()> {
     Ok(())
 }
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn nonfinite_and_out_of_range_numbers_are_explicit_errors() {
-        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            assert!(encode(&Value::Float(value), false).is_err());
-        }
-        for text in ["18446744073709551616", "9223372036854775808", "1e999"] {
-            assert!(decode(text).is_err());
-        }
-    }
-}
+#[path = "json_tests.rs"]
+mod tests;
