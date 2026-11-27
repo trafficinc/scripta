@@ -10,6 +10,7 @@ from prepare_release import workspace_version
 from promote_release import GitHub, checked_evidence, package_names, tag_path
 from publish_release import prepare
 from validate_native import ROOT
+from release_assets import public_assets, validation_directory
 
 
 def build_options(environment, root=ROOT):
@@ -39,10 +40,7 @@ def assemble(inputs, output, options):
 
 
 def verify_saved_assets(assets, options, scratch):
-    expected = set(package_names(options['version']).values()) | {'SHA256SUMS', 'validation-evidence.zip'}
-    if ({path.name for path in assets.iterdir()} != expected
-            or any(not path.is_file() or path.is_symlink() for path in assets.iterdir())):
-        raise ValueError('Saved build must contain exactly the six release assets')
+    public_assets(assets, options['version'])
     inputs = checked_evidence(assets, options['tag'], options['source_revision'],
                               options['version'], scratch, prerelease=options['prerelease'])
     # Reapply the publication gates to the bundled native records, not just hashes.
@@ -58,11 +56,12 @@ def write_summary(options, environment):
             f"Source commit: `{options['source_revision']}`\n\n"
             f"Release tag: `{options['tag']}`\n\n"
             f"Build run ID: **{environment['GITHUB_RUN_ID']}**\n\n"
-            'All four native test/package jobs passed: Linux x86-64/ARM64, '
+            'All three native test/package jobs passed: Linux x86-64, '
             'Windows x86-64, and macOS 15 Apple Silicon. SQLite is included.\n\n'
             f"[Download the validated build]({environment['BUILD_ARTIFACT_URL']})\n\n"
-            'The download contains four platform archives, `SHA256SUMS`, and '
-            '`validation-evidence.zip`. Artifacts expire after 30 days.\n\n')
+            'The internal build contains an `assets` directory with three platform archives '
+            'and `SHA256SUMS`, plus separate local validation records. '
+            'Only the contents of `assets` are published. Artifacts expire after 30 days.\n\n')
     text += ('Next: open **Publish release candidate**, paste this build run ID, '
              'and run it on the default branch. The release tag is derived automatically.\n')
     with Path(environment['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8', newline='\n') as output:

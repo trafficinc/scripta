@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 import promote_release as promotion
 import test_publish_release as fixtures
 from publish_release import TARGETS, digest, prepare
+from release_assets import validation_directory
 
 REVISION = fixtures.REVISION
 SOURCE_TAG = 'v0.1.0-validation.20261115.5'
@@ -50,7 +51,7 @@ class FakeAPI:
                 'repository': {'full_name': REPOSITORY}, 'head_repository': {'full_name': REPOSITORY},
                 'html_url': 'https://github.com/owner/repo/actions/runs/123'},
             '/actions/runs/123/jobs?per_page=100': {
-                'total_count': 5,
+                'total_count': len(TARGETS) + 1,
                 'jobs': [{'name': name, 'status': 'completed', 'conclusion': 'success'}
                          for name in [*TARGETS, 'Publish release downloads']]},
             '/releases/tags/' + SOURCE_TAG: {
@@ -96,20 +97,17 @@ class FakeAPI:
             asset['size'] = (self.source / asset['name']).stat().st_size
 
     def edit_evidence(self, change, rehash_members=False):
-        path = self.source / 'validation-evidence.zip'
-        with zipfile.ZipFile(path) as bundle:
-            entries = {info.filename: bundle.read(info) for info in bundle.infolist()}
+        root = validation_directory(self.source)
+        entries = {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob('*') if p.is_file()}
         change(entries)
         if rehash_members:
             manifest = json.loads(entries['release-manifest.json'])
-            for name, content in entries.items():
-                if name != 'release-manifest.json':
-                    manifest['files'][name] = hashlib.sha256(content).hexdigest()
+            manifest['files'].update({name: hashlib.sha256(content).hexdigest() for name, content in entries.items() if name != 'release-manifest.json'})
             entries['release-manifest.json'] = json.dumps(manifest).encode()
-        with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as bundle:
-            for name, content in entries.items():
-                bundle.writestr(name, content)
-        self.refresh_checksums()
+        for name, content in entries.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
 
 
 class PromotionTests(unittest.TestCase):
@@ -121,7 +119,7 @@ class PromotionTests(unittest.TestCase):
         self.output = self.root / 'promoted'
 
     def prepare(self, release_tag=STABLE_TAG):
-        return promotion.prepare_promotion(self.api, REPOSITORY, SOURCE_TAG, RUN_ID, release_tag, self.output)
+        return promotion.prepare_promotion(self.api, REPOSITORY, SOURCE_TAG, RUN_ID, release_tag, self.output, validation_directory(self.api.source))
 
     def test_packages_and_raw_native_evidence_are_unchanged_but_release_metadata_is_stable(self):
         manifest, notes = self.prepare()
@@ -129,15 +127,14 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(manifest['tag'], STABLE_TAG)
         self.assertFalse(manifest['prerelease'])
         self.assertEqual(manifest['promoted_from']['run_id'], RUN_ID)
-        self.assertEqual(len(list(self.output.iterdir())), 6)
+        self.assertEqual(len(list(self.output.iterdir())), 4)
         self.assertEqual(self.api.posts, [])
         for package in manifest['packages']:
             self.assertEqual((self.output / package['asset']).read_bytes(), (self.api.source / package['asset']).read_bytes())
-        with zipfile.ZipFile(self.api.source / 'validation-evidence.zip') as old, zipfile.ZipFile(self.output / 'validation-evidence.zip') as new:
-            self.assertEqual(json.loads(new.read('release-manifest.json')), manifest)
-            for name in old.namelist():
-                if name != 'release-manifest.json':
-                    self.assertEqual(old.read(name), new.read(name), name)
+        before, after = validation_directory(self.api.source), validation_directory(self.output)
+        for path in before.rglob('*'):
+            if path.is_file() and path.name != 'release-manifest.json':
+                self.assertEqual(path.read_bytes(), (after / path.relative_to(before)).read_bytes())
         for line in (self.output / 'SHA256SUMS').read_text().splitlines():
             checksum, name = line.split('  ', 1)
             self.assertEqual(digest(self.output / name), checksum)
@@ -169,7 +166,7 @@ class PromotionTests(unittest.TestCase):
         jobs = self.api.responses['/actions/runs/123/jobs?per_page=100']
         jobs['jobs'].append({'name': 'Assemble validated downloads',
                              'status': 'completed', 'conclusion': 'success'})
-        jobs['total_count'] = 6
+        jobs['total_count'] = len(jobs['jobs'])
         manifest, _ = self.prepare()
         self.assertEqual(manifest['promoted_from']['tag'], SOURCE_TAG)
         self.assertEqual(manifest['source_revision'], REVISION)
@@ -185,7 +182,7 @@ class PromotionTests(unittest.TestCase):
         ]:
             jobs.update(copy.deepcopy(original))
             jobs['jobs'].append(extra)
-            jobs['total_count'] = 6
+            jobs['total_count'] = len(jobs['jobs'])
             with self.subTest(extra=extra), self.assertRaises(ValueError):
                 self.prepare()
             self.assertEqual(self.api.downloads, [])
@@ -224,32 +221,29 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(self.api.posts, [])
 
     def test_zip_traversal_is_rejected(self):
-        self.api.edit_evidence(lambda entries: entries.update({'../outside': b'bad'}))
+        self.api.edit_evidence(lambda entries: entries.update({'outside': b'bad'}))
         with self.assertRaisesRegex(ValueError, 'unsafe'):
             self.prepare()
         self.assertFalse((self.root / 'outside').exists())
         self.assertEqual(self.api.posts, [])
 
     def test_symlink_entries_are_rejected(self):
-        path = self.api.source / 'validation-evidence.zip'
-        with zipfile.ZipFile(path, 'a') as bundle:
-            info = zipfile.ZipInfo('logs/' + TARGETS[0] + '/link.log')
-            info.external_attr = (stat.S_IFLNK | 0o777) << 16
-            bundle.writestr(info, b'/outside')
-        self.api.refresh_checksums()
+        root = validation_directory(self.api.source)
+        path = root / 'logs' / TARGETS[0] / 'link.log'
+        try:
+            path.symlink_to(root / 'release-manifest.json')
+        except OSError:
+            self.skipTest('symlinks unavailable on this host')
         with self.assertRaisesRegex(ValueError, 'unsafe'):
             self.prepare()
         self.assertEqual(self.api.posts, [])
 
-    def test_duplicate_zip_entries_are_rejected(self):
-        path = self.api.source / 'validation-evidence.zip'
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', UserWarning)
-            with zipfile.ZipFile(path, 'a') as bundle:
-                bundle.writestr('release-manifest.json', b'{}')
-        self.api.refresh_checksums()
-        with self.assertRaisesRegex(ValueError, 'duplicate'):
+    def test_validation_files_cannot_be_added_to_public_assets(self):
+        (self.api.source / 'validation-evidence.zip').write_bytes(b'not a release asset')
+        self.api.assets.append({'id': 999, 'name': 'validation-evidence.zip', 'size': 19})
+        with self.assertRaisesRegex(ValueError, 'exactly'):
             self.prepare()
+        self.assertEqual(self.api.downloads, [])
         self.assertEqual(self.api.posts, [])
 
     def test_evidence_size_budget_is_checked_before_extraction(self):

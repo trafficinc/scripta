@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 from publish_release import TARGETS, digest, prepare, publish, release_kind
+from release_assets import package_names, public_assets, validation_directory
 
 JSON_LIMIT = 8 * 1024 * 1024
 EVIDENCE_LIMIT = 64 * 1024 * 1024
@@ -145,75 +146,52 @@ def validated_run(api, repository, run_id, source_tag, revision):
     if (jobs.get('total_count') != len(expected) or len(jobs.get('jobs', [])) != len(expected)
             or {job.get('name') for job in jobs['jobs']} != expected
             or any(job.get('status') != 'completed' or job.get('conclusion') != 'success' for job in jobs['jobs'])):
-        raise ValueError('All four native jobs and candidate publication must have passed')
+        raise ValueError('All three native jobs and candidate publication must have passed')
     return run
 
 
-def package_names(version):
-    return {target: f'scripta-{version}-{target}' + ('.zip' if target.endswith('windows-msvc') else '.tar.gz')
-            for target in TARGETS}
-
-
-def checked_evidence(source, source_tag, revision, version, destination, *, prerelease=True):
+def checked_evidence(source, source_tag, revision, version, destination, *, prerelease=True, validation=None):
     names = package_names(version)
     assets = set(names.values())
-    checksums = {}
-    for line in (source / 'SHA256SUMS').read_bytes().decode('ascii').splitlines():
-        match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9._-]+)', line)
-        if not match or match[2] in checksums:
-            raise ValueError('Malformed or duplicate source checksums')
-        checksums[match[2]] = match[1]
-    if set(checksums) != assets | {'validation-evidence.zip'}:
-        raise ValueError('Source checksums must cover exactly the four packages and evidence ZIP')
-    for name, checksum in checksums.items():
-        if digest(source / name) != checksum:
-            raise ValueError('Source asset checksum mismatch: ' + name)
-
+    checksums = public_assets(source, version)
+    validation = validation_directory(source) if validation is None else validation
+    if not validation.is_dir() or validation.is_symlink():
+        raise ValueError('Local validation records are required; release downloads contain no evidence')
+    paths = list(validation.rglob('*'))
+    if len(paths) > 512:
+        raise ValueError('Local validation has excessive entries')
+    required = {'release-manifest.json'} | {f'validation-{target}.json' for target in TARGETS}
+    required |= {name + suffix for name in assets for suffix in ('.sha256', '.validation.json', '.package.json')}
+    members = []
+    total = 0
+    for path in paths:
+        name = path.relative_to(validation).as_posix()
+        log = any(re.fullmatch(re.escape('logs/' + target + '/') + r'[A-Za-z0-9_.-]+\.log', name) for target in TARGETS)
+        directory = name == 'logs' or name in {'logs/' + target for target in TARGETS}
+        if path.is_symlink() or (path.is_dir() and not directory) or (not path.is_dir() and (not path.is_file() or (name not in required and not log))):
+            raise ValueError('Unexpected or unsafe local validation entry: ' + name)
+        if path.is_file():
+            size = path.stat().st_size
+            total += size
+            if size > (JSON_LIMIT if name.endswith('.json') else EVIDENCE_LIMIT) or total > UNPACKED_LIMIT:
+                raise ValueError('Local validation entry exceeds size limit')
+            members.append(name)
+    if not required.issubset(members):
+        raise ValueError('Local validation is incomplete')
     unpacked = destination / 'evidence'
     unpacked.mkdir()
-    with zipfile.ZipFile(source / 'validation-evidence.zip') as bundle:
-        infos = bundle.infolist()
-        if len(infos) > 512 or len({info.filename for info in infos}) != len(infos):
-            raise ValueError('Evidence ZIP has duplicate or excessive entries')
-        if sum(info.file_size for info in infos) > UNPACKED_LIMIT:
-            raise ValueError('Unpacked evidence exceeds 256 MiB')
-        required = {'release-manifest.json'} | {f'validation-{target}.json' for target in TARGETS}
-        required |= {name + suffix for name in assets for suffix in ('.sha256', '.validation.json')}
-        for info in infos:
-            name = info.filename
-            path = PurePosixPath(name)
-            log = any(re.fullmatch(re.escape('logs/' + target + '/') + r'[A-Za-z0-9_.-]+\.log', name)
-                      for target in TARGETS)
-            if ((name not in required and not log) or '\\' in name or path.is_absolute()
-                    or '..' in path.parts or path.as_posix() != name or info.is_dir()
-                    or stat.S_IFMT(info.external_attr >> 16) not in (0, stat.S_IFREG)
-                    or info.file_size > (JSON_LIMIT if name.endswith('.json') else EVIDENCE_LIMIT)):
-                raise ValueError('Unexpected or unsafe evidence ZIP entry: ' + name)
-        if not required.issubset({info.filename for info in infos}):
-            raise ValueError('Evidence ZIP is incomplete')
-        # Every path is whitelisted before any member is extracted. Bounded copy
-        # also protects against forged ZIP sizes; original evidence stays raw.
-        for info in infos:
-            output = unpacked.joinpath(*PurePosixPath(info.filename).parts)
-            output.parent.mkdir(parents=True, exist_ok=True)
-            total = 0
-            with bundle.open(info) as stream, output.open('xb') as target:
-                while True:
-                    chunk = stream.read(65536)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > info.file_size:
-                        raise ValueError('Evidence entry exceeds its declared size')
-                    target.write(chunk)
+    for name in members:
+        output = unpacked / name
+        output.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(validation / name, output)
 
     manifest = json.loads((unpacked / 'release-manifest.json').read_bytes())
     if (manifest.get('tag') != source_tag or manifest.get('source_revision') != revision
             or manifest.get('version') != version or manifest.get('prerelease') is not prerelease):
         raise ValueError('Candidate manifest does not match validated source')
     packages = manifest.get('packages', [])
-    if len(packages) != 4 or {p.get('asset') for p in packages} != assets:
-        raise ValueError('Candidate manifest must describe all four platform packages')
+    if len(packages) != len(TARGETS) or {p.get('asset') for p in packages} != assets:
+        raise ValueError('Candidate manifest must describe all three platform packages')
     for package in packages:
         if (names.get(package.get('target')) != package['asset'] or package.get('variant') != 'standard'
                 or package.get('extensions') != ['sqlite']
@@ -240,12 +218,13 @@ def checked_evidence(source, source_tag, revision, version, destination, *, prer
         shutil.copyfile(unpacked / f'validation-{target}.json', directory / 'validation.json')
         shutil.copyfile(source / name, directory / 'standard' / name)
         shutil.copyfile(unpacked / (name + '.validation.json'), directory / 'standard' / (name + '.validation.json'))
+        shutil.copyfile(unpacked / (name + '.package.json'), directory / 'standard' / (name + '.package.json'))
         if (unpacked / 'logs' / target).is_dir():
             shutil.copytree(unpacked / 'logs' / target, directory / 'logs')
     return inputs
 
 
-def prepare_promotion(api, repository, source_tag, run_id, release_tag, output):
+def prepare_promotion(api, repository, source_tag, run_id, release_tag, output, validation=None):
     if output.exists():
         raise ValueError('Choose a fresh promotion output directory')
     revision = resolve_tag(api, source_tag)
@@ -261,21 +240,21 @@ def prepare_promotion(api, repository, source_tag, run_id, release_tag, output):
     if existing is not None and not existing.get('draft'):
         raise ValueError('Stable release is already published; it will not be replaced')
     assets = source_release['assets']
-    expected = set(package_names(version).values()) | {'SHA256SUMS', 'validation-evidence.zip'}
-    if len(assets) != 6 or {asset['name'] for asset in assets} != expected:
-        raise ValueError('Source prerelease must contain exactly the six release assets')
+    expected = set(package_names(version).values()) | {'SHA256SUMS'}
+    if len(assets) != len(expected) or {asset['name'] for asset in assets} != expected:
+        raise ValueError('Source prerelease must contain exactly three platform packages and SHA256SUMS')
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='scripta-promotion-', dir=output.parent) as directory:
         scratch = Path(directory)
         source = scratch / 'source'
         source.mkdir()
         for asset in assets:
-            limit = 65536 if asset['name'] == 'SHA256SUMS' else EVIDENCE_LIMIT if asset['name'] == 'validation-evidence.zip' else PACKAGE_LIMIT
+            limit = 65536 if asset['name'] == 'SHA256SUMS' else PACKAGE_LIMIT
             api.download(asset, source / asset['name'], limit)
-        inputs = checked_evidence(source, source_tag, revision, version, scratch)
+        inputs = checked_evidence(source, source_tag, revision, version, scratch, validation=validation)
         provenance = {'tag': source_tag, 'run_id': run_id, 'run_url': run['html_url'],
                       'run_attempt': run.get('run_attempt', 1), 'release_url': source_release['html_url'],
-                      'evidence_sha256': digest(source / 'validation-evidence.zip')}
+                      'validation_manifest_sha256': digest(scratch / 'evidence/release-manifest.json')}
         manifest, notes = prepare(inputs, output, revision, release_tag, version, promoted_from=provenance)
         for package in manifest['packages']:
             if digest(output / package['asset']) != digest(source / package['asset']):
@@ -342,12 +321,13 @@ def main():
     parser.add_argument('--validation-run-id', type=int, required=True)
     parser.add_argument('--release-tag', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--validation', type=Path, required=True, help='retained local validation directory for the source candidate')
     parser.add_argument('--publish', action='store_true', help='Create the stable tag and publish; default is read-only preparation')
     args = parser.parse_args()
     if args.publish:
         require_dispatch(os.environ)
     api = GitHub(args.repository or '', os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN'))
-    manifest, notes = prepare_promotion(api, args.repository, args.validation_tag, args.validation_run_id, args.release_tag, args.output)
+    manifest, notes = prepare_promotion(api, args.repository, args.validation_tag, args.validation_run_id, args.release_tag, args.output, args.validation)
     print(json.dumps({'tag': manifest['tag'], 'source_revision': manifest['source_revision'],
                       'promoted_from': manifest['promoted_from'], 'packages': manifest['packages']}, indent=2))
     if args.publish:

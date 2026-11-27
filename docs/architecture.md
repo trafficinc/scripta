@@ -65,3 +65,9 @@ Module policies compose filesystem, package and development-watch restrictions.
 Workers cache parsed entry scripts and create a fresh runtime per request.
 The supervisor manages admission, deadlines, workers and request files; web APIs
 register through the standard library. See [web hosting](web-servers.md).
+
+Single literal-index assignments rooted in a variable may borrow their key from
+syntax instead of allocating an owned path. Root resolution and compound-value
+snapshots precede RHS evaluation; the write rechecks the current binding and map
+hint afterward. Replacement validation, retained results and handle owners keep
+the ordinary ordering. Byte-budgeted and unsupported targets use general places.

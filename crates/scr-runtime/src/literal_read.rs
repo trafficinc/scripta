@@ -1,7 +1,7 @@
 //! Literal reads borrow AST keys without constructing an assignment path.
 use crate::{Expr, ExprKind, Literal, Result, Runtime, Signal, Span, Value, ops};
 
-fn ungroup(mut expression: &Expr) -> &Expr {
+pub(super) fn ungroup(mut expression: &Expr) -> &Expr {
     while let ExprKind::Grouped(inner) = &expression.kind {
         expression = inner;
     }

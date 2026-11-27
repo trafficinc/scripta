@@ -258,7 +258,7 @@ Text-editing tests use explicit LF/CRLF bytes and cover rollback and Git checkou
 rules with `core.autocrlf=true`. Build inputs stay LF while byte-exact fixtures
 and upstream notices retain their original bytes. Local success does not establish
 correctness on other platforms; see the native validation guidance in
-[AGENTS.md](../AGENTS.md#cross-platform-validation).
+[AGENTS.md](../AGENTS.md#native-platforms-and-releases).
 
 ## Formatter and diagnostic tooling
 

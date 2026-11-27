@@ -10,9 +10,8 @@ use std::{
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const TARGETS: [&str; 4] = [
+const TARGETS: [&str; 3] = [
     "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
     "aarch64-apple-darwin",
     "x86_64-pc-windows-msvc",
 ];
@@ -73,6 +72,11 @@ fn run() -> Result<()> {
         "version" => println!("{VERSION}"),
         "package" => {
             let target = required(&args, "--target")?;
+            if target == "aarch64-unknown-linux-gnu" {
+                return Err(fail(
+                    "Linux ARM64 is source-only; build scr-cli with Cargo on an ARM64 host",
+                ));
+            }
             if !TARGETS.contains(&target) {
                 return Err(fail("unrecognized release target"));
             }
@@ -168,10 +172,6 @@ fn supplemental_notices(
         }
         files.insert(format!("third-party/{name}-{version}/{filename}"), bytes);
     }
-    files.insert(
-        format!("third-party/{name}-{version}/provenance.json"),
-        fs::read(directory.join("provenance.json"))?,
-    );
     Ok(entries.len())
 }
 fn notices(
@@ -343,12 +343,7 @@ fn package(
     let binary_bytes = fs::read(binary)?;
     files.insert(alias.into(), binary_bytes.clone());
     files.insert(name.into(), binary_bytes);
-    for name in ["LICENSE", "README.md"] {
-        files.insert(name.into(), fs::read(root().join(name))?);
-    }
-    for directory in ["docs", "examples", "playground"] {
-        collect(&root().join(directory), directory, &mut files)?;
-    }
+    files.insert("LICENSE".into(), fs::read(root().join("LICENSE"))?);
     notices(&mut files, target, features)?;
     let inventory: BTreeMap<_, _> = files
         .iter()
@@ -359,11 +354,7 @@ fn package(
     } else {
         vec![]
     };
-    let manifest = json!({"version":VERSION,"target":target,"binary":name,"compatibility_binary":alias,"binary_sha256":digest(&files[name]),"source_date_epoch":epoch,"extensions":extensions,"files":inventory,"validation":"see the per-target validation record; archive creation alone is not platform support"});
-    files.insert(
-        "release.json".into(),
-        [serde_json::to_vec_pretty(&manifest)?, vec![b'\n']].concat(),
-    );
+    let mut manifest = json!({"format":2,"version":VERSION,"target":target,"binary":name,"compatibility_binary":alias,"binary_sha256":digest(&files[name]),"source_date_epoch":epoch,"extensions":extensions,"files":inventory,"validation":"see the per-target validation record; archive creation alone is not platform support"});
     fs::create_dir_all(out)?;
     let base = format!("scripta-{VERSION}-{target}");
     let path = out.join(format!(
@@ -387,6 +378,9 @@ fn package(
             .set_permissions(fs::Permissions::from_mode(0o644))?;
     }
     temporary.persist(&path).map_err(|e| e.error)?;
+    // Maintainer-only metadata stays beside the archive, never inside it.
+    manifest["archive_sha256"] = json!(digest(&bytes));
+    fs::write(path.with_file_name(format!("{}.package.json", path.file_name().ok_or("missing archive name")?.to_string_lossy())), serde_json::to_vec_pretty(&manifest)?)?;
     fs::write(
         path.with_file_name(format!(
             "{}.sha256",
@@ -521,6 +515,9 @@ fn read_archive(path: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
 }
 fn read_verified(path: &Path) -> Result<(String, Value, BTreeMap<String, Vec<u8>>)> {
     let files = read_archive(path)?;
+    if !files.keys().any(|name| name.ends_with("/release.json")) {
+        return read_runtime_package(path, files);
+    }
     let key = files
         .keys()
         .find(|p| p.ends_with("/release.json"))
@@ -532,7 +529,10 @@ fn read_verified(path: &Path) -> Result<(String, Value, BTreeMap<String, Vec<u8>
     let manifest: Value = serde_json::from_slice(&files[key])?;
     let version = manifest["version"].as_str().ok_or("version missing")?;
     let target = manifest["target"].as_str().ok_or("target missing")?;
-    if !TARGETS.contains(&target) || prefix != format!("scripta-{version}-{target}/") {
+    // Continue verifying historical ARM64 archives without creating new releases.
+    if (!TARGETS.contains(&target) && target != "aarch64-unknown-linux-gnu")
+        || prefix != format!("scripta-{version}-{target}/")
+    {
         return Err(fail("invalid release identity"));
     }
     if let Some(extensions) = manifest.get("extensions") {
@@ -576,6 +576,44 @@ fn read_verified(path: &Path) -> Result<(String, Value, BTreeMap<String, Vec<u8>
     }
     if binary == alias && manifest.get("compatibility_binary").is_some() {
         return Err(fail("invalid legacy compatibility metadata"));
+    }
+    Ok((prefix, manifest, files))
+}
+fn runtime_file(name: &str, windows: bool) -> bool {
+    let binaries = if windows { ["scripta.exe", "scr.exe"] } else { ["scripta", "scr"] };
+    if binaries.contains(&name) || matches!(name, "LICENSE" | "THIRD_PARTY_NOTICES.txt") { return true; }
+    let parts: Vec<_> = name.split('/').collect();
+    if parts.len() < 3 || parts[0] != "third-party" || parts.iter().any(|part| matches!(part.to_ascii_lowercase().as_str(), "docs" | "examples" | "playground" | "logs" | "validation")) { return false; }
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".json") || lower.ends_with(".log") { return false; }
+    (parts[1] == "rust" && parts[2] == "licenses") || name == "third-party/rust/COPYRIGHT-library.html" || (parts.len() == 3 && ["license", "copying", "notice", "unlicense", "declared-license"].iter().any(|prefix| parts[2].to_ascii_lowercase().starts_with(prefix)))
+}
+fn read_runtime_package(path: &Path, files: BTreeMap<String, Vec<u8>>) -> Result<(String, Value, BTreeMap<String, Vec<u8>>)> {
+    let first = files.keys().next().ok_or("empty release archive")?;
+    let base = first.split('/').next().ok_or("missing release prefix")?;
+    let target = TARGETS.iter().find(|target| base.ends_with(&format!("-{target}"))).ok_or("invalid runtime package target")?;
+    let version = base.strip_prefix("scripta-").and_then(|s| s.strip_suffix(&format!("-{target}"))).filter(|s| !s.is_empty()).ok_or("invalid runtime package version")?;
+    let prefix = format!("{base}/");
+    let (binary, alias) = if target.contains("windows") { ("scripta.exe", "scr.exe") } else { ("scripta", "scr") };
+    let mut inventory = BTreeMap::new();
+    for (name, data) in &files {
+        let relative = name.strip_prefix(&prefix).ok_or("runtime package has mixed roots")?;
+        if !runtime_file(relative, target.contains("windows")) { return Err(fail("unexpected runtime package file")); }
+        inventory.insert(relative.to_owned(), digest(data));
+    }
+    for name in [binary, alias, "LICENSE", "THIRD_PARTY_NOTICES.txt"] {
+        if !inventory.contains_key(name) { return Err(fail("runtime package file missing")); }
+    }
+    if files[&format!("{prefix}{binary}")].is_empty() || inventory[binary] != inventory[alias] { return Err(fail("compatibility executable differs")); }
+    let mut manifest = json!({"format":2,"version":version,"target":target,"binary":binary,"compatibility_binary":alias,"binary_sha256":inventory[binary],"files":inventory});
+    let sidecar = path.with_file_name(format!("{}.package.json", path.file_name().ok_or("missing archive name")?.to_string_lossy()));
+    if sidecar.exists() {
+        let external: Value = serde_json::from_slice(&fs::read(sidecar)?)?;
+        for key in ["format", "version", "target", "binary", "compatibility_binary", "binary_sha256", "files"] {
+            if external[key] != manifest[key] { return Err(fail("local package metadata differs from archive")); }
+        }
+        if external["archive_sha256"] != digest(&fs::read(path)?) || ![json!([]), json!(["sqlite"])].contains(&external["extensions"]) { return Err(fail("invalid local package metadata")); }
+        manifest = external;
     }
     Ok((prefix, manifest, files))
 }
@@ -632,6 +670,22 @@ fn smoke(path: &Path) -> Result<()> {
         }
     }
     let directory = temporary.path().join(prefix.trim_end_matches('/'));
+    if manifest["format"] == 2 {
+        for (name, source) in [
+            ("examples/hello.scripta", include_str!("../../../examples/hello.scripta")),
+            ("examples/variables.scripta", include_str!("../../../examples/variables.scripta")),
+            ("examples/loops.scripta", include_str!("../../../examples/loops.scripta")),
+            ("examples/functions.scripta", include_str!("../../../examples/functions.scripta")),
+            ("examples/sqlite.scripta", include_str!("../../../examples/sqlite.scripta")),
+            ("examples/timezones.scripta", include_str!("../../../examples/timezones.scripta")),
+            ("examples/lib/helpers.scripta", include_str!("../../../examples/lib/helpers.scripta")),
+            ("playground/collections.scripta", include_str!("../../../playground/collections.scripta")),
+        ] {
+            let probe = directory.join(name);
+            fs::create_dir_all(probe.parent().ok_or("missing probe directory")?)?;
+            fs::write(probe, source)?;
+        }
+    }
     let executable = directory.join(manifest["binary"].as_str().ok_or("missing binary")?);
     let execute_with = |executable: &Path, arguments: &[&str]| -> Result<std::process::Output> {
         let mut command = Command::new(executable);
@@ -769,7 +823,7 @@ mod tests {
     use super::*;
     #[test]
     fn archive_output_is_deterministic_and_inventory_detects_corruption() -> Result<()> {
-        for target in TARGETS {
+        for target in TARGETS.into_iter().chain(["aarch64-unknown-linux-gnu"]) {
             let binary = if target.contains("windows") {
                 "scripta.exe"
             } else {

@@ -26,3 +26,8 @@ in ignored benchmark JSON files.
 These are workload/API comparisons, not an overall language ranking or native
 validation of other platforms.
 
+
+Simple variable-rooted assignments with one literal int/string index borrow the
+key and avoid a temporary path buffer when no value-byte quota is configured.
+Compound and retained-result writes preserve ordinary snapshots and validation;
+quota-enabled, dynamic, nested, property and append targets keep general handling.

@@ -5,9 +5,13 @@ Release targets and baseline requirements:
 | Platform | Rust target | Native baseline | Archive format |
 | --- | --- | --- | --- |
 | Linux x86-64 | `x86_64-unknown-linux-gnu` | Ubuntu 22.04 x86-64 | `.tar.gz` |
-| Linux ARM64 | `aarch64-unknown-linux-gnu` | Ubuntu 22.04 ARM64 | `.tar.gz` |
 | macOS ARM64 | `aarch64-apple-darwin` | macOS 15 Apple Silicon | `.tar.gz` |
 | Windows x86-64 | `x86_64-pc-windows-msvc` | Windows Server 2022 x86-64 | `.zip` |
+
+Linux ARM64 (`aarch64-unknown-linux-gnu`) is available from source, without a
+prebuilt release package or mandatory release-validation job. Build on a native
+ARM64 Linux host; see [source builds](../README.md#linux). This policy does not
+certify ARM64 builds or change historical release artifacts.
 
 Every archive is named `scripta-<version>-<target>.tar.gz` or `.zip`. Windows contains
 `scripta.exe` and compatibility `scr.exe`; other platforms contain `scripta` and

@@ -48,8 +48,9 @@ known Db signatures, but never connects, validates a DSN or confirms driver
 availability. Installing a library with `scripta add`/`require` cannot change the
 executable's compiled connectors. Use an executable showing `mysql` in its verbose
 extension list, or build one from source. Existing published releases are not
-changed by this implementation; release downloads remain the four-platform SQLite
-packages with checksums and validation evidence.
+changed by this implementation. New prebuilt releases target Linux x86-64,
+Windows x86-64 and macOS Apple Silicon, with SQLite included; Linux ARM64 is
+available from source. See [platform policy](compatibility.md).
 
 Script libraries can declare their required connector API version and capabilities
 in `[extensions]`; installation and execution compare those declarations with the

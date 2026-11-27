@@ -14,6 +14,7 @@ import test_prepare_release as preparation_fixtures
 import prepare_release
 import workflow_build
 from publish_release import digest, prepare
+from release_assets import validation_directory
 
 REVISION = fixtures.REVISION
 REPOSITORY = 'owner/repo'
@@ -77,14 +78,14 @@ class PublishBuildTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         self.api = FakeAPI()
-        self.source = self.root / 'source'
+        self.source = self.root / 'saved-build' / 'assets'
         self.output = self.root / 'output'
 
     def fixture(self):
         fixtures.ReleaseTests().fixture(self.root / 'native')
         prepare(self.root / 'native', self.source, REVISION, 'v0.1.0', '0.1.0')
         selection = saved.select_build(self.api, REPOSITORY, 123)
-        manifest, notes = saved.prepare_saved(self.api, selection, self.source, self.output)
+        manifest, notes = saved.prepare_saved(self.api, selection, self.source.parent, self.output)
         return selection, manifest, notes
 
     def test_run_id_is_required_and_tag_is_derived_from_that_build(self):
@@ -110,7 +111,7 @@ class PublishBuildTests(unittest.TestCase):
         workflow_build.assemble(self.root / 'native', self.source, build_options)
         self.api.jobs.pop()  # New build-only workflow has five successful jobs.
         selection = saved.select_build(self.api, REPOSITORY, 123)
-        manifest, notes = saved.prepare_saved(self.api, selection, self.source, self.output)
+        manifest, notes = saved.prepare_saved(self.api, selection, self.source.parent, self.output)
         before = {p['asset']: (self.source / p['asset']).read_bytes() for p in manifest['packages']}
         publisher = Mock(return_value=json.dumps({'url': 'https://github.com/owner/repo/releases/tag/v0.1.1'}))
         saved.publish_build(self.api, selection, manifest, self.output, notes, ENV, publisher)
@@ -170,16 +171,16 @@ class PublishBuildTests(unittest.TestCase):
         self.assertEqual(manifest['tag'], 'v0.1.0')
         self.assertFalse(manifest['prerelease'])
         self.assertEqual(manifest['built_from']['artifact_id'], 456)
-        self.assertEqual(manifest['built_from']['evidence_sha256'], digest(self.source / 'validation-evidence.zip'))
-        self.assertEqual(len(list(self.output.iterdir())), 6)
+        self.assertEqual(manifest['built_from']['validation_manifest_sha256'], digest(validation_directory(self.source) / 'release-manifest.json'))
+        self.assertEqual(len(list(self.output.iterdir())), 4)
         for package in manifest['packages']:
             self.assertEqual((self.source / package['asset']).read_bytes(),
                              (self.output / package['asset']).read_bytes())
-        with zipfile.ZipFile(self.source / 'validation-evidence.zip') as before, zipfile.ZipFile(self.output / 'validation-evidence.zip') as after:
-            for name in before.namelist():
-                if name != 'release-manifest.json':
-                    self.assertEqual(before.read(name), after.read(name))
-        self.assertIn('Only release metadata', notes.read_text())
+        before, after = validation_directory(self.source), validation_directory(self.output)
+        for path in before.rglob('*'):
+            if path.is_file() and path.name != 'release-manifest.json':
+                self.assertEqual(path.read_bytes(), (after / path.relative_to(before)).read_bytes())
+        self.assertIn('Only local release metadata', notes.read_text())
         for line in (self.output / 'SHA256SUMS').read_text().splitlines():
             checksum, name = line.split('  ')
             self.assertEqual(checksum, digest(self.output / name))
@@ -232,7 +233,7 @@ class PublishBuildTests(unittest.TestCase):
         package.write_bytes(package.read_bytes() + b'tampered')
         selection = saved.select_build(self.api, REPOSITORY, 123)
         with self.assertRaisesRegex(ValueError, 'checksum'):
-            saved.prepare_saved(self.api, selection, self.source, self.output)
+            saved.prepare_saved(self.api, selection, self.source.parent, self.output)
         self.assertEqual(self.api.posts, [])
 
 

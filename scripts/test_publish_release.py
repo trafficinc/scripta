@@ -1,5 +1,8 @@
 """Release staging and publication tests without credentials or network access."""
 import json
+import io
+import tarfile
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -8,6 +11,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from publish_release import SUITES, TARGETS, digest, prepare, publish, release_kind
+
+from release_assets import inspect_package, validation_directory
 
 REVISION = 'a' * 40
 
@@ -27,15 +32,31 @@ class ReleaseTests(unittest.TestCase):
                 name = f'scripta-{version}-{target}{extension}'
                 path = directory / variant / name
                 path.parent.mkdir()
-                path.write_bytes((target + variant).encode())
+                primary, alias = ('scripta.exe', 'scr.exe') if 'windows' in target else ('scripta', 'scr')
+                files = {primary: (target + variant).encode(), alias: (target + variant).encode(), 'LICENSE': b'MIT', 'THIRD_PARTY_NOTICES.txt': b'notices', 'third-party/test-1/LICENSE': b'license'}
+                prefix = f'scripta-{version}-{target}/'
+                if 'windows' in target:
+                    with zipfile.ZipFile(path, 'w') as archive:
+                        for member, data in files.items():
+                            archive.writestr(prefix + member, data)
+                else:
+                    with tarfile.open(path, 'w:gz') as archive:
+                        for member, data in files.items():
+                            entry = tarfile.TarInfo(prefix + member)
+                            entry.size = len(data)
+                            entry.mode = 0o755 if member in (primary, alias) else 0o644
+                            archive.addfile(entry, io.BytesIO(data))
+                details = inspect_package(path, version, target)
+                details.update(format=2, extensions=['sqlite'], archive_sha256=digest(path))
+                path.with_name(path.name + '.package.json').write_bytes(json.dumps(details).encode())
                 checksum = digest(path)
                 record['packages'][variant] = {
                     'archive': variant + ('\\' if 'windows' in target else '/') + name,
-                    'archive_sha256': checksum, 'binary_sha256': 'b' * 64,
+                    'archive_sha256': checksum, 'binary_sha256': details['binary_sha256'],
                     'offline_package_smoke': 'passed', 'identical_input_repack': 'passed',
                     'dependencies': ['system library'], 'extensions': ['sqlite']}
                 smoke = {'target': target, 'version': version, 'extensions': ['sqlite'], 'archive_sha256': checksum,
-                         'binary_sha256': 'b' * 64}
+                         'binary_sha256': details['binary_sha256']}
                 path.with_name(name + '.validation.json').write_text(json.dumps(smoke), encoding='utf-8')
             (directory / 'validation.json').write_text(json.dumps(record), encoding='utf-8')
         return root / ('native-validation-' + TARGETS[0] + '-1')
@@ -47,25 +68,20 @@ class ReleaseTests(unittest.TestCase):
             output = root / 'assets'
             manifest, notes = prepare(root / 'inputs', output, REVISION, 'v0.1.0', '0.1.0')
             self.assertFalse(manifest['prerelease'])
-            self.assertEqual(len(manifest['packages']), 4)
-            self.assertEqual(len({p['asset'] for p in manifest['packages']}), 4)
-            self.assertEqual(len(list(output.iterdir())), 6)
-            expected_assets = {p['asset'] for p in manifest['packages']} | {'SHA256SUMS', 'validation-evidence.zip'}
+            self.assertEqual(len(manifest['packages']), 3)
+            self.assertEqual(len({p['asset'] for p in manifest['packages']}), 3)
+            self.assertEqual(len(list(output.iterdir())), 4)
+            expected_assets = {p['asset'] for p in manifest['packages']} | {'SHA256SUMS'}
             self.assertEqual({p.name for p in output.iterdir()}, expected_assets)
-            with zipfile.ZipFile(output / 'validation-evidence.zip') as evidence:
-                bundled_manifest = json.loads(evidence.read('release-manifest.json'))
-                self.assertEqual(bundled_manifest, manifest)
-                for package in manifest['packages']:
-                    self.assertEqual(digest(output / package['asset']), package['archive_sha256'])
-                    self.assertEqual(evidence.read(package['asset'] + '.sha256').decode(),
-                                     package['archive_sha256'] + '  ' + package['asset'] + '\n')
-                    smoke = json.loads(evidence.read(package['asset'] + '.validation.json'))
-                    self.assertEqual(smoke['archive_sha256'], package['archive_sha256'])
-                for target in TARGETS:
-                    self.assertEqual(json.loads(evidence.read(f'validation-{target}.json'))['target'], target)
-                    self.assertEqual(evidence.read(f'logs/{target}/check.log'), b'passed\n')
+            evidence = validation_directory(output)
+            self.assertEqual(json.loads((evidence / 'release-manifest.json').read_bytes()), manifest)
+            for package in manifest['packages']:
+                self.assertEqual(digest(output / package['asset']), package['archive_sha256'])
+                smoke = json.loads((evidence / (package['asset'] + '.validation.json')).read_bytes())
+                self.assertEqual(smoke['archive_sha256'], package['archive_sha256'])
+            self.assertFalse((output / 'validation-evidence.zip').exists())
             checksums = (output / 'SHA256SUMS').read_text().splitlines()
-            self.assertEqual(len(checksums), 5)
+            self.assertEqual(len(checksums), 3)
             for line in checksums:
                 checksum, name = line.split('  ', 1)
                 self.assertEqual(digest(output / name), checksum)
@@ -85,13 +101,13 @@ class ReleaseTests(unittest.TestCase):
                 (target / 'logs/check.log').write_bytes(b'passed\r\n')
                 output = root / 'assets'
                 manifest, notes = prepare(root / 'inputs', output, REVISION, 'v0.1.0', '0.1.0')
-            with zipfile.ZipFile(output / 'validation-evidence.zip') as evidence:
-                for package in manifest['packages']:
-                    self.assertEqual(evidence.read(package['asset'] + '.sha256'),
-                                     (package['archive_sha256'] + '  ' + package['asset'] + '\n').encode('utf-8'))
-                self.assertEqual(evidence.read('release-manifest.json'),
-                                 (json.dumps(manifest, indent=2) + '\n').encode('utf-8'))
-                self.assertEqual(evidence.read(f"logs/{TARGETS[0]}/check.log"), b'passed\r\n')
+            evidence = validation_directory(output)
+            for package in manifest['packages']:
+                self.assertEqual((evidence / (package['asset'] + '.sha256')).read_bytes(),
+                                 (package['archive_sha256'] + '  ' + package['asset'] + '\n').encode())
+            self.assertEqual((evidence / 'release-manifest.json').read_bytes(),
+                             (json.dumps(manifest, indent=2) + '\n').encode())
+            self.assertEqual((evidence / f"logs/{TARGETS[0]}/check.log").read_bytes(), b'passed\r\n')
             checksums = ''.join(f'{digest(path)}  {path.name}\n' for path in sorted(output.iterdir())
                                 if path.name != 'SHA256SUMS')
             self.assertEqual((output / 'SHA256SUMS').read_bytes(), checksums.encode('utf-8'))
@@ -127,6 +143,19 @@ class ReleaseTests(unittest.TestCase):
                     prepare(root / 'inputs', root / 'assets', REVISION, 'v0.1.0', '0.1.0')
                 self.assertFalse((root / 'assets').exists())
 
+    def test_linux_arm64_input_is_rejected_before_staging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = self.fixture(root / 'inputs')
+            arm = root / 'inputs' / 'native-validation-aarch64-unknown-linux-gnu'
+            shutil.copytree(first, arm)
+            record = json.loads((arm / 'validation.json').read_text())
+            record['target'] = 'aarch64-unknown-linux-gnu'
+            (arm / 'validation.json').write_text(json.dumps(record))
+            with self.assertRaises(ValueError):
+                prepare(root / 'inputs', root / 'assets', REVISION, 'v0.1.0', '0.1.0')
+            self.assertFalse((root / 'assets').exists())
+
     def test_version_and_prerelease_classification(self):
         self.assertFalse(release_kind('v0.1.0', '0.1.0'))
         for tag in ['v0.1.0-validation.1', 'v0.1.0-rc.1', 'nightly', 'test/build']:
@@ -137,9 +166,10 @@ class ReleaseTests(unittest.TestCase):
 
     def test_upload_failure_leaves_release_as_draft_and_published_assets_are_not_replaced(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory)
-            (output / 'asset.zip').write_bytes(b'asset')
-            manifest = {'tag': 'v0.1.0', 'source_revision': REVISION, 'prerelease': False}
+            root = Path(directory)
+            self.fixture(root / 'inputs')
+            output = root / 'assets'
+            manifest, _ = prepare(root / 'inputs', output, REVISION, 'v0.1.0', '0.1.0')
             calls = []
             def run(arguments, **kwargs):
                 calls.append(arguments)
@@ -158,8 +188,10 @@ class ReleaseTests(unittest.TestCase):
 
     def test_prerelease_is_published_only_after_upload_and_draft_can_resume(self):
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory)
-            (output / 'asset.zip').write_bytes(b'asset')
+            root = Path(directory)
+            self.fixture(root / 'inputs')
+            output = root / 'assets'
+            manifest, _ = prepare(root / 'inputs', output, REVISION, 'v0.1.0-test', '0.1.0')
             for draft_exists in [False, True]:
                 calls = []
                 def run(arguments, **kwargs):
@@ -167,7 +199,7 @@ class ReleaseTests(unittest.TestCase):
                     if arguments[2] == 'view':
                         return subprocess.CompletedProcess(arguments, 0 if draft_exists else 1, '{"isDraft": true}', '')
                     return subprocess.CompletedProcess(arguments, 0, '', '')
-                publish('owner/repo', {'tag': 'v0.1.0-test', 'source_revision': REVISION, 'prerelease': True},
+                publish('owner/repo', manifest,
                         output, output / 'notes.md', run)
                 upload = next(i for i, call in enumerate(calls) if call[2] == 'upload')
                 publication = next(i for i, call in enumerate(calls) if '--draft=false' in call)

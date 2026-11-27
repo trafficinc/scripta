@@ -12,6 +12,7 @@ import zipfile
 from promote_release import GitHub, JSON_LIMIT, SHA, WORKFLOW, require_dispatch, tag_path, workspace_version
 from publish_release import prepare, publish, release_kind
 from validate_native import TARGETS, digest
+from release_assets import validation_directory
 from workflow_build import verify_saved_assets
 
 
@@ -39,7 +40,7 @@ def successful_run(api, repository, run_id):
                    or job.get('conclusion') not in (('success', 'skipped')
                        if job.get('name') == 'Publish release downloads' else ('success',))
                    for job in items)):
-        raise ValueError('All four native jobs and artifact assembly must have passed')
+        raise ValueError('All three native jobs and artifact assembly must have passed')
     return run
 
 
@@ -109,16 +110,14 @@ def recheck(api, selection):
 
 def prepare_saved(api, selection, assets, output):
     recheck(api, selection)
-    # Read only the bounded manifest here; verify_saved_assets validates the entire ZIP.
-    with zipfile.ZipFile(assets / 'validation-evidence.zip') as bundle:
-        info = bundle.getinfo('release-manifest.json')
-        if info.file_size > JSON_LIMIT:
-            raise ValueError('Build manifest exceeds its size limit')
-        with bundle.open(info) as stream:
-            content = stream.read(JSON_LIMIT + 1)
-        if len(content) > JSON_LIMIT:
-            raise ValueError('Build manifest exceeds its size limit')
-        original = json.loads(content)
+    # Actions retains local validation beside public assets, never in release downloads.
+    assets = assets / 'assets'
+    record = validation_directory(assets) / 'release-manifest.json'
+    with record.open('rb') as stream:
+        content = stream.read(JSON_LIMIT + 1)
+    if len(content) > JSON_LIMIT:
+        raise ValueError('Build manifest exceeds its size limit')
+    original = json.loads(content)
     source_options = {'version': selection['version'], 'tag': original['tag'],
                       'source_revision': selection['source_revision'],
                       'prerelease': release_kind(original['tag'], selection['version'])}
@@ -128,7 +127,7 @@ def prepare_saved(api, selection, assets, output):
         provenance = {key: selection[key] for key in ('run_id', 'run_attempt', 'artifact_id', 'artifact_name')}
         provenance['run_url'] = (f'https://github.com/{selection["repository"]}/actions/runs/'
                                  f'{selection["run_id"]}')
-        provenance['evidence_sha256'] = digest(assets / 'validation-evidence.zip')
+        provenance['validation_manifest_sha256'] = digest(record)
         manifest, notes = prepare(scratch / 'inputs', output, selection['source_revision'],
                                   selection['release_tag'], selection['version'], built_from=provenance)
     for package in manifest['packages']:

@@ -34,7 +34,8 @@ text/binary files, LF/CRLF streams, overwrite protection, directories, environme
 system RAM/disk/CPU/uptime, clocks, processes, and SQLite file reopening. Files
 created by cases live in runner-owned temporary directories. It needs no Python
 or Rust when using an existing executable. Supported launchers target Linux x86-64/ARM64, Windows
-x86-64, and Apple Silicon macOS; native runs on each are still required. These
+x86-64, and Apple Silicon macOS. Linux ARM64 is source-only; its local launcher
+remains available, but ARM64 runs do not gate prebuilt releases. These
 smoke tests complement Cargo tests and release/package validation.
 
 Maintainers can check launcher failure handling with

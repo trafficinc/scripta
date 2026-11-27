@@ -45,7 +45,9 @@ Scripta bridges the gap between shell scripts that become difficult to maintain 
 - **Useful tools built in:** work with files, commands, HTTP APIs, JSON, and SQLite. Standard release packages include SQLite without a separate database server or library installation.
 - **Predictable type rules:** strict runtime operations and explicit conversions help catch incompatible values; optional function annotations check arguments and return values at runtime.
 - **An integrated workflow:** format scripts, run native Scripta tests, and check syntax with the same executable. Errors include source locations and runtime stack traces.
-- **Multiple platforms:** platform-specific packages target Linux, Windows, and Apple Silicon macOS. See [compatibility](docs/compatibility.md) for architectures and OS baselines.
+- **Multiple platforms:** prebuilt packages target Linux x86-64, Windows x86-64,
+  and Apple Silicon macOS. Linux ARM64 is available from source. See
+  [compatibility](docs/compatibility.md) for architectures and OS baselines.
 
 ### ~ *SCRIPTA IS STILL IN BETA* ~
 
@@ -256,7 +258,8 @@ cargo build -p scr-cli --profile dist --locked
 ```
 
 Cargo selects the native host architecture: x86-64 on an x86-64 host, ARM64 on an
-ARM64 host. Configured Linux distribution candidates use GNU/glibc targets built
+ARM64 host. Linux ARM64 is source-only; prebuilt Linux releases target x86-64.
+Configured Linux distribution candidates use GNU/glibc targets built
 on Ubuntu 22.04. musl/Alpine and ARM32 are outside the release matrix.
 
 ### Windows

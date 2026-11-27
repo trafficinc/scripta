@@ -294,6 +294,51 @@ pub(crate) fn set_index_with_hint(
     set_index(value, path, replacement, append)
 }
 
+/// Single final index with a borrowed, already typed literal key.
+pub(crate) fn set_index_key(
+    value: &mut Value,
+    key: IndexKey<'_>,
+    replacement: Value,
+    hint: Option<usize>,
+) -> Result<()> {
+    match value {
+        Value::List(items) => {
+            let IndexKey::Int(key) = key else {
+                return Err(Error::Type("list index must be an int"));
+            };
+            let index = integer_index(key, items.len())?;
+            if index == items.len() {
+                items
+                    .try_reserve(1)
+                    .map_err(|_| Error::Fatal("list allocation failed"))?;
+                items.push(replacement);
+            } else {
+                *items
+                    .get_mut(index)
+                    .ok_or(Error::Index("list index out of bounds"))? = replacement;
+            }
+            Ok(())
+        }
+        Value::Map(entries) => {
+            if let Some(at) = hint.filter(|&at| {
+                entries
+                    .get(at)
+                    .is_some_and(|(stored, _)| key.matches(stored))
+            }) {
+                entries[at].1 = replacement;
+            } else if let Some((_, value)) =
+                entries.iter_mut().find(|(stored, _)| key.matches(stored))
+            {
+                *value = replacement;
+            } else {
+                entries.push((key.owned(), replacement));
+            }
+            Ok(())
+        }
+        _ => Err(Error::Type("index assignment requires a list or map")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,6 +1,7 @@
 """Manual candidate build defaults, version preflight, and artifact integrity."""
 import hashlib
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -8,7 +9,8 @@ import zipfile
 from unittest.mock import Mock
 
 import workflow_build as build
-from publish_release import digest
+from publish_release import TARGETS, digest
+from release_assets import validation_directory
 import test_publish_release as fixtures
 
 REVISION = fixtures.REVISION
@@ -60,9 +62,9 @@ class WorkflowBuildTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'prepare_release.py'):
                 build.check_available(api, self.options)
 
-    def test_build_only_creates_six_downloads_and_summary_without_github_calls(self):
+    def test_build_only_creates_four_downloads_and_summary_without_github_calls(self):
         manifest, notes = self.assemble()
-        self.assertEqual(len(list(self.assets.iterdir())), 6)
+        self.assertEqual(len(list(self.assets.iterdir())), 4)
         summary = self.root / 'summary.md'
         build.write_summary(self.options, environment(
             GITHUB_STEP_SUMMARY=str(summary), GITHUB_RUN_ID='123', BUILD_ARTIFACT_URL='https://github.com/build-artifact'))
@@ -74,6 +76,15 @@ class WorkflowBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             verified, _ = build.verify_saved_assets(self.assets, self.options, Path(directory))
         self.assertEqual(verified, manifest)
+
+    def test_native_matrix_and_release_targets_match_the_three_prebuilt_platforms(self):
+        expected = {'x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-pc-windows-msvc'}
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/native-validation.yml').read_text()
+        targets = re.findall(r'^            target: (\S+)$', workflow, re.M)
+        self.assertEqual(set(TARGETS), expected)
+        self.assertEqual(len(TARGETS), 3)
+        self.assertEqual(set(targets), expected)
+        self.assertEqual(len(targets), 3)
 
     def test_modified_download_or_extra_file_is_rejected_before_any_api_access(self):
         options = self.options
@@ -94,19 +105,15 @@ class WorkflowBuildTests(unittest.TestCase):
 
     def test_failed_native_record_is_rejected_even_when_every_checksum_is_updated(self):
         self.assemble()
-        path = self.assets / 'validation-evidence.zip'
-        with zipfile.ZipFile(path) as bundle:
-            entries = {name: bundle.read(name) for name in bundle.namelist()}
-        native = next(name for name in entries if name.startswith('validation-') and name.endswith('.json'))
-        record = json.loads(entries[native])
+        evidence = validation_directory(self.assets)
+        path = evidence / ('validation-' + TARGETS[0] + '.json')
+        record = json.loads(path.read_bytes())
         record['status'] = 'failed'
-        entries[native] = json.dumps(record).encode()
-        manifest = json.loads(entries['release-manifest.json'])
-        manifest['files'][native] = hashlib.sha256(entries[native]).hexdigest()
-        entries['release-manifest.json'] = json.dumps(manifest).encode()
-        with zipfile.ZipFile(path, 'w') as bundle:
-            for name, content in entries.items():
-                bundle.writestr(name, content)
+        path.write_bytes(json.dumps(record).encode())
+        manifest_path = evidence / 'release-manifest.json'
+        manifest = json.loads(manifest_path.read_bytes())
+        manifest['files'][path.name] = digest(path)
+        manifest_path.write_bytes(json.dumps(manifest).encode())
         (self.assets / 'SHA256SUMS').write_bytes(''.join(
             f'{digest(item)}  {item.name}\r\n' for item in sorted(self.assets.iterdir())
             if item.name != 'SHA256SUMS').encode())

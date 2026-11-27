@@ -6,11 +6,10 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
-import zipfile
 from pathlib import Path
 
 from validate_native import ROOT, TARGETS, digest
+from release_assets import inspect_package, public_assets, validation_directory
 
 SUITES = {'tests-' + profile + '-' + features
           for profile in ('debug', 'dist') for features in ('default', 'all-features', 'minimal')}
@@ -27,7 +26,7 @@ def release_kind(tag, version):
 
 def prepare(inputs, output, revision, tag, version, promoted_from=None, built_from=None):
     prerelease = release_kind(tag, version)
-    if output.exists():
+    if output.exists() or validation_directory(output).exists():
         raise ValueError('Choose a fresh release asset directory')
     records = {}
     for path in inputs.glob('*/validation.json'):
@@ -48,7 +47,7 @@ def prepare(inputs, output, revision, tag, version, promoted_from=None, built_fr
             raise ValueError('One standard SQLite-enabled package is required per target')
         records[target] = (path, record)
     if set(records) != set(TARGETS):
-        raise ValueError('All four native targets must pass before publication')
+        raise ValueError('All three native targets must pass before publication')
 
     # Validate every input before staging or contacting GitHub.
     packages = []
@@ -77,8 +76,16 @@ def prepare(inputs, output, revision, tag, version, promoted_from=None, built_fr
                                ('binary_sha256', package['binary_sha256'])]:
                 if evidence.get(key) != value:
                     raise ValueError('Extracted-package evidence differs from archive')
+            details = inspect_package(archive, version, target)
+            metadata_path = archive.with_name(archive.name + '.package.json')
+            metadata = json.loads(metadata_path.read_bytes())
+            if (metadata.get('format') != 2 or metadata.get('archive_sha256') != package['archive_sha256']
+                    or metadata.get('extensions') != ['sqlite']
+                    or any(metadata.get(key) != value for key, value in details.items())
+                    or details['binary_sha256'] != package['binary_sha256']):
+                raise ValueError('Native runtime package metadata differs from archive')
             name = expected
-            packages.append((archive, smoke, name, target, variant))
+            packages.append((archive, smoke, metadata_path, name, target, variant))
 
     output.mkdir(parents=True)
     manifest = {'tag': tag, 'source_revision': revision, 'version': version,
@@ -87,54 +94,52 @@ def prepare(inputs, output, revision, tag, version, promoted_from=None, built_fr
         manifest['promoted_from'] = promoted_from
     if built_from is not None:
         manifest['built_from'] = built_from
-    with tempfile.TemporaryDirectory(prefix='scripta-evidence-', dir=output.parent) as directory:
-        evidence = Path(directory)
-        for archive, smoke, name, target, variant in packages:
-            shutil.copyfile(archive, output / name)
-            checksum = digest(output / name)
-            (evidence / (name + '.sha256')).write_bytes(f'{checksum}  {name}\n'.encode('utf-8'))
-            shutil.copyfile(smoke, evidence / (name + '.validation.json'))
-            manifest['packages'].append({'asset': name, 'target': target, 'variant': variant,
-                                         'archive_sha256': checksum, 'extensions': ['sqlite']})
-        for target, (path, _) in sorted(records.items()):
-            shutil.copyfile(path, evidence / f'validation-{target}.json')
-            logs = evidence / 'logs' / target
-            logs.mkdir(parents=True)
-            for log in sorted((path.parent / 'logs').glob('*.log')):
-                shutil.copyfile(log, logs / log.name)
-        manifest['files'] = {p.name: digest(p) for p in sorted(output.iterdir())}
-        manifest['files'].update({p.relative_to(evidence).as_posix(): digest(p)
-                                  for p in sorted(evidence.rglob('*')) if p.is_file()})
-        (evidence / 'release-manifest.json').write_bytes((json.dumps(manifest, indent=2) + '\n').encode('utf-8'))
-        with zipfile.ZipFile(output / 'validation-evidence.zip', 'w', zipfile.ZIP_DEFLATED) as bundle:
-            for path in sorted(evidence.rglob('*')):
-                if path.is_file():
-                    bundle.write(path, path.relative_to(evidence).as_posix())
+    evidence = validation_directory(output)
+    evidence.mkdir()
+    for archive, smoke, metadata_path, name, target, variant in packages:
+        shutil.copyfile(archive, output / name)
+        checksum = digest(output / name)
+        (evidence / (name + '.sha256')).write_bytes(f'{checksum}  {name}\n'.encode('utf-8'))
+        shutil.copyfile(smoke, evidence / (name + '.validation.json'))
+        shutil.copyfile(metadata_path, evidence / (name + '.package.json'))
+        manifest['packages'].append({'asset': name, 'target': target, 'variant': variant,
+                                     'archive_sha256': checksum, 'extensions': ['sqlite']})
+    for target, (path, _) in sorted(records.items()):
+        shutil.copyfile(path, evidence / f'validation-{target}.json')
+        logs = evidence / 'logs' / target
+        logs.mkdir(parents=True)
+        for log in sorted((path.parent / 'logs').glob('*.log')):
+            shutil.copyfile(log, logs / log.name)
+    manifest['files'] = {p.name: digest(p) for p in sorted(output.iterdir())}
+    manifest['files'].update({p.relative_to(evidence).as_posix(): digest(p)
+                              for p in sorted(evidence.rglob('*')) if p.is_file()})
+    (evidence / 'release-manifest.json').write_bytes((json.dumps(manifest, indent=2) + '\n').encode('utf-8'))
     checksums = [f'{digest(path)}  {path.name}\n' for path in sorted(output.iterdir())]
     (output / 'SHA256SUMS').write_bytes(''.join(checksums).encode('utf-8'))
+    public_assets(output, version)
     notes = [f'Scripta {version}', '', f'Tag: `{tag}`', f'Source: `{revision}`', '',
-             'Native validation passed on Linux x86-64/ARM64, Windows x86-64, and macOS 15 Apple Silicon.',
+             'Native validation passed on Linux x86-64, Windows x86-64, and macOS 15 Apple Silicon.',
              'Default/all-feature debug/dist suites, minimal-build compatibility tests, Clippy, dependency inspection, archive verification,',
              'offline extracted-package smoke, and identical-input repacking passed.', '',
              'Download the single archive for your platform; SQLite is included by default.',
              'Archives contain `scripta` and legacy `scr` commands; no Rust installation is required.',
-             'SHA256SUMS verifies the four packages and validation-evidence.zip.',
-             'The evidence ZIP contains individual checksums, native/smoke records, logs, and release-manifest.json.',
+             'SHA256SUMS verifies the three platform packages.',
              'Candidates have no publisher signatures or macOS notarization.']
     if promoted_from is not None:
         notes += ['', 'Platform archives promoted byte-for-byte from `' + promoted_from['tag'] + '`.',
                   'Native validation: ' + promoted_from['run_url'],
-                  'Only release metadata, the evidence ZIP, and SHA256SUMS were regenerated.']
+                  'Only local release metadata and SHA256SUMS were regenerated.']
     if built_from is not None:
         notes += ['', 'Platform archives reused byte-for-byte from a saved native build.',
                   'Original build: ' + built_from['run_url'],
-                  'Only release metadata, the evidence ZIP, and SHA256SUMS were regenerated.']
+                  'Only local release metadata and SHA256SUMS were regenerated.']
     notes_path = output.parent / (output.name + '-notes.md')
     notes_path.write_bytes(('\n'.join(notes) + '\n').encode('utf-8'))
     return manifest, notes_path
 
 
 def publish(repository, manifest, output, notes, run=subprocess.run):
+    public_assets(output, manifest['version'])
     tag = manifest['tag']
     def gh(*arguments, check=True):
         return run(['gh', 'release', *arguments, '--repo', repository],

@@ -23,9 +23,6 @@ jobs:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             python: python3
-          - os: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
-            python: python3
           - os: macos-15
             target: aarch64-apple-darwin
             python: python3
@@ -82,18 +79,18 @@ jobs:
           path: dist/release-inputs
           merge-multiple: false
 
-      - name: Verify all four platforms and assemble downloads
+      - name: Verify all three platforms and assemble downloads
         run: >-
           python3 scripts/workflow_build.py prepare
           --inputs dist/release-inputs
-          --output dist/release-assets
+          --output dist/saved-build/assets
 
       - name: Save the validated build
         id: artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: scripta-build-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dist/release-assets/
+          path: dist/saved-build/
           if-no-files-found: error
           retention-days: 30
           compression-level: 0

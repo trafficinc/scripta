@@ -63,7 +63,7 @@ class Preparation:
         print(compiler, end='')
         host = re.search(r'^host: (\S+)$', compiler, re.M)
         if not host or host[1] not in TARGETS:
-            raise ValueError('Compiler host must be one of the four native release targets')
+            raise ValueError('Compiler host must be one of the three native release targets')
         target = host[1]
         if target.endswith('apple-darwin'):
             self.environment['MACOSX_DEPLOYMENT_TARGET'] = '15.0'

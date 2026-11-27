@@ -8,7 +8,7 @@ and choose the archive for your OS and architecture. Consult the
 for its tested environment.
 
 Download the platform archive, `SHA256SUMS`, and `validation-evidence.zip` from
-that same release. `SHA256SUMS` covers the four platform packages and the evidence
+that same release. `SHA256SUMS` covers the three platform packages and the evidence
 ZIP. Individual `.sha256` files, native/smoke records, logs, and the release
 manifest are bundled inside the ZIP; they are not separate release downloads.
 The commands below select the checksum entry for the archive being installed,
@@ -53,14 +53,13 @@ downloads or installs the app automatically. Use `scripta playground --no-open` 
 print the local URL without opening a browser. Delete the companion and remove
 any PATH/environment entry to uninstall it.
 
-## Linux x86-64 / ARM64
+## Linux x86-64
 
 Run these commands beside the downloaded archive and `SHA256SUMS`. Replace
 `REPLACE_WITH_RELEASE_VERSION` with the version in the archive filename:
 
 ```sh
 release_version=REPLACE_WITH_RELEASE_VERSION
-# For ARM64, use aarch64-unknown-linux-gnu.
 package="scripta-${release_version}-x86_64-unknown-linux-gnu"
 archive="$package.tar.gz"
 checksum_entry=$(awk -v archive="$archive" '
@@ -78,6 +77,20 @@ scripta run "$package/examples/hello.scripta"
 
 Add the PATH export to your shell startup file if needed. Check the glibc/platform
 baseline in the matrix. Do not use the GNU/Linux artifact on musl/Alpine.
+
+### Linux ARM64 from source
+
+There is no prebuilt ARM64 Linux package. On a native ARM64 Linux host, follow
+the [Linux source-build instructions](../README.md#linux), using the pinned Rust
+toolchain and a native C compiler:
+
+```sh
+cargo build -p scr-cli --release --locked --target aarch64-unknown-linux-gnu
+./target/aarch64-unknown-linux-gnu/release/scripta version --verbose
+```
+
+The default build includes SQLite. Source availability does not establish native
+validation on a particular ARM64 distribution.
 
 ## macOS Apple Silicon (M-series)
 

@@ -33,6 +33,7 @@ mod integer_loop;
 mod invocation;
 mod list;
 mod literal_read;
+mod literal_write;
 pub use list::List;
 mod map;
 pub use map::Map;
@@ -167,6 +168,10 @@ pub struct Runtime {
     disable_literal_reads: bool,
     #[cfg(test)]
     literal_reads_executed: usize,
+    #[cfg(test)]
+    disable_literal_writes: bool,
+    #[cfg(test)]
+    literal_writes_executed: usize,
     exception_classes:
         std::cell::RefCell<std::collections::HashMap<String, Rc<objects::ScriptClass>>>,
     stack: Vec<error::ActiveFrame>,
@@ -1822,6 +1827,14 @@ impl Runtime {
         retain: bool,
         output: &mut dyn ScriptOutput,
     ) -> Result<Value> {
+        if matches!(
+            target.kind,
+            ExprKind::IndexAccess(..) | ExprKind::Grouped(_)
+        ) {
+            if let Some(result) = self.literal_index_assignment(target, op, rhs, retain, output) {
+                return result;
+            }
+        }
         if let ExprKind::List(items) = &target.kind {
             return self.destructure(items, op, rhs, retain, target.span, output);
         }

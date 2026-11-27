@@ -125,9 +125,12 @@ existing triggers unchanged. Validate natively on these baselines when available
 | Native host | Rust target |
 | --- | --- |
 | Ubuntu 22.04 x86-64 | `x86_64-unknown-linux-gnu` |
-| Ubuntu 22.04 ARM64 | `aarch64-unknown-linux-gnu` |
 | macOS 15 ARM64 | `aarch64-apple-darwin` |
 | Windows Server 2022 x86-64 | `x86_64-pc-windows-msvc` |
+
+Linux ARM64 (`aarch64-unknown-linux-gnu`) is source-only: retain native source
+builds and local test launchers, but do not require ARM64 jobs for release or
+publish ARM64 packages.
 
 macOS support is Apple Silicon only: do not add Intel targets or require Intel
 validation. Each native audit requires the validation checks above, dist-profile
@@ -135,9 +138,9 @@ tests, dependency inspection, archive verification and extracted-package smoke.
 Debug tests/lints alone do not establish release support. Update
 `docs/compatibility.md` only with the required native evidence.
 
-Build all four platforms and publish downloads only after every native test/package
-job succeeds and publication is explicitly requested. Upload exactly six assets:
-four platform packages, all including SQLite; `SHA256SUMS`; and
+Build all three release platforms and publish downloads only after every native
+test/package job succeeds and publication is explicitly requested. Upload exactly five assets:
+three platform packages, all including SQLite; `SHA256SUMS`; and
 `validation-evidence.zip`. Bundle individual checksums, native/smoke records, logs
 and the release manifest inside the evidence ZIP, not as separate assets. Minimal
 `--no-default-features` builds remain source-only.
