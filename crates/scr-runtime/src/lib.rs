@@ -43,6 +43,8 @@ mod map_builder;
 #[cfg(test)]
 mod map_builder_tests;
 mod map_index;
+#[cfg(test)]
+mod method_branch_tests;
 mod method_cache;
 #[cfg(test)]
 mod method_cache_tests;
@@ -156,6 +158,10 @@ pub struct Runtime {
     disable_method_local_plans: bool,
     #[cfg(test)]
     method_local_plans_executed: usize,
+    #[cfg(test)]
+    disable_method_branch_plans: bool,
+    #[cfg(test)]
+    method_branch_plans_executed: usize,
     #[cfg(test)]
     disable_comprehension_plans: bool,
     #[cfg(test)]

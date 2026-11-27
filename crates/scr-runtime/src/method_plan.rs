@@ -1,4 +1,4 @@
-//! Bounded straight-line scalar methods; unsupported entry states do no work.
+//! Bounded scalar methods; unsupported entry states do no work.
 use crate::{
     AssignmentOp, BinaryOp, Expr, ExprKind, Result, Runtime, StatementKind, Value,
     compact_call::Expression,
@@ -17,6 +17,28 @@ const CACHED_LAYOUT_FIELDS: usize = 64;
 const STATEMENTS: usize = 16;
 const NODES: usize = 256;
 const DEPTH: usize = 16;
+
+#[path = "method_plan_compiler.rs"]
+mod compiler;
+
+enum Flow {
+    Action(usize),
+    Tick(Span),
+    Test {
+        value: Expression,
+        span: Span,
+        next: usize,
+    },
+    Jump(usize),
+    Enter(Span),
+    Leave,
+}
+
+struct MethodFields<'a> {
+    object: &'a Rc<dyn crate::NativeObject>,
+    instance: &'a ScriptObject,
+    single_field: bool,
+}
 
 enum Step {
     Assign {
@@ -44,6 +66,7 @@ pub(crate) struct Plan {
     // input region. Fields retain a fixed offset after all of these bindings.
     locals: Box<[String]>,
     steps: Box<[Step]>,
+    flow: Option<Box<[Flow]>>,
     positions: RefCell<Option<FieldPositions>>,
 }
 
@@ -99,117 +122,7 @@ fn inspect(
 
 impl Plan {
     fn compile(declaration: &UserDeclaration) -> Option<Box<Self>> {
-        if declaration.parameters.len() > PARAMETERS
-            || declaration.body.statements.len() > STATEMENTS
-            || declaration
-                .parameters
-                .iter()
-                .any(|p| p.default.is_some() || p.variadic)
-        {
-            return None;
-        }
-        let mut fields = Vec::new();
-        let mut locals = Vec::new();
-        let mut names: Vec<_> = declaration
-            .parameters
-            .iter()
-            .map(|p| p.binding.name.as_str())
-            .collect();
-        let mut nodes = 0;
-        for statement in &declaration.body.statements {
-            match &statement.kind {
-                StatementKind::Expression(Expr {
-                    kind: ExprKind::Assignment(target, op, value),
-                    ..
-                }) if *op != AssignmentOp::Concat => {
-                    if let ExprKind::Variable(name) = &target.kind {
-                        if name == "this"
-                            || declaration
-                                .parameters
-                                .iter()
-                                .any(|p| p.binding.name == *name)
-                        {
-                            return None;
-                        }
-                        let initialized = names.contains(&name.as_str());
-                        if !initialized
-                            && (*op != AssignmentOp::Assign || names.len() == PARAMETERS)
-                        {
-                            return None;
-                        }
-                        // Inspect before adding a new name: even short-circuited
-                        // reads before initialization conservatively fall back.
-                        inspect(value, &mut fields, &mut nodes, 0, &names)?;
-                        if !initialized {
-                            names.push(name);
-                            locals.push(name.clone());
-                        }
-                    } else {
-                        field(target, &mut fields)?;
-                        inspect(value, &mut fields, &mut nodes, 0, &names)?;
-                    }
-                }
-                StatementKind::Return(value) => {
-                    if let Some(value) = value {
-                        inspect(value, &mut fields, &mut nodes, 0, &names)?;
-                    }
-                }
-                _ => return None,
-            }
-        }
-        let field_names: Vec<_> = fields.iter().map(String::as_str).collect();
-        let compile = |value| Expression::compile_inputs(value, &names, &field_names);
-        let mut steps = Vec::new();
-        let mut instructions = 0;
-        for statement in &declaration.body.statements {
-            steps.push(match &statement.kind {
-                StatementKind::Expression(Expr {
-                    kind: ExprKind::Assignment(target, op, value),
-                    ..
-                }) => {
-                    let value = compile(value)?;
-                    instructions += value.instruction_count();
-                    match &target.kind {
-                        ExprKind::Variable(name) => Step::Local {
-                            slot: names.iter().position(|binding| *binding == name)?,
-                            op: *op,
-                            value,
-                            span: statement.span,
-                            target: target.span,
-                        },
-                        ExprKind::PropertyAccess(_, name) => Step::Assign {
-                            field: fields.iter().position(|field| field == name)?,
-                            op: *op,
-                            value,
-                            span: statement.span,
-                            target: target.span,
-                        },
-                        _ => unreachable!("validated scalar assignment"),
-                    }
-                }
-                StatementKind::Return(value) => {
-                    let value = match value {
-                        Some(value) => Some(compile(value)?),
-                        None => None,
-                    };
-                    instructions += value.as_ref().map_or(0, Expression::instruction_count);
-                    Step::Return {
-                        value,
-                        span: statement.span,
-                    }
-                }
-                _ => unreachable!("validated straight-line body"),
-            });
-            if instructions > NODES {
-                return None;
-            }
-        }
-        Some(Box::new(Self {
-            fields: fields.into(),
-            locals: locals.into(),
-            steps: steps.into(),
-            positions: RefCell::new(None),
-        }))
+        compiler::compile(declaration)
     }
 
     fn field_positions(&self, class: &Rc<ScriptClass>) -> Option<[usize; FIELDS]> {
@@ -294,7 +207,7 @@ impl Runtime {
         let proof = Plan::compile(declaration)?;
         // Local bodies are optimized independently first. Do not silently widen
         // caller-loop admission or its capture/ownership proof in this change.
-        if !proof.locals.is_empty() {
+        if !proof.locals.is_empty() || proof.flow.is_some() {
             return None;
         }
         for name in &proof.fields {
@@ -373,6 +286,10 @@ impl Runtime {
         {
             return None;
         }
+        #[cfg(test)]
+        if self.disable_method_branch_plans && plan.flow.is_some() {
+            return None;
+        }
         let bindings = arguments.len() + plan.locals.len();
         let single_field = instance.class.declaration.fields.len() == 1;
         // Short layout walks are cheaper than maintaining a class hint.
@@ -421,6 +338,7 @@ impl Runtime {
         {
             self.method_plans_executed += 1;
             self.method_local_plans_executed += usize::from(!plan.locals.is_empty());
+            self.method_branch_plans_executed += usize::from(plan.flow.is_some());
         }
         Some((|| {
             for (parameter, value) in declaration.parameters.iter().zip(arguments) {
@@ -429,81 +347,19 @@ impl Runtime {
             let previous =
                 self.enter_empty_scope(self.environments.current, declaration.body.span)?;
             let result = (|| {
+                let fields = MethodFields {
+                    object,
+                    instance,
+                    single_field,
+                };
+                if let Some(flow) = &plan.flow {
+                    return self.method_flow(plan, flow, &fields, &mut inputs, bindings);
+                }
                 for step in &plan.steps {
-                    match step {
-                        Step::Assign {
-                            field,
-                            op,
-                            value,
-                            span,
-                            target,
-                        } => {
-                            self.checkpoint(*span)?;
-                            let old = &inputs[bindings + field];
-                            let mut value = value.evaluate_inputs(self, &inputs)?;
-                            if *op != AssignmentOp::Assign {
-                                let binary = match op {
-                                    AssignmentOp::Add => BinaryOp::Add,
-                                    AssignmentOp::Subtract => BinaryOp::Subtract,
-                                    AssignmentOp::Multiply => BinaryOp::Multiply,
-                                    AssignmentOp::Divide => BinaryOp::Divide,
-                                    _ => unreachable!("scalar compound assignment"),
-                                };
-                                value = self.operation(
-                                    crate::ops::binary(binary, old.clone(), value),
-                                    *target,
-                                )?;
-                            }
-                            let fixed_scalar = single_field && Expression::scalar(&value);
-                            #[cfg(test)]
-                            let fixed_scalar = fixed_scalar && !self.force_field_snapshot;
-                            if fixed_scalar {
-                                self.set_scalar_method_field(instance, value.clone(), *target)?;
-                            } else {
-                                self.set_object_field(
-                                    object,
-                                    &plan.fields[*field],
-                                    value.clone(),
-                                    *target,
-                                )?;
-                            }
-                            inputs[bindings + field] = value;
-                        }
-                        Step::Local {
-                            slot,
-                            op,
-                            value,
-                            span,
-                            target,
-                        } => {
-                            self.checkpoint(*span)?;
-                            let old = &inputs[*slot];
-                            let mut value = value.evaluate_inputs(self, &inputs)?;
-                            if *op != AssignmentOp::Assign {
-                                let binary = match op {
-                                    AssignmentOp::Add => BinaryOp::Add,
-                                    AssignmentOp::Subtract => BinaryOp::Subtract,
-                                    AssignmentOp::Multiply => BinaryOp::Multiply,
-                                    AssignmentOp::Divide => BinaryOp::Divide,
-                                    _ => unreachable!("scalar local compound assignment"),
-                                };
-                                value = self.operation(
-                                    crate::ops::binary(binary, old.clone(), value),
-                                    *target,
-                                )?;
-                            }
-                            // Read-only scalar expressions cannot produce handles;
-                            // no byte quota, capture or callback can observe these
-                            // fresh bindings before the ordinary scope exit.
-                            inputs[*slot] = value;
-                        }
-                        Step::Return { value, span } => {
-                            self.checkpoint(*span)?;
-                            return match value {
-                                Some(value) => value.evaluate_inputs(self, &inputs),
-                                None => Ok(Value::Null),
-                            };
-                        }
+                    if let Some(value) =
+                        self.method_step(step, plan, &fields, &mut inputs, bindings)?
+                    {
+                        return Ok(value);
                     }
                 }
                 Ok(Value::Null)
@@ -518,6 +374,139 @@ impl Runtime {
             )?;
             Ok(value)
         })())
+    }
+
+    #[inline(always)]
+    fn method_step(
+        &mut self,
+        step: &Step,
+        plan: &Plan,
+        fields: &MethodFields<'_>,
+        inputs: &mut [Value],
+        bindings: usize,
+    ) -> Result<Option<Value>> {
+        let object = fields.object;
+        let instance = fields.instance;
+        let single_field = fields.single_field;
+        match step {
+            Step::Assign {
+                field,
+                op,
+                value,
+                span,
+                target,
+            } => {
+                self.checkpoint(*span)?;
+                let old = &inputs[bindings + field];
+                let mut value = value.evaluate_inputs(self, inputs)?;
+                if *op != AssignmentOp::Assign {
+                    let binary = match op {
+                        AssignmentOp::Add => BinaryOp::Add,
+                        AssignmentOp::Subtract => BinaryOp::Subtract,
+                        AssignmentOp::Multiply => BinaryOp::Multiply,
+                        AssignmentOp::Divide => BinaryOp::Divide,
+                        _ => unreachable!("scalar compound assignment"),
+                    };
+                    value =
+                        self.operation(crate::ops::binary(binary, old.clone(), value), *target)?;
+                }
+                let fixed_scalar = single_field && Expression::scalar(&value);
+                #[cfg(test)]
+                let fixed_scalar = fixed_scalar && !self.force_field_snapshot;
+                if fixed_scalar {
+                    self.set_scalar_method_field(instance, value.clone(), *target)?;
+                } else {
+                    self.set_object_field(object, &plan.fields[*field], value.clone(), *target)?;
+                }
+                inputs[bindings + field] = value;
+            }
+            Step::Local {
+                slot,
+                op,
+                value,
+                span,
+                target,
+            } => {
+                self.checkpoint(*span)?;
+                let old = &inputs[*slot];
+                let mut value = value.evaluate_inputs(self, inputs)?;
+                if *op != AssignmentOp::Assign {
+                    let binary = match op {
+                        AssignmentOp::Add => BinaryOp::Add,
+                        AssignmentOp::Subtract => BinaryOp::Subtract,
+                        AssignmentOp::Multiply => BinaryOp::Multiply,
+                        AssignmentOp::Divide => BinaryOp::Divide,
+                        _ => unreachable!("scalar local compound assignment"),
+                    };
+                    value =
+                        self.operation(crate::ops::binary(binary, old.clone(), value), *target)?;
+                }
+                // Read-only scalar expressions cannot produce handles;
+                // no byte quota, capture or callback can observe these
+                // fresh bindings before the ordinary scope exit.
+                inputs[*slot] = value;
+            }
+            Step::Return { value, span } => {
+                self.checkpoint(*span)?;
+                return match value {
+                    Some(value) => value.evaluate_inputs(self, inputs),
+                    None => Ok(Value::Null),
+                }
+                .map(Some);
+            }
+        }
+        Ok(None)
+    }
+
+    fn method_flow(
+        &mut self,
+        plan: &Plan,
+        flow: &[Flow],
+        fields: &MethodFields<'_>,
+        inputs: &mut [Value],
+        bindings: usize,
+    ) -> Result<Value> {
+        let mut scopes = [0; DEPTH];
+        let mut depth = 0;
+        let result = (|| {
+            let mut ip = 0;
+            while let Some(instruction) = flow.get(ip) {
+                ip += 1;
+                match instruction {
+                    Flow::Action(index) => {
+                        if let Some(value) =
+                            self.method_step(&plan.steps[*index], plan, fields, inputs, bindings)?
+                        {
+                            return Ok(value);
+                        }
+                    }
+                    Flow::Tick(span) => self.checkpoint(*span)?,
+                    Flow::Test { value, span, next } => {
+                        let value = value.evaluate_inputs(self, inputs)?;
+                        if !self.operation(crate::ops::boolean(value), *span)? {
+                            ip = *next;
+                        }
+                    }
+                    Flow::Jump(next) => ip = *next,
+                    Flow::Enter(span) => {
+                        scopes[depth] = self.enter_empty_scope(self.environments.current, *span)?;
+                        depth += 1;
+                    }
+                    Flow::Leave => {
+                        depth -= 1;
+                        self.environments.leave_empty(scopes[depth]);
+                    }
+                }
+            }
+            Ok(Value::Null)
+        })();
+        // Returns, cancellation and every failure must unwind all selected
+        // branch blocks before the ordinary body/parameter scopes and annotation.
+        while depth > 0 {
+            depth -= 1;
+            self.environments.leave_empty(scopes[depth]);
+        }
+        result
     }
 
     // Entry guards prove a runtime-owned, non-exception, snapshot-free object

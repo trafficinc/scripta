@@ -178,7 +178,6 @@ fn unsupported_local_reads_writes_and_effects_keep_general_evaluation() {
         "class C{$x=0;function f():int{$a+=1;return $a;}}$c=new C();$c->f();",
         "class C{$x=0;function f($v:int):int{$v+=1;return $v;}}$c=new C();$c->f(1);",
         "class C{$x=0;function f():int{$this=1;return 1;}}$c=new C();$c->f();",
-        "class C{$x=0;function f():int{$a=1;if($a===1){return $a;}return 0;}}$c=new C();$c->f();",
         "function helper():int{return 1;}class C{$x=0;function f():int{$a=helper();return $a;}}$c=new C();$c->f();",
         "class C{$x=0;function f():string{$a='text';return $a;}}$c=new C();$c->f();",
         "class C{$x=0;function f():int{$a=[];return 1;}}$c=new C();$c->f();",
