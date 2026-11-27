@@ -247,6 +247,14 @@ pub struct Runtime {
     disable_numeric_call_loops: bool,
     #[cfg(test)]
     numeric_call_loops_executed: usize,
+    #[cfg(test)]
+    disable_method_call_loops: bool,
+    #[cfg(test)]
+    method_call_loops_executed: usize,
+    #[cfg(test)]
+    disable_prepared_method_calls: bool,
+    #[cfg(test)]
+    prepared_method_calls_executed: usize,
     class_resolution_depth: usize,
     #[cfg(test)]
     disable_copy_validation: bool,

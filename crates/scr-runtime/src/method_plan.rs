@@ -192,6 +192,82 @@ impl Plan {
 }
 
 impl Runtime {
+    // Speculative syntax/state proof only: do not warm plans, resolve methods
+    // through host hooks, or retain receivers while planning a caller loop.
+    pub(super) fn integer_loop_method_scope(
+        &self,
+        base: &Expr,
+        name: &str,
+        arguments: usize,
+    ) -> Option<usize> {
+        let ExprKind::Variable(binding) = &crate::literal_read::ungroup(base).kind else {
+            return None;
+        };
+        if binding == "this" {
+            return None;
+        }
+        let (_, Value::NativeObject(object)) = self.environments.lookup(binding, false)? else {
+            return None;
+        };
+        if !self.environments.recent_script_object(object) {
+            return None;
+        }
+        let instance = object.as_any()?.downcast_ref::<ScriptObject>()?;
+        let class = &instance.class;
+        if !Rc::ptr_eq(&class.owner, &self.identity)
+            || !class.parent.get().is_some_and(Option::is_none)
+            || instance.exception.borrow().is_some()
+            || instance.requires_snapshot.get()
+            || class
+                .declaration
+                .fields
+                .iter()
+                .any(|field| field.binding.name == name)
+        {
+            return None;
+        }
+        let declaration = class
+            .declaration
+            .methods
+            .iter()
+            .find(|method| method.name == name)?;
+        let primitive = |annotation: &Option<crate::TypeAnnotation>| {
+            annotation
+                .as_ref()
+                .is_none_or(|ty| matches!(ty.name.as_str(), "int" | "bool"))
+        };
+        if declaration.parameters.len() != arguments
+            || declaration.return_type.as_ref()?.name != "int"
+            || declaration.parameters.iter().any(|parameter| {
+                parameter.binding.name == "this" || !primitive(&parameter.annotation)
+            })
+        {
+            return None;
+        }
+        // Successful returns must be real ints. The scalar body proof excludes
+        // callbacks, free-variable access, declarations and caller writes.
+        let proof = Plan::compile(declaration)?;
+        for name in &proof.fields {
+            let (slot, field) = class
+                .declaration
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, field)| field.binding.name == *name)?;
+            if !primitive(&field.annotation)
+                || !self
+                    .environments
+                    .scope(instance.scope)
+                    .variables
+                    .get_slot(slot, name)
+                    .is_some_and(Expression::scalar)
+            {
+                return None;
+            }
+        }
+        Some(instance.scope)
+    }
+
     pub(super) fn method_call(
         &mut self,
         declaration: &UserDeclaration,

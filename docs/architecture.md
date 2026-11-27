@@ -36,12 +36,7 @@ Native callbacks share the active output, call stack and execution budgets.
 Reentrant callbacks invoke scripts through InvocationContext, preserving exceptions
 and control flow. Native resources use Rust ownership and explicit cleanup.
 
-## Execution hot paths and limits
 
-Specialized evaluation paths preserve ordinary type, error and limit semantics.
-Source/value sizes, scope counts, recursion, output and execution checkpoints are
-bounded by runtime/host settings. Logical value limits are not a process heap cap;
-blocking native work needs cooperative cancellation and backend deadlines.
 
 Tracing reclaims unreachable captured scopes and script-object cycles. Active
 calls, cached modules and host-retained values remain roots. Opaque native
@@ -65,19 +60,3 @@ Module policies compose filesystem, package and development-watch restrictions.
 Workers cache parsed entry scripts and create a fresh runtime per request.
 The supervisor manages admission, deadlines, workers and request files; web APIs
 register through the standard library. See [web hosting](web-servers.md).
-
-Single literal-index assignments rooted in a variable may borrow their key from
-syntax instead of allocating an owned path. Root resolution and compound-value
-snapshots precede RHS evaluation; the write rechecks the current binding and map
-hint afterward. Replacement validation, retained results and handle owners keep
-the ordinary ordering. Byte-budgeted and unsupported targets use general places.
-
-Compiled scalar literal and input-read expressions return directly without
-initializing an operand stack. Scalar guards and surrounding method/function
-validation, checkpoints, scopes and field writes retain their ordinary ordering.
-
-Scalar method plans may cache up to eight verified field positions for one weak
-class identity on large layouts (at least 64 fields). Smaller layouts retain
-ordinary name resolution. Initialized single-scalar-field writes reuse the
-method entry guards, preserving field annotations and the pre-write checkpoint;
-byte quotas, snapshots and unsupported receivers keep ordinary assignment.

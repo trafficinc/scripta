@@ -1,4 +1,4 @@
-//! Integer caller slots around proven leaf calls; normal call semantics remain.
+//! Integer caller slots around proven leaf functions/methods; calls stay normal.
 use crate::{Callable, Function, Result, Runtime, Value, numeric_call::Plan, ops};
 use scr_ast::{AssignmentOp, BinaryOp, Expr, ExprKind, Literal, Statement, StatementKind, UnaryOp};
 use scr_diagnostics::Span;
@@ -11,17 +11,46 @@ struct Slot<'a> {
     value: i64,
     dirty: bool,
 }
-enum Integer {
+impl Slot<'_> {
+    fn publish(&mut self, runtime: &mut Runtime) {
+        if self.dirty {
+            runtime
+                .map_indexes
+                .get_mut()
+                .invalidate(self.scope, self.name);
+            *runtime
+                .environments
+                .scope_mut(self.scope)
+                .variables
+                .get_mut(self.name)
+                .expect("active caller binding") = Value::Int(self.value);
+            self.dirty = false;
+        }
+    }
+}
+
+struct Method<'a> {
+    prepared: Option<crate::objects::PreparedLoopMethod<'a>>,
+    base: &'a Expr,
+    name: &'a str,
+    arguments: &'a [Expr],
+    argument_slots: Box<[usize]>,
+    property_span: Span,
+    call_span: Span,
+}
+
+enum Integer<'a> {
     Literal(i64),
     Slot(usize),
-    Unary(UnaryOp, Box<Integer>, Span),
-    Binary(Box<Integer>, BinaryOp, Box<Integer>, Span),
-    Call(Callable, Vec<Integer>, Span),
+    Unary(UnaryOp, Box<Integer<'a>>, Span),
+    Binary(Box<Integer<'a>>, BinaryOp, Box<Integer<'a>>, Span),
+    Call(Callable, Vec<Integer<'a>>, Span),
+    Method(Box<Method<'a>>),
 }
-struct Assignment {
+struct Assignment<'a> {
     slot: usize,
     op: AssignmentOp,
-    rhs: Integer,
+    rhs: Integer<'a>,
     span: Span,
     checkpoint: Span,
 }
@@ -30,6 +59,7 @@ struct Builder<'a, 'r> {
     slots: Vec<Slot<'a>>,
     nodes: usize,
     calls: usize,
+    method_scopes: Vec<usize>,
 }
 impl<'a> Builder<'a, '_> {
     fn slot(&mut self, name: &'a str) -> Option<usize> {
@@ -53,7 +83,41 @@ impl<'a> Builder<'a, '_> {
         });
         Some(self.slots.len() - 1)
     }
-    fn integer(&mut self, expr: &'a Expr, depth: usize, allow_calls: bool) -> Option<Integer> {
+    fn argument(&mut self, expr: &'a Expr, depth: usize, slots: &mut Vec<usize>) -> Option<()> {
+        self.nodes += 1;
+        if self.nodes > 128 || depth > 32 {
+            return None;
+        }
+        match &expr.kind {
+            ExprKind::Literal(Literal::Int(_)) => {}
+            ExprKind::Variable(name) => {
+                let slot = self.slot(name)?;
+                if !slots.contains(&slot) {
+                    slots.push(slot);
+                }
+            }
+            ExprKind::Grouped(inner)
+            | ExprKind::Unary(UnaryOp::Positive | UnaryOp::Negative, inner) => {
+                self.argument(inner, depth + 1, slots)?;
+            }
+            ExprKind::Binary(
+                left,
+                BinaryOp::Add
+                | BinaryOp::Subtract
+                | BinaryOp::Multiply
+                | BinaryOp::Divide
+                | BinaryOp::Remainder,
+                right,
+            ) => {
+                self.argument(left, depth + 1, slots)?;
+                self.argument(right, depth + 1, slots)?;
+            }
+            _ => return None,
+        }
+        Some(())
+    }
+
+    fn integer(&mut self, expr: &'a Expr, depth: usize, allow_calls: bool) -> Option<Integer<'a>> {
         self.nodes += 1;
         if self.nodes > 128 || depth > 32 {
             return None;
@@ -84,6 +148,30 @@ impl<'a> Builder<'a, '_> {
             ExprKind::Call(callee, args) if allow_calls => {
                 if args.len() > 8 || self.calls == 8 {
                     return None;
+                }
+                if let ExprKind::PropertyAccess(base, name) = &callee.kind {
+                    #[cfg(test)]
+                    if self.runtime.disable_method_call_loops {
+                        return None;
+                    }
+                    let scope = self
+                        .runtime
+                        .integer_loop_method_scope(base, name, args.len())?;
+                    let mut argument_slots = Vec::new();
+                    for arg in args {
+                        self.argument(arg, depth + 1, &mut argument_slots)?;
+                    }
+                    self.calls += 1;
+                    self.method_scopes.push(scope);
+                    return Some(Integer::Method(Box::new(Method {
+                        prepared: self.runtime.prepare_loop_method(base, name),
+                        base,
+                        name,
+                        arguments: args,
+                        argument_slots: argument_slots.into(),
+                        property_span: callee.span,
+                        call_span: expr.span,
+                    })));
                 }
                 let ExprKind::Identifier(name) = &callee.kind else {
                     return None;
@@ -122,7 +210,7 @@ impl<'a> Builder<'a, '_> {
             _ => return None,
         })
     }
-    fn assignment(&mut self, expr: &'a Expr, checkpoint: Span) -> Option<Assignment> {
+    fn assignment(&mut self, expr: &'a Expr, checkpoint: Span) -> Option<Assignment<'a>> {
         let ExprKind::Assignment(target, op, rhs) = &expr.kind else {
             return None;
         };
@@ -141,10 +229,54 @@ impl<'a> Builder<'a, '_> {
         })
     }
 }
-impl Integer {
+impl Method<'_> {
+    #[inline(never)]
     fn evaluate(
         &self,
-        slots: &[Slot<'_>],
+        slots: &mut [Slot<'_>],
+        runtime: &mut Runtime,
+        output: &mut dyn crate::ScriptOutput,
+    ) -> Result<i64> {
+        // Arguments retain ordinary receiver resolution/evaluation order. Only
+        // completed integer writes read by those pure arguments need publishing.
+        for &index in &self.argument_slots {
+            slots[index].publish(runtime);
+        }
+        // No receiver/callable owners live in the loop plan. Normal invocation
+        // retains the exact per-call roots, scopes, annotations and field writes.
+        let prepared = self.prepared.as_ref().and_then(|prepared| {
+            runtime.call_prepared_loop_method(
+                prepared,
+                self.name,
+                self.arguments,
+                self.property_span,
+                self.call_span,
+                output,
+            )
+        });
+        let value = if let Some(result) = prepared {
+            result
+        } else {
+            runtime.call_property(
+                self.base,
+                self.name,
+                self.arguments,
+                self.property_span,
+                self.call_span,
+                output,
+            )
+        }?;
+        let Value::Int(value) = value else {
+            unreachable!("scalar method with canonical int return annotation")
+        };
+        Ok(value)
+    }
+}
+
+impl Integer<'_> {
+    fn evaluate(
+        &self,
+        slots: &mut [Slot<'_>],
         runtime: &mut Runtime,
         output: &mut dyn crate::ScriptOutput,
     ) -> Result<i64> {
@@ -188,10 +320,11 @@ impl Integer {
                 };
                 Ok(value)
             }
+            Self::Method(method) => method.evaluate(slots, runtime, output),
         }
     }
 }
-impl Assignment {
+impl Assignment<'_> {
     fn execute(
         &self,
         slots: &mut [Slot<'_>],
@@ -281,6 +414,7 @@ impl Runtime {
             slots: Vec::new(),
             nodes: 0,
             calls: 0,
+            method_scopes: Vec::new(),
         };
         let counter_slot = builder.slot(counter)?;
         let bound_slot = if let ExprKind::Variable(name) = &right.kind {
@@ -305,16 +439,29 @@ impl Runtime {
             return None;
         }
         let increment = builder.assignment(increment, increment.span)?;
+        // Keep the existing function-loop ownership policy separate. Method
+        // plans contain no strong receiver/callable owners between checkpoints.
+        let methods = builder.method_scopes.len();
+        if methods > 0
+            && (methods != builder.calls
+                || builder
+                    .slots
+                    .iter()
+                    .any(|slot| builder.method_scopes.contains(&slot.scope)))
+        {
+            return None;
+        }
         let mut slots = builder.slots;
         #[cfg(test)]
         {
             self.numeric_call_loops_executed += 1;
+            self.method_call_loops_executed += usize::from(methods > 0);
         }
         let result = (|| {
             loop {
                 self.checkpoint(span)?;
-                let a = left.evaluate(&slots, self, output)?;
-                let b = right.evaluate(&slots, self, output)?;
+                let a = left.evaluate(&mut slots, self, output)?;
+                let b = right.evaluate(&mut slots, self, output)?;
                 if a >= b {
                     break;
                 }
@@ -335,17 +482,13 @@ impl Runtime {
         })();
         // Calls cannot read or mutate caller bindings. Publish all completed
         // writes before propagating a callee failure, limit or cancellation.
-        for slot in slots.into_iter().filter(|s| s.dirty) {
-            self.map_indexes.get_mut().invalidate(slot.scope, slot.name);
-            *self
-                .environments
-                .scope_mut(slot.scope)
-                .variables
-                .get_mut(slot.name)
-                .expect("active caller binding") = Value::Int(slot.value);
+        for slot in &mut slots {
+            slot.publish(self);
         }
         Some(result)
     }
 }
+#[cfg(test)]
+mod method_tests;
 #[cfg(test)]
 mod tests;

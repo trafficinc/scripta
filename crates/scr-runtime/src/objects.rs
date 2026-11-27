@@ -147,6 +147,18 @@ enum FieldValues<'a> {
     Live(usize),
 }
 
+// Borrowed names and a weak private class identity retain no receiver owners.
+// Only the bounded scalar-loop proof may construct this metadata.
+pub(super) struct PreparedLoopMethod<'a> {
+    binding: &'a str,
+    scope: usize,
+    slot: usize,
+    class: std::rc::Weak<ScriptClass>,
+    field_scope: usize,
+    method: usize,
+    warm: Cell<bool>,
+}
+
 enum ResolvedProperty {
     Method(Function),
     Value(Value),
@@ -654,6 +666,98 @@ impl Runtime {
         }))
     }
 
+    pub(super) fn prepare_loop_method<'a>(
+        &self,
+        base: &'a Expr,
+        name: &str,
+    ) -> Option<PreparedLoopMethod<'a>> {
+        #[cfg(test)]
+        if self.disable_prepared_method_calls {
+            return None;
+        }
+        let ExprKind::Variable(binding) = &crate::literal_read::ungroup(base).kind else {
+            return None;
+        };
+        let (scope, slot, Value::NativeObject(object)) =
+            self.environments.resolve_variable(binding)?
+        else {
+            return None;
+        };
+        if !self.environments.recent_script_object(object) {
+            return None;
+        }
+        let instance = object.as_any()?.downcast_ref::<ScriptObject>()?;
+        Some(PreparedLoopMethod {
+            binding,
+            scope,
+            slot,
+            class: Rc::downgrade(&instance.class),
+            field_scope: instance.scope,
+            method: instance
+                .class
+                .declaration
+                .methods
+                .iter()
+                .position(|m| m.name == name)?,
+            warm: Cell::new(false),
+        })
+    }
+
+    pub(super) fn call_prepared_loop_method(
+        &mut self,
+        prepared: &PreparedLoopMethod<'_>,
+        name: &str,
+        arguments: &[Expr],
+        property_span: Span,
+        call_span: Span,
+        output: &mut dyn ScriptOutput,
+    ) -> Option<Result<Value>> {
+        // Preserve ordinary first-call cache admission. Failed guards have no
+        // effects, so the caller can still resolve the original property.
+        if !prepared.warm.replace(true) {
+            return None;
+        }
+        let Value::NativeObject(object) = self
+            .environments
+            .scope(prepared.scope)
+            .variables
+            .get_slot(prepared.slot, prepared.binding)?
+        else {
+            return None;
+        };
+        // A native proxy must not observe an additional speculative downcast.
+        if !self.environments.recent_script_object(object) {
+            return None;
+        }
+        let instance = object.as_any()?.downcast_ref::<ScriptObject>()?;
+        let class = &instance.class;
+        if !std::ptr::eq(prepared.class.as_ptr(), class.as_ref())
+            || instance.scope != prepared.field_scope
+            || !Rc::ptr_eq(&class.owner, &self.identity)
+        {
+            return None;
+        }
+        let declaration = class.declaration.methods.get(prepared.method)?;
+        if declaration.name != name {
+            return None;
+        }
+        // Match both ordinary per-call receiver owners: the evaluated base and
+        // the Function receiver. Neither survives this call/its checkpoints.
+        let object = object.clone();
+        let function = Function::User {
+            declaration: declaration.clone(),
+            environment: class.environment,
+            owner: self.identity.clone(),
+            source: class.source.clone(),
+            receiver: Some(Value::NativeObject(object.clone())),
+        };
+        #[cfg(test)]
+        {
+            self.prepared_method_calls_executed += 1;
+        }
+        Some(self.call_resolved_property(&function, arguments, property_span, call_span, output))
+    }
+
     pub(super) fn call_property(
         &mut self,
         base: &Expr,
@@ -673,6 +777,17 @@ impl Runtime {
                 return self.call(callee, arguments, call_span, output);
             }
         };
+        self.call_resolved_property(&function, arguments, property_span, call_span, output)
+    }
+
+    fn call_resolved_property(
+        &mut self,
+        function: &Function,
+        arguments: &[Expr],
+        property_span: Span,
+        call_span: Span,
+        output: &mut dyn ScriptOutput,
+    ) -> Result<Value> {
         // Like a bound callable, a direct method accounts for one Value slot
         // before argument evaluation, without allocating a callable identity.
         if self
@@ -682,7 +797,7 @@ impl Runtime {
         {
             return self.fail("execution value byte limit exceeded", property_span);
         }
-        let Function::User { environment, .. } = &function else {
+        let Function::User { environment, .. } = function else {
             unreachable!()
         };
         // The receiver remains an external object root via `function`. Its class
@@ -691,7 +806,7 @@ impl Runtime {
         self.environments.temporary_roots.push(*environment);
         let result = (|| {
             let values = self.evaluate_arguments(arguments, call_span, output)?;
-            self.call_function(&function, values, call_span, output)
+            self.call_function(function, values, call_span, output)
         })();
         self.environments.temporary_roots.pop();
         result
@@ -1249,3 +1364,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "objects_prepared_tests.rs"]
+mod prepared_tests;
