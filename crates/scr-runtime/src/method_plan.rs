@@ -26,6 +26,13 @@ enum Step {
         span: Span,
         target: Span,
     },
+    Local {
+        slot: usize,
+        op: AssignmentOp,
+        value: Expression,
+        span: Span,
+        target: Span,
+    },
     Return {
         value: Option<Expression>,
         span: Span,
@@ -33,6 +40,9 @@ enum Step {
 }
 pub(crate) struct Plan {
     fields: Box<[String]>,
+    // Parameters and definitely initialized locals share the existing bounded
+    // input region. Fields retain a fixed offset after all of these bindings.
+    locals: Box<[String]>,
     steps: Box<[Step]>,
     positions: RefCell<Option<FieldPositions>>,
 }
@@ -63,19 +73,21 @@ fn inspect(
     fields: &mut Vec<String>,
     nodes: &mut usize,
     depth: usize,
+    names: &[&str],
 ) -> Option<()> {
     *nodes = nodes.checked_add(1)?;
     if *nodes > NODES || depth > DEPTH {
         return None;
     }
     match &expression.kind {
-        ExprKind::Literal(_) | ExprKind::Variable(_) => {}
+        ExprKind::Literal(_) => {}
+        ExprKind::Variable(name) if names.contains(&name.as_str()) => {}
         ExprKind::Grouped(inner) | ExprKind::Unary(_, inner) => {
-            inspect(inner, fields, nodes, depth + 1)?
+            inspect(inner, fields, nodes, depth + 1, names)?
         }
         ExprKind::Binary(left, _, right) => {
-            inspect(left, fields, nodes, depth + 1)?;
-            inspect(right, fields, nodes, depth + 1)?;
+            inspect(left, fields, nodes, depth + 1, names)?;
+            inspect(right, fields, nodes, depth + 1, names)?;
         }
         ExprKind::PropertyAccess(_, _) => {
             field(expression, fields)?;
@@ -97,6 +109,12 @@ impl Plan {
             return None;
         }
         let mut fields = Vec::new();
+        let mut locals = Vec::new();
+        let mut names: Vec<_> = declaration
+            .parameters
+            .iter()
+            .map(|p| p.binding.name.as_str())
+            .collect();
         let mut nodes = 0;
         for statement in &declaration.body.statements {
             match &statement.kind {
@@ -104,22 +122,41 @@ impl Plan {
                     kind: ExprKind::Assignment(target, op, value),
                     ..
                 }) if *op != AssignmentOp::Concat => {
-                    field(target, &mut fields)?;
-                    inspect(value, &mut fields, &mut nodes, 0)?;
+                    if let ExprKind::Variable(name) = &target.kind {
+                        if name == "this"
+                            || declaration
+                                .parameters
+                                .iter()
+                                .any(|p| p.binding.name == *name)
+                        {
+                            return None;
+                        }
+                        let initialized = names.contains(&name.as_str());
+                        if !initialized
+                            && (*op != AssignmentOp::Assign || names.len() == PARAMETERS)
+                        {
+                            return None;
+                        }
+                        // Inspect before adding a new name: even short-circuited
+                        // reads before initialization conservatively fall back.
+                        inspect(value, &mut fields, &mut nodes, 0, &names)?;
+                        if !initialized {
+                            names.push(name);
+                            locals.push(name.clone());
+                        }
+                    } else {
+                        field(target, &mut fields)?;
+                        inspect(value, &mut fields, &mut nodes, 0, &names)?;
+                    }
                 }
                 StatementKind::Return(value) => {
                     if let Some(value) = value {
-                        inspect(value, &mut fields, &mut nodes, 0)?;
+                        inspect(value, &mut fields, &mut nodes, 0, &names)?;
                     }
                 }
                 _ => return None,
             }
         }
-        let names: Vec<_> = declaration
-            .parameters
-            .iter()
-            .map(|p| p.binding.name.as_str())
-            .collect();
         let field_names: Vec<_> = fields.iter().map(String::as_str).collect();
         let compile = |value| Expression::compile_inputs(value, &names, &field_names);
         let mut steps = Vec::new();
@@ -130,17 +167,24 @@ impl Plan {
                     kind: ExprKind::Assignment(target, op, value),
                     ..
                 }) => {
-                    let ExprKind::PropertyAccess(_, name) = &target.kind else {
-                        unreachable!()
-                    };
                     let value = compile(value)?;
                     instructions += value.instruction_count();
-                    Step::Assign {
-                        field: fields.iter().position(|field| field == name)?,
-                        op: *op,
-                        value,
-                        span: statement.span,
-                        target: target.span,
+                    match &target.kind {
+                        ExprKind::Variable(name) => Step::Local {
+                            slot: names.iter().position(|binding| *binding == name)?,
+                            op: *op,
+                            value,
+                            span: statement.span,
+                            target: target.span,
+                        },
+                        ExprKind::PropertyAccess(_, name) => Step::Assign {
+                            field: fields.iter().position(|field| field == name)?,
+                            op: *op,
+                            value,
+                            span: statement.span,
+                            target: target.span,
+                        },
+                        _ => unreachable!("validated scalar assignment"),
                     }
                 }
                 StatementKind::Return(value) => {
@@ -162,6 +206,7 @@ impl Plan {
         }
         Some(Box::new(Self {
             fields: fields.into(),
+            locals: locals.into(),
             steps: steps.into(),
             positions: RefCell::new(None),
         }))
@@ -247,6 +292,11 @@ impl Runtime {
         // Successful returns must be real ints. The scalar body proof excludes
         // callbacks, free-variable access, declarations and caller writes.
         let proof = Plan::compile(declaration)?;
+        // Local bodies are optimized independently first. Do not silently widen
+        // caller-loop admission or its capture/ownership proof in this change.
+        if !proof.locals.is_empty() {
+            return None;
+        }
         for name in &proof.fields {
             let (slot, field) = class
                 .declaration
@@ -308,6 +358,22 @@ impl Runtime {
         {
             return None;
         }
+        #[cfg(test)]
+        if self.disable_method_local_plans && !plan.locals.is_empty() {
+            return None;
+        }
+        // A variable assigned in a method can refer to a captured module name.
+        // Only genuinely fresh body bindings may stay in the private input slots.
+        if instance.class.environment != 0
+            && plan.locals.iter().any(|name| {
+                self.environments
+                    .capture_value(instance.class.environment, name)
+                    .is_some()
+            })
+        {
+            return None;
+        }
+        let bindings = arguments.len() + plan.locals.len();
         let single_field = instance.class.declaration.fields.len() == 1;
         // Short layout walks are cheaper than maintaining a class hint.
         let positions = if instance.class.declaration.fields.len() < CACHED_LAYOUT_FIELDS
@@ -349,11 +415,12 @@ impl Runtime {
             if !Expression::scalar(value) {
                 return None;
             }
-            inputs[arguments.len() + index] = value.clone();
+            inputs[bindings + index] = value.clone();
         }
         #[cfg(test)]
         {
             self.method_plans_executed += 1;
+            self.method_local_plans_executed += usize::from(!plan.locals.is_empty());
         }
         Some((|| {
             for (parameter, value) in declaration.parameters.iter().zip(arguments) {
@@ -372,7 +439,7 @@ impl Runtime {
                             target,
                         } => {
                             self.checkpoint(*span)?;
-                            let old = &inputs[arguments.len() + field];
+                            let old = &inputs[bindings + field];
                             let mut value = value.evaluate_inputs(self, &inputs)?;
                             if *op != AssignmentOp::Assign {
                                 let binary = match op {
@@ -400,7 +467,35 @@ impl Runtime {
                                     *target,
                                 )?;
                             }
-                            inputs[arguments.len() + field] = value;
+                            inputs[bindings + field] = value;
+                        }
+                        Step::Local {
+                            slot,
+                            op,
+                            value,
+                            span,
+                            target,
+                        } => {
+                            self.checkpoint(*span)?;
+                            let old = &inputs[*slot];
+                            let mut value = value.evaluate_inputs(self, &inputs)?;
+                            if *op != AssignmentOp::Assign {
+                                let binary = match op {
+                                    AssignmentOp::Add => BinaryOp::Add,
+                                    AssignmentOp::Subtract => BinaryOp::Subtract,
+                                    AssignmentOp::Multiply => BinaryOp::Multiply,
+                                    AssignmentOp::Divide => BinaryOp::Divide,
+                                    _ => unreachable!("scalar local compound assignment"),
+                                };
+                                value = self.operation(
+                                    crate::ops::binary(binary, old.clone(), value),
+                                    *target,
+                                )?;
+                            }
+                            // Read-only scalar expressions cannot produce handles;
+                            // no byte quota, capture or callback can observe these
+                            // fresh bindings before the ordinary scope exit.
+                            inputs[*slot] = value;
                         }
                         Step::Return { value, span } => {
                             self.checkpoint(*span)?;
