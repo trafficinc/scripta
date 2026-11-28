@@ -512,6 +512,7 @@ impl Runtime {
     // Entry guards prove a runtime-owned, non-exception, snapshot-free object
     // with one initialized scalar field and no byte quota. Like the setter's
     // fixed-scalar branch, this write cannot change its logical payload size.
+    #[inline(always)]
     fn set_scalar_method_field(
         &mut self,
         instance: &ScriptObject,

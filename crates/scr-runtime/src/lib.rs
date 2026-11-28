@@ -163,6 +163,12 @@ pub struct Runtime {
     #[cfg(test)]
     method_branch_plans_executed: usize,
     #[cfg(test)]
+    disable_empty_method_scopes: bool,
+    #[cfg(test)]
+    method_parameter_scopes_reused: usize,
+    #[cfg(test)]
+    empty_method_parameter_scopes_released: usize,
+    #[cfg(test)]
     disable_comprehension_plans: bool,
     #[cfg(test)]
     comprehension_plans_executed: usize,
@@ -1426,7 +1432,22 @@ impl Runtime {
                         return result;
                     }
                 }
-                let parameter_scope = if reuse_parameters {
+                // Only a warm cache selects the cheap storage path. This is a
+                // storage hint, not admission: receiver/argument/capture guards
+                // still run after the ordinary logical scope-limit check.
+                let method_scope_reuse =
+                    receiver.is_some() && self.options.max_value_bytes.is_none();
+                #[cfg(test)]
+                let method_scope_reuse = method_scope_reuse
+                    && !self.disable_empty_method_scopes
+                    && !self.environments.disable_empty_reuse
+                    && !self.environments.disable_parameter_reuse;
+                let reuse_method_parameters = method_scope_reuse
+                    && matches!(
+                        declaration.special_call.get(),
+                        Some(Some(value::SpecialCall::Method(_)))
+                    );
+                let parameter_scope = if reuse_parameters || reuse_method_parameters {
                     self.enter_empty_scope(*environment, span)
                 } else {
                     self.enter_scope(*environment, span)
@@ -1442,6 +1463,11 @@ impl Runtime {
                 self.environments
                     .scope_mut(self.environments.current)
                     .function_boundary = true;
+                let mut empty_method_parameters = false;
+                #[cfg(test)]
+                if reuse_method_parameters {
+                    self.method_parameter_scopes_reused += 1;
+                }
                 let result = (|| {
                     #[cfg(test)]
                     if reuse_parameters {
@@ -1449,6 +1475,10 @@ impl Runtime {
                     }
                     if let Some(receiver) = receiver {
                         if let Some(result) = self.method_call(declaration, receiver, values) {
+                            // A completed admission (including a returned error)
+                            // proves no parameter bindings/captures were created.
+                            // Declined plans keep the general cleanup below.
+                            empty_method_parameters = method_scope_reuse;
                             return result;
                         }
                     }
@@ -1551,7 +1581,11 @@ impl Runtime {
                     )?;
                     Ok(value)
                 })();
-                if reuse_parameters {
+                if reuse_parameters || empty_method_parameters {
+                    #[cfg(test)]
+                    if empty_method_parameters {
+                        self.empty_method_parameter_scopes_released += 1;
+                    }
                     self.environments
                         .scope_mut(self.environments.current)
                         .function_boundary = false;

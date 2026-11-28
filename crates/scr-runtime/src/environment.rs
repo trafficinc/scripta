@@ -10,6 +10,8 @@ use std::{
 };
 
 #[cfg(test)]
+mod method_scope_tests;
+#[cfg(test)]
 mod parameter_scope_tests;
 
 #[cfg(test)]
