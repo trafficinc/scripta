@@ -128,8 +128,12 @@ impl MapIndexes {
                     .get(p)
                     .is_some_and(|(stored, _)| key.matches(stored))
             }) {
-                let index = self.indexes.remove(at).expect("cached map index");
-                self.indexes.push_back(index);
+                // A hot map is already most recent; moving its index again
+                // only copies bookkeeping and leaves the LRU order unchanged.
+                if at + 1 != self.indexes.len() {
+                    let index = self.indexes.remove(at).expect("cached map index");
+                    self.indexes.push_back(index);
+                }
                 return Some(position);
             }
             // Hints never establish absence. A replaced map or reused scope ID
