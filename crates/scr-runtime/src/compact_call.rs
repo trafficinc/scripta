@@ -16,14 +16,18 @@ pub(crate) use frames::Stack;
 mod expression;
 pub(super) use expression::Expression;
 
-#[derive(Clone, Copy)]
-enum Scalar {
+#[cfg(test)]
+#[path = "scalar_method_tests.rs"]
+mod scalar_method_tests;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Scalar {
     Null,
     Bool(bool),
     Int(i64),
 }
 impl Scalar {
-    fn from_value(value: &Value) -> Option<Self> {
+    pub(crate) fn from_value(value: &Value) -> Option<Self> {
         Some(match value {
             Value::Null => Self::Null,
             Value::Bool(v) => Self::Bool(*v),
@@ -31,11 +35,53 @@ impl Scalar {
             _ => return None,
         })
     }
-    fn value(self) -> Value {
+    pub(crate) fn value(self) -> Value {
         match self {
             Self::Null => Value::Null,
             Self::Bool(v) => Value::Bool(v),
             Self::Int(v) => Value::Int(v),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn boolean(self) -> ops::Result<bool> {
+        match self {
+            Self::Bool(value) => Ok(value),
+            value => ops::boolean(value.value()),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn unary(self, op: UnaryOp) -> ops::Result<Self> {
+        match (op, self) {
+            (UnaryOp::Not, value) => value.boolean().map(|value| Self::Bool(!value)),
+            (UnaryOp::Positive, Self::Int(value)) => Ok(Self::Int(value)),
+            (UnaryOp::Negative, Self::Int(value)) => {
+                ops::integer(BinaryOp::Subtract, 0, value).map(Self::Int)
+            }
+            _ => ops::unary(op, self.value())
+                .map(|value| Self::from_value(&value).expect("scalar unary result")),
+        }
+    }
+
+    #[inline]
+    pub(crate) fn binary(self, op: BinaryOp, right: Self) -> ops::Result<Self> {
+        use BinaryOp as B;
+        match (op, self, right) {
+            (B::Equal, left, right) => Ok(Self::Bool(left == right)),
+            (B::NotEqual, left, right) => Ok(Self::Bool(left != right)),
+            (B::Less, Self::Int(left), Self::Int(right)) => Ok(Self::Bool(left < right)),
+            (B::LessEqual, Self::Int(left), Self::Int(right)) => Ok(Self::Bool(left <= right)),
+            (B::Greater, Self::Int(left), Self::Int(right)) => Ok(Self::Bool(left > right)),
+            (B::GreaterEqual, Self::Int(left), Self::Int(right)) => Ok(Self::Bool(left >= right)),
+            (
+                B::Add | B::Subtract | B::Multiply | B::Divide | B::Remainder,
+                Self::Int(left),
+                Self::Int(right),
+            ) => ops::integer(op, left, right).map(Self::Int),
+            // Reuse ordinary error kinds and wording for unsupported pairs.
+            _ => ops::binary(op, self.value(), right.value())
+                .map(|value| Self::from_value(&value).expect("scalar binary result")),
         }
     }
 }

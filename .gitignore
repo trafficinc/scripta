@@ -52,3 +52,5 @@ id_ed25519.*
 
 # Local plans and temporary task artifacts.
 /.temp/
+
+/repogroom

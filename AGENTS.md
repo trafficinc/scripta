@@ -150,3 +150,10 @@ Minimal `--no-default-features` builds remain source-only.
 
 Workspace-version tags publish normal releases; validation/RC/other tags publish
 prereleases. Do not replace published assets or move existing tags.
+
+<!-- repogroom:start -->
+## Development Guidelines
+
+Read and follow [DEVELOPMENT_GUIDELINES.md](./DEVELOPMENT_GUIDELINES.md)
+before creating, modifying, reviewing, or documenting code.
+<!-- repogroom:end -->

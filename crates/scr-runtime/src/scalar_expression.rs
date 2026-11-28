@@ -58,16 +58,28 @@ impl Expression {
     }
 
     pub fn evaluate_inputs(&self, runtime: &Runtime, inputs: &[Value]) -> Result<Value> {
+        self.evaluate_with::<false>(runtime, |index| {
+            Scalar::from_value(&inputs[index]).expect("guarded scalar inputs")
+        })
+        .map(Scalar::value)
+    }
+
+    pub fn evaluate_scalars(&self, runtime: &Runtime, inputs: &[Scalar]) -> Result<Scalar> {
+        self.evaluate_with::<true>(runtime, |index| inputs[index])
+    }
+
+    #[inline(always)]
+    fn evaluate_with<const DIRECT_SCALARS: bool>(
+        &self,
+        runtime: &Runtime,
+        input: impl Fn(usize) -> Scalar,
+    ) -> Result<Scalar> {
         // A compiled literal or input read has no operations, errors or ticks.
         // Return it directly instead of initializing the bounded operand stack.
         if let [Instruction { code, operand }] = self.code.as_ref() {
             match code {
-                Code::Constant => return Ok(self.constants[*operand as usize].value()),
-                Code::Local => {
-                    return Ok(Scalar::from_value(&inputs[*operand as usize])
-                        .expect("guarded scalar inputs")
-                        .value());
-                }
+                Code::Constant => return Ok(self.constants[*operand as usize]),
+                Code::Local => return Ok(input(*operand as usize)),
                 _ => {}
             }
         }
@@ -83,32 +95,51 @@ impl Expression {
                     values[top] = if matches!(code, Code::Constant) {
                         self.constants[operand as usize]
                     } else {
-                        Scalar::from_value(&inputs[operand as usize])
-                            .expect("guarded scalar inputs")
+                        input(operand as usize)
                     };
                     top += 1;
                 }
                 Code::Unary(op) => {
-                    values[top - 1] = Scalar::from_value(
-                        &runtime.operation(ops::unary(op, values[top - 1].value()), span)?,
-                    )
-                    .unwrap();
+                    values[top - 1] = if DIRECT_SCALARS {
+                        runtime.operation(values[top - 1].unary(op), span)?
+                    } else {
+                        Scalar::from_value(
+                            &runtime.operation(ops::unary(op, values[top - 1].value()), span)?,
+                        )
+                        .unwrap()
+                    };
                 }
                 Code::Binary(op) => {
                     top -= 1;
-                    values[top - 1] = Scalar::from_value(&runtime.operation(
-                        ops::binary(op, values[top - 1].value(), values[top].value()),
-                        span,
-                    )?)
-                    .unwrap();
+                    values[top - 1] = if DIRECT_SCALARS {
+                        runtime.operation(values[top - 1].binary(op, values[top]), span)?
+                    } else {
+                        Scalar::from_value(&runtime.operation(
+                            ops::binary(op, values[top - 1].value(), values[top].value()),
+                            span,
+                        )?)
+                        .unwrap()
+                    };
                 }
                 Code::Boolean => {
-                    values[top - 1] = Scalar::Bool(
-                        runtime.operation(ops::boolean(values[top - 1].value()), span)?,
-                    );
+                    values[top - 1] = Scalar::Bool(runtime.operation(
+                        if DIRECT_SCALARS {
+                            values[top - 1].boolean()
+                        } else {
+                            ops::boolean(values[top - 1].value())
+                        },
+                        span,
+                    )?);
                 }
                 Code::Short(stop) => {
-                    let value = runtime.operation(ops::boolean(values[top - 1].value()), span)?;
+                    let value = runtime.operation(
+                        if DIRECT_SCALARS {
+                            values[top - 1].boolean()
+                        } else {
+                            ops::boolean(values[top - 1].value())
+                        },
+                        span,
+                    )?;
                     if value == stop {
                         values[top - 1] = Scalar::Bool(value);
                         ip = operand as usize;
@@ -120,6 +151,6 @@ impl Expression {
             }
         }
         debug_assert_eq!(top, 1);
-        Ok(values[0].value())
+        Ok(values[0])
     }
 }

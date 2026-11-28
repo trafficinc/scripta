@@ -1,7 +1,7 @@
 //! Bounded scalar methods; unsupported entry states do no work.
 use crate::{
     AssignmentOp, BinaryOp, Expr, ExprKind, Result, Runtime, StatementKind, Value,
-    compact_call::Expression,
+    compact_call::{Expression, Scalar},
     objects::{ScriptClass, ScriptObject},
     value::{SpecialCall, UserDeclaration},
 };
@@ -300,9 +300,9 @@ impl Runtime {
         } else {
             Some(plan.field_positions(&instance.class)?)
         };
-        let mut inputs: [Value; PARAMETERS + FIELDS] = std::array::from_fn(|_| Value::Null);
+        let mut inputs = [Scalar::Null; PARAMETERS + FIELDS];
         for (input, value) in inputs.iter_mut().zip(arguments) {
-            *input = value.clone();
+            *input = Scalar::from_value(value).expect("guarded scalar arguments");
         }
         // All referenced fields must already exist and be scalar. Otherwise
         // ordinary evaluation preserves missing-field errors and earlier writes.
@@ -329,10 +329,7 @@ impl Runtime {
                 .scope(instance.scope)
                 .variables
                 .get_slot(slot, name)?;
-            if !Expression::scalar(value) {
-                return None;
-            }
-            inputs[bindings + index] = value.clone();
+            inputs[bindings + index] = Scalar::from_value(value)?;
         }
         #[cfg(test)]
         {
@@ -362,10 +359,10 @@ impl Runtime {
                         return Ok(value);
                     }
                 }
-                Ok(Value::Null)
+                Ok(Scalar::Null)
             })();
             self.environments.leave_empty(previous);
-            let value = result?;
+            let value = result?.value();
             self.annotation(
                 &declaration.return_type,
                 &value,
@@ -382,9 +379,9 @@ impl Runtime {
         step: &Step,
         plan: &Plan,
         fields: &MethodFields<'_>,
-        inputs: &mut [Value],
+        inputs: &mut [Scalar],
         bindings: usize,
-    ) -> Result<Option<Value>> {
+    ) -> Result<Option<Scalar>> {
         let object = fields.object;
         let instance = fields.instance;
         let single_field = fields.single_field;
@@ -398,7 +395,7 @@ impl Runtime {
             } => {
                 self.checkpoint(*span)?;
                 let old = &inputs[bindings + field];
-                let mut value = value.evaluate_inputs(self, inputs)?;
+                let mut value = value.evaluate_scalars(self, inputs)?;
                 if *op != AssignmentOp::Assign {
                     let binary = match op {
                         AssignmentOp::Add => BinaryOp::Add,
@@ -407,16 +404,15 @@ impl Runtime {
                         AssignmentOp::Divide => BinaryOp::Divide,
                         _ => unreachable!("scalar compound assignment"),
                     };
-                    value =
-                        self.operation(crate::ops::binary(binary, old.clone(), value), *target)?;
+                    value = self.operation(old.binary(binary, value), *target)?;
                 }
-                let fixed_scalar = single_field && Expression::scalar(&value);
+                let fixed_scalar = single_field;
                 #[cfg(test)]
                 let fixed_scalar = fixed_scalar && !self.force_field_snapshot;
                 if fixed_scalar {
-                    self.set_scalar_method_field(instance, value.clone(), *target)?;
+                    self.set_scalar_method_field(instance, value.value(), *target)?;
                 } else {
-                    self.set_object_field(object, &plan.fields[*field], value.clone(), *target)?;
+                    self.set_object_field(object, &plan.fields[*field], value.value(), *target)?;
                 }
                 inputs[bindings + field] = value;
             }
@@ -429,7 +425,7 @@ impl Runtime {
             } => {
                 self.checkpoint(*span)?;
                 let old = &inputs[*slot];
-                let mut value = value.evaluate_inputs(self, inputs)?;
+                let mut value = value.evaluate_scalars(self, inputs)?;
                 if *op != AssignmentOp::Assign {
                     let binary = match op {
                         AssignmentOp::Add => BinaryOp::Add,
@@ -438,8 +434,7 @@ impl Runtime {
                         AssignmentOp::Divide => BinaryOp::Divide,
                         _ => unreachable!("scalar local compound assignment"),
                     };
-                    value =
-                        self.operation(crate::ops::binary(binary, old.clone(), value), *target)?;
+                    value = self.operation(old.binary(binary, value), *target)?;
                 }
                 // Read-only scalar expressions cannot produce handles;
                 // no byte quota, capture or callback can observe these
@@ -449,8 +444,8 @@ impl Runtime {
             Step::Return { value, span } => {
                 self.checkpoint(*span)?;
                 return match value {
-                    Some(value) => value.evaluate_inputs(self, inputs),
-                    None => Ok(Value::Null),
+                    Some(value) => value.evaluate_scalars(self, inputs),
+                    None => Ok(Scalar::Null),
                 }
                 .map(Some);
             }
@@ -463,9 +458,9 @@ impl Runtime {
         plan: &Plan,
         flow: &[Flow],
         fields: &MethodFields<'_>,
-        inputs: &mut [Value],
+        inputs: &mut [Scalar],
         bindings: usize,
-    ) -> Result<Value> {
+    ) -> Result<Scalar> {
         let mut scopes = [0; DEPTH];
         let mut depth = 0;
         let result = (|| {
@@ -482,8 +477,8 @@ impl Runtime {
                     }
                     Flow::Tick(span) => self.checkpoint(*span)?,
                     Flow::Test { value, span, next } => {
-                        let value = value.evaluate_inputs(self, inputs)?;
-                        if !self.operation(crate::ops::boolean(value), *span)? {
+                        let value = value.evaluate_scalars(self, inputs)?;
+                        if !self.operation(value.boolean(), *span)? {
                             ip = *next;
                         }
                     }
@@ -498,7 +493,7 @@ impl Runtime {
                     }
                 }
             }
-            Ok(Value::Null)
+            Ok(Scalar::Null)
         })();
         // Returns, cancellation and every failure must unwind all selected
         // branch blocks before the ordinary body/parameter scopes and annotation.

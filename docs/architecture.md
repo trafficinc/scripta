@@ -36,6 +36,10 @@ Native callbacks share the active output, call stack and execution budgets.
 Reentrant callbacks invoke scripts through InvocationContext, preserving exceptions
 and control flow. Native resources use Rust ownership and explicit cleanup.
 
+Bounded scalar method plans keep null, bool and int operands in compact slots.
+Field writes, annotations and returned results use ordinary runtime values,
+preserving the language's value budgets, validation and error semantics.
+
 
 
 Tracing reclaims unreachable captured scopes and script-object cycles. Active
