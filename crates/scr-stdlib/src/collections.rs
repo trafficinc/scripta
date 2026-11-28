@@ -90,6 +90,7 @@ fn list_result<'a>(
 
 fn map_result<'a>(
     context: &RuntimeContext<'_>,
+    source: &scr_runtime::Map,
     entries: impl Iterator<Item = &'a (MapKey, Value)> + Clone,
 ) -> NativeResult {
     let mut bytes = budget(context, size_of::<Value>())?;
@@ -109,7 +110,9 @@ fn map_result<'a>(
         context.check_cancelled()?;
         result.push(entry.clone());
     }
-    Ok(Value::map(result))
+    Ok(Value::Map(scr_runtime::Map::from_ordered_subset(
+        source, result,
+    )))
 }
 
 fn key_matches(key: &MapKey, value: &Value) -> bool {
@@ -251,7 +254,10 @@ fn map_call(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> NativeR
         budget(context, size_of::<Value>())?;
         return Ok(Value::map(Vec::new()));
     }
-    let entries = map(&args[0]);
+    let Value::Map(source) = &args[0] else {
+        unreachable!("validated map argument")
+    };
+    let entries = source.as_slice();
     match name {
         "has" => Ok(Value::Bool(lookup(context, entries, &args[1])?.is_some())),
         "get" => {
@@ -286,6 +292,7 @@ fn map_call(name: &str, context: &RuntimeContext<'_>, args: &[Value]) -> NativeR
         }
         "remove" => map_result(
             context,
+            source,
             entries
                 .iter()
                 .filter(|(key, _)| !key_matches(key, &args[1])),
@@ -1342,5 +1349,77 @@ mod tests {
                 assert_eq!(result.unwrap_err().kind, "Interrupted");
             }
         });
+    }
+    #[test]
+    fn large_map_removal_keeps_preflight_ownership_limits_and_cancellation() {
+        use std::{
+            cell::RefCell,
+            rc::{Rc, Weak},
+            sync::{Arc, atomic::AtomicBool},
+        };
+        #[derive(Debug)]
+        struct Observed {
+            owner: Weak<Observed>,
+            events: Rc<RefCell<Vec<usize>>>,
+        }
+        impl scr_runtime::NativeObject for Observed {
+            fn type_name(&self) -> &str {
+                "Observed"
+            }
+            fn get_property(&self, _: &str) -> Result<Value, String> {
+                Err("none".into())
+            }
+            fn payload_bytes(&self) -> usize {
+                self.events.borrow_mut().push(self.owner.strong_count());
+                8
+            }
+        }
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let object = Rc::new_cyclic(|owner| Observed {
+            owner: owner.clone(),
+            events: events.clone(),
+        });
+        let mut entries: Vec<_> = (0..64).map(|i| (MapKey::Int(i), Value::Int(i))).collect();
+        entries[0].1 = Value::NativeObject(object.clone());
+        let mut host = Runtime::new();
+        host.set_global("source", Value::map(entries)).unwrap();
+        let primed = host.get_global("source").unwrap().clone();
+        drop(host);
+        let args = [primed, Value::Int(1)];
+        let required = size_of::<Value>() + 63 * (MapKey::LOGICAL_BYTES + size_of::<Value>()) + 8;
+        for limit in [None, Some(required - 1), Some(required), Some(required + 1)] {
+            events.borrow_mut().clear();
+            assert_eq!(Rc::strong_count(&object), 2);
+            let result = with_context(limit, |ctx| map_call("remove", ctx, &args));
+            assert_eq!(*events.borrow(), vec![2]);
+            if limit == Some(required - 1) {
+                assert_eq!(result.unwrap_err().kind, "ResourceLimitError");
+            } else {
+                let result = result.unwrap();
+                let Value::Map(values) = &result else {
+                    unreachable!()
+                };
+                assert_eq!(values.len(), 63);
+                assert_eq!(Rc::strong_count(&object), 3);
+                assert_eq!(
+                    values.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(),
+                    (0..64)
+                        .filter(|i| *i != 1)
+                        .map(MapKey::Int)
+                        .collect::<Vec<_>>()
+                );
+                drop(result);
+            }
+            assert_eq!(Rc::strong_count(&object), 2);
+        }
+        events.borrow_mut().clear();
+        let error = with_context(None, |ctx| {
+            ctx.cancellation = Some(Arc::new(AtomicBool::new(true)));
+            map_call("remove", ctx, &args)
+        })
+        .unwrap_err();
+        assert_eq!(error.kind, "Interrupted");
+        assert!(events.borrow().is_empty());
+        assert_eq!(Rc::strong_count(&object), 2);
     }
 }

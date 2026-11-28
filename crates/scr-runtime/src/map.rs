@@ -11,6 +11,8 @@ use std::{
 struct Storage {
     entries: Vec<(MapKey, Value)>,
     plain: Cell<Option<bool>>,
+    // A successful key scan only; never a value/depth/byte-budget proof.
+    unique_keys: Cell<bool>,
 }
 
 /// Insertion-ordered map entries. Plain-data clones share storage until mutable
@@ -24,11 +26,25 @@ thread_local! {
 }
 
 impl Map {
-    fn with_cache(entries: Vec<(MapKey, Value)>, plain: Option<bool>) -> Self {
+    fn with_cache(entries: Vec<(MapKey, Value)>, plain: Option<bool>, unique_keys: bool) -> Self {
         Self(Rc::new(Storage {
             entries,
             plain: Cell::new(plain),
+            unique_keys: Cell::new(unique_keys),
         }))
+    }
+
+    #[inline]
+    pub(crate) fn keys_validated(&self) -> bool {
+        let valid = self.0.unique_keys.get();
+        #[cfg(test)]
+        let valid = valid && !crate::value::HASHED_MAP_VALIDATION.get();
+        valid
+    }
+
+    #[inline]
+    pub(crate) fn mark_keys_validated(&self) {
+        self.0.unique_keys.set(true);
     }
 
     pub(crate) fn plain(&self, depth: usize) -> bool {
@@ -45,6 +61,22 @@ impl Map {
         plain
     }
 
+    /// Construct entries, reusing a validated source's key-uniqueness proof
+    /// only when the output keys form an ordered subset of its keys.
+    ///
+    /// Arbitrary, reordered or unvalidated-source entries remain supported and
+    /// use ordinary runtime validation. Output values, depth and byte budgets
+    /// must still be validated; this method does not certify them.
+    pub fn from_ordered_subset(source: &Self, entries: Vec<(MapKey, Value)>) -> Self {
+        let unique_keys = source.keys_validated() && {
+            let mut original = source.iter();
+            entries
+                .iter()
+                .all(|(key, _)| original.any(|(source_key, _)| source_key == key))
+        };
+        Self::with_cache(entries, None, unique_keys)
+    }
+
     /// Recover the entry vector, copying shared plain data when necessary.
     pub fn into_vec(self) -> Vec<(MapKey, Value)> {
         match Rc::try_unwrap(self.0) {
@@ -58,12 +90,20 @@ impl Clone for Map {
     fn clone(&self) -> Self {
         #[cfg(test)]
         if EAGER_CLONES.get() {
-            return Self::with_cache(self.0.entries.clone(), self.0.plain.get());
+            return Self::with_cache(
+                self.0.entries.clone(),
+                self.0.plain.get(),
+                self.0.unique_keys.get(),
+            );
         }
         if self.plain(0) {
             Self(self.0.clone())
         } else {
-            Self::with_cache(self.0.entries.clone(), Some(false))
+            Self::with_cache(
+                self.0.entries.clone(),
+                Some(false),
+                self.0.unique_keys.get(),
+            )
         }
     }
 }
@@ -81,13 +121,14 @@ impl DerefMut for Map {
         // Key edits and nested writes invalidate the proof before a mutable
         // reference escapes. Detachment precedes insertion of opaque handles.
         storage.plain.set(None);
+        storage.unique_keys.set(false);
         &mut storage.entries
     }
 }
 
 impl From<Vec<(MapKey, Value)>> for Map {
     fn from(entries: Vec<(MapKey, Value)>) -> Self {
-        Self::with_cache(entries, None)
+        Self::with_cache(entries, None, false)
     }
 }
 

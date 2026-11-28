@@ -32,7 +32,6 @@ and runtime identity. Collections have value semantics; objects and callables ha
 identity. Shared collection storage and immutable map-key text preserve independent
 snapshots on mutation.
 
-
 Tracing reclaims unreachable captured scopes and script-object cycles. Active
 calls, cached modules and host-retained values remain roots. Opaque native
 ownership cycles require host cleanup. See the [language specification](language-spec.md)

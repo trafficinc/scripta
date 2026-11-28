@@ -165,6 +165,7 @@ for the full native contract, [SQLite](sqlite.md) for stateful handles, and the
 [database connector guide](database-connectors.md) for shared Driver/Connection
 implementations. Db drivers supply discovery metadata through `Driver::info`.
 
+
 ## Build and test
 
 Replace `TARGET` with your native triple from `rustc -vV`. On Apple Silicon macOS,

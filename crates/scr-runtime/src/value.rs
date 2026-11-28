@@ -32,7 +32,7 @@ const SMALL_MAP_KEYS: usize = 16;
 
 #[cfg(test)]
 thread_local! {
-    static HASHED_MAP_VALIDATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static HASHED_MAP_VALIDATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 #[inline]
@@ -313,9 +313,10 @@ impl Value {
                         add = measure_small_map(entries)?;
                         pending.extend(entries.iter().map(|(_, value)| (value, depth + 1)));
                     } else {
-                        let mut keys = std::collections::HashSet::with_capacity(entries.len());
+                        let mut keys = (!entries.keys_validated())
+                            .then(|| std::collections::HashSet::with_capacity(entries.len()));
                         for (key, value) in entries {
-                            if !keys.insert(key) {
+                            if keys.as_mut().is_some_and(|keys| !keys.insert(key)) {
                                 return Err("duplicate host map key".into());
                             }
                             add = add
@@ -326,6 +327,9 @@ impl Value {
                             }
                             pending.push((value, depth + 1));
                         }
+                        // Cache only the completed key scan, never child values,
+                        // payload sizes or a depth-/budget-dependent result.
+                        entries.mark_keys_validated();
                     }
                 }
                 _ => {}

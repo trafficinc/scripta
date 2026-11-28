@@ -112,9 +112,13 @@ fn measure(values: &[Value], limit: Option<usize>) -> Result<usize, String> {
                     add = measure_small_map(entries)?;
                     pending.extend(entries.iter().map(|(_, value)| (value, depth + 1)));
                 } else {
-                    let mut keys = std::collections::HashSet::with_capacity(entries.len());
+                    let mut keys = (!entries.keys_validated())
+                        .then(|| std::collections::HashSet::with_capacity(entries.len()));
                     for (key, value) in entries {
-                        if !keys.insert(CopyKey::from(key)) {
+                        if keys
+                            .as_mut()
+                            .is_some_and(|keys| !keys.insert(CopyKey::from(key)))
+                        {
                             return Err("duplicate host map key".into());
                         }
                         add = add
@@ -125,6 +129,7 @@ fn measure(values: &[Value], limit: Option<usize>) -> Result<usize, String> {
                         }
                         pending.push((value, depth + 1));
                     }
+                    entries.mark_keys_validated();
                 }
             }
             _ => {}
