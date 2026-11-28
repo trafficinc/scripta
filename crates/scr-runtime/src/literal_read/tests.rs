@@ -72,12 +72,11 @@ fn errors_keep_source_spans_stacks_and_failed_destinations() {
 }
 
 #[test]
-fn unsupported_keys_effects_receivers_and_nested_reads_keep_general_evaluation() {
+fn unsupported_keys_effects_and_receivers_keep_general_evaluation() {
     for source in [
         r#"$row=["rank"=>7];$key="rank";$seen=$row[$key];"#,
         r#"$row=["rank"=>7];$key="rank";$seen=$row[($key="rank")];"#,
         r#"$row=["rank"=>7];function key(){return "rank";}$seen=$row[key()];"#,
-        r#"$row=[["rank"=>7]];$seen=$row[0]["rank"];"#,
         r#"$row=["rank"=>7];try{$seen=$row[false];}catch(TypeError $e){$seen=9;}"#,
         r#"class C{function read(){return $this["rank"];}}$c=new C();$seen=$c->read();"#,
     ] {

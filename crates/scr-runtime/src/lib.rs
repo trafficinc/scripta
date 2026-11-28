@@ -187,6 +187,10 @@ pub struct Runtime {
     #[cfg(test)]
     literal_reads_executed: usize,
     #[cfg(test)]
+    disable_nested_literal_reads: bool,
+    #[cfg(test)]
+    nested_literal_reads_executed: usize,
+    #[cfg(test)]
     disable_literal_writes: bool,
     #[cfg(test)]
     literal_writes_executed: usize,
