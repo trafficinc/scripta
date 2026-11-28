@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="docs/assets/scripta-banner.png" alt="Scripta — a standing black American bison wrapped in a glowing beam of light. Lightweight scripting for everyday automation." width="960">
+  <img src="docs/assets/scripta-banner.png" alt="Scripta — a dark green American bison logo formed from angular geometric shapes. A practical language for ambitious ideas." width="960">
 </h1>
 
 <p align="center">
