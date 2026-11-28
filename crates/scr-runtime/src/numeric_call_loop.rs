@@ -491,4 +491,6 @@ impl Runtime {
 #[cfg(test)]
 mod method_tests;
 #[cfg(test)]
+mod structured_tests;
+#[cfg(test)]
 mod tests;

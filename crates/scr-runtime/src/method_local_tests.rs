@@ -225,8 +225,8 @@ fn combined_parameter_local_bound_and_caller_loop_scope_stay_bounded() {
     let (mut a, mut b) = pair();
     test_support::compare_source(&mut a,&mut b,"class C{$x=0;function f():int{$a=$this->x+1;$this->x=$a;return $a;}}$c=new C();$total=0;for($i=0;$i<128;$i+=1){$total+=$c->f();}$field=$c->x;").unwrap();
     assert_eq!(a.method_local_plans_executed, 128);
-    assert_eq!(a.method_call_loops_executed, 0);
-    assert_eq!(b.method_call_loops_executed, 0);
+    assert_eq!(a.method_call_loops_executed, 1);
+    assert_eq!(b.method_call_loops_executed, 1);
     assert_eq!(a.get_global("total"), Some(&Value::Int(8256)));
 }
 

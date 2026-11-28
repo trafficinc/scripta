@@ -205,9 +205,21 @@ impl Runtime {
         // Successful returns must be real ints. The scalar body proof excludes
         // callbacks, free-variable access, declarations and caller writes.
         let proof = Plan::compile(declaration)?;
-        // Local bodies are optimized independently first. Do not silently widen
-        // caller-loop admission or its capture/ownership proof in this change.
-        if !proof.locals.is_empty() || proof.flow.is_some() {
+        #[cfg(test)]
+        if self.disable_structured_method_call_loops
+            && (!proof.locals.is_empty() || proof.flow.is_some())
+        {
+            return None;
+        }
+        // Match method_call's per-receiver capture guard: a purported local
+        // could otherwise read or update a cached caller/module binding.
+        if class.environment != 0
+            && proof.locals.iter().any(|name| {
+                self.environments
+                    .capture_value(class.environment, name)
+                    .is_some()
+            })
+        {
             return None;
         }
         for name in &proof.fields {

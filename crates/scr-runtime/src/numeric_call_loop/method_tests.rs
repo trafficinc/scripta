@@ -267,6 +267,16 @@ fn native_bridges_and_proxy_receivers_keep_live_values_and_observable_downcasts(
 
 #[test]
 fn collector_observes_no_extra_receiver_owners_between_calls() {
+    for method_body in [
+        "$this->x+=1;return $this->x;",
+        "$next=$this->x+1;$this->x=$next;return $next;",
+        "$next=$this->x+1;$this->x=$next;if($next%2===0){return $next;}return $next;",
+    ] {
+        check_receiver_owners(method_body);
+    }
+}
+
+fn check_receiver_owners(method_body: &str) {
     use crate::{NativeFunction, NativeObject, NativeSignature, NativeType};
     use std::{
         cell::{Cell, RefCell},
@@ -298,7 +308,8 @@ fn collector_observes_no_extra_receiver_owners_between_calls() {
         runtime.disable_method_call_loops = disabled;
         runtime
             .execute_source(
-                "class C{$x=0;function next():int{$this->x+=1;return $this->x;}}$c=new C();",
+                &"class C{$x=0;function next():int{$this->x+=1;return $this->x;}}$c=new C();"
+                    .replace("$this->x+=1;return $this->x;", method_body),
                 &mut Vec::new(),
             )
             .unwrap();
@@ -360,6 +371,16 @@ fn collector_observes_no_extra_receiver_owners_between_calls() {
 
 #[test]
 fn captured_class_resources_survive_collection_and_release_after_receiver_drop() {
+    for method_body in [
+        "$this->x+=1;return $this->x;",
+        "$next=$this->x+1;$this->x=$next;return $next;",
+        "$next=$this->x+1;$this->x=$next;if($next%2===0){return $next;}return $next;",
+    ] {
+        check_captured_resource_lifetime(method_body);
+    }
+}
+
+fn check_captured_resource_lifetime(method_body: &str) {
     use crate::{NativeFunction, NativeObject, NativeSignature, NativeType};
     use std::cell::Cell;
     #[derive(Debug)]
@@ -442,7 +463,7 @@ fn captured_class_resources_survive_collection_and_release_after_receiver_drop()
         // retained non-global lexical environment, never nested declarations.
         let previous = runtime.environments.enter(0);
         let module = runtime.environments.current;
-        runtime.execute_source("$resource=probe();class C{$x=0;function next():int{$this->x+=1;return $this->x;}}$c=new C();", &mut Vec::new()).unwrap();
+        runtime.execute_source(&"$resource=probe();class C{$x=0;function next():int{$this->x+=1;return $this->x;}}$c=new C();".replace("$this->x+=1;return $this->x;", method_body), &mut Vec::new()).unwrap();
         let object = runtime
             .environments
             .scope(module)
@@ -466,6 +487,16 @@ fn captured_class_resources_survive_collection_and_release_after_receiver_drop()
 
 #[test]
 fn asynchronous_cancellation_publishes_totals_and_keeps_method_partial_writes() {
+    for method_body in [
+        "$this->x+=1;return $this->x;",
+        "$next=$this->x+1;$this->x=$next;return $next;",
+        "$next=$this->x+1;$this->x=$next;if($next%2===0){return $next;}return $next;",
+    ] {
+        check_cancelled_method_loop(method_body);
+    }
+}
+
+fn check_cancelled_method_loop(method_body: &str) {
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -481,7 +512,7 @@ fn asynchronous_cancellation_publishes_totals_and_keeps_method_partial_writes() 
             std::thread::sleep(std::time::Duration::from_millis(50));
             flag.store(true, Ordering::Relaxed);
         });
-        let error=runtime.execute_source("class C{$x=0;function next():int{$this->x+=1;return $this->x;}}$c=new C();$i=0;$total=0;for($i=0;$i<9223372036854775807;$i+=1){$total+=$c->next();}",&mut Vec::new()).unwrap_err();
+        let error=runtime.execute_source(&"class C{$x=0;function next():int{$this->x+=1;return $this->x;}}$c=new C();$i=0;$total=0;for($i=0;$i<9223372036854775807;$i+=1){$total+=$c->next();}".replace("$this->x+=1;return $this->x;", method_body),&mut Vec::new()).unwrap_err();
         worker.join().unwrap();
         assert!(error.message.contains("execution interrupted"));
         assert!(runtime.stack.is_empty());

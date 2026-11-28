@@ -211,12 +211,12 @@ fn structured_statement_and_scope_stack_bounds_fall_back_safely() {
 }
 
 #[test]
-fn branch_methods_do_not_widen_caller_loop_admission() {
+fn proven_branch_methods_admit_caller_loops_with_either_body_evaluator() {
     let (mut a, mut b) = pair();
     test_support::compare_source(&mut a,&mut b,"class C{$x=0;function f():int{$this->x+=1;if($this->x%2===0){return $this->x;}return 0;}}$c=new C();$total=0;for($i=0;$i<128;$i+=1){$total+=$c->f();}$seen=$c->x;").unwrap();
     assert_eq!(a.method_branch_plans_executed, 128);
-    assert_eq!(a.method_call_loops_executed, 0);
-    assert_eq!(b.method_call_loops_executed, 0);
+    assert_eq!(a.method_call_loops_executed, 1);
+    assert_eq!(b.method_call_loops_executed, 1);
     assert_eq!(a.get_global("total"), Some(&Value::Int(4160)));
 }
 

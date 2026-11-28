@@ -272,6 +272,8 @@ pub struct Runtime {
     #[cfg(test)]
     disable_method_call_loops: bool,
     #[cfg(test)]
+    disable_structured_method_call_loops: bool,
+    #[cfg(test)]
     method_call_loops_executed: usize,
     #[cfg(test)]
     disable_prepared_method_calls: bool,
