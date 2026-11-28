@@ -53,10 +53,12 @@ impl Expression {
         self.code.len()
     }
 
+    #[cfg(test)]
     pub fn evaluate(&self, runtime: &Runtime, input: &Value) -> Result<Value> {
         self.evaluate_inputs(runtime, std::slice::from_ref(input))
     }
 
+    #[cfg(test)]
     pub fn evaluate_inputs(&self, runtime: &Runtime, inputs: &[Value]) -> Result<Value> {
         self.evaluate_with::<false>(runtime, |index| {
             Scalar::from_value(&inputs[index]).expect("guarded scalar inputs")

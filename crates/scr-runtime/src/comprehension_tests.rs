@@ -241,3 +241,143 @@ fn cancellation_in_a_comprehension_releases_transient_values_and_recovers() {
     flag.store(false, Ordering::Relaxed);
     crate::test_support::compare_source(&mut fast, &mut reference, "$recovered=7;").unwrap();
 }
+
+fn scalar_input_pair() -> (Runtime, Runtime) {
+    let (a, mut b) = crate::test_support::runtimes(RuntimeOptions::default());
+    b.disable_scalar_comprehension_inputs = true;
+    (a, b)
+}
+
+#[test]
+fn direct_scalar_inputs_match_previous_plans_for_operators_and_failures() {
+    for input in ["[0,1,-3]", "[true,false]", "[null]"] {
+        for expression in [
+            "$x",
+            "+$x",
+            "-$x",
+            "!$x",
+            "$x+2",
+            "$x-2",
+            "$x*3",
+            "$x/2",
+            "$x%2",
+            "$x===1",
+            "$x!==null",
+            "$x<2",
+            "$x<=2",
+            "$x>2",
+            "$x>=2",
+            "$x&&false",
+            "$x||true",
+            "true||(1/0===0)",
+        ] {
+            let source = format!("$dest='kept';$dest=[{expression} for $x in {input}];");
+            let (mut a, mut b) = scalar_input_pair();
+            let _ = crate::test_support::compare_with_recovery(
+                &mut a,
+                &mut b,
+                &source,
+                "$recovered=1;",
+            );
+            assert_eq!(a.scalar_comprehension_inputs_executed, 1, "{source}");
+            assert_eq!(b.scalar_comprehension_inputs_executed, 0);
+            assert_eq!(a.environments.scope_entries, b.environments.scope_entries);
+        }
+    }
+    for source in [
+        "$dest='kept';$dest=[$x*9223372036854775807 for $x in [1,2]];",
+        "$dest='kept';$dest=[-$x for $x in [-9223372036854775807-1]];",
+        "$dest='kept';$dest=[$x for $x in [true,false] if $x || (1/0===0)];",
+        "$dest='kept';$dest=[$x for $x in [0,1] if $x];",
+        "$dest='kept';$dest=[$x/0 for $x in [1,2]];",
+    ] {
+        let (mut a, mut b) = scalar_input_pair();
+        assert!(
+            crate::test_support::compare_with_recovery(&mut a, &mut b, source, "$recovered=1;")
+                .is_err()
+        );
+        assert_eq!(a.get_global("dest"), Some(&Value::String("kept".into())));
+        assert_eq!(a.environments.scope_entries, b.environments.scope_entries);
+    }
+}
+
+#[test]
+fn direct_scalar_inputs_keep_exact_limits_sources_scopes_and_destinations() {
+    let setup = "$items=[1,2,3];$dest='kept';";
+    let source = "$dest=[$x*3 for $x in $items if $x%2===0];";
+    let (mut a, mut b) = scalar_input_pair();
+    crate::test_support::compare_source(&mut a, &mut b, setup).unwrap();
+    crate::test_support::compare_source(&mut a, &mut b, source).unwrap();
+    let exact = a.steps;
+    let mut options = Vec::new();
+    for limit in 0..=exact + 1 {
+        options.push(RuntimeOptions {
+            instruction_limit: Some(limit),
+            ..Default::default()
+        });
+    }
+    for limit in 0..6 {
+        options.push(RuntimeOptions {
+            max_scopes: Some(limit),
+            ..Default::default()
+        });
+    }
+    let slot = size_of::<Value>();
+    for limit in [
+        0,
+        slot - 1,
+        slot,
+        slot + 1,
+        slot * 4 - 1,
+        slot * 4,
+        slot * 4 + 1,
+        1024,
+    ] {
+        options.push(RuntimeOptions {
+            max_value_bytes: Some(limit),
+            ..Default::default()
+        });
+    }
+    for option in options {
+        let (mut a, mut b) = scalar_input_pair();
+        crate::test_support::compare_source(&mut a, &mut b, setup).unwrap();
+        a.options = option.clone();
+        b.options = option;
+        let _ = crate::test_support::compare_source(&mut a, &mut b, source);
+        assert_eq!(a.environments.scope_entries, b.environments.scope_entries);
+        if a.options.max_value_bytes.is_some() {
+            assert_eq!(a.scalar_comprehension_inputs_executed, 0);
+        }
+        a.options = RuntimeOptions::default();
+        b.options = RuntimeOptions::default();
+        crate::test_support::compare_source(&mut a, &mut b, "$recovered=1;").unwrap();
+    }
+}
+
+#[test]
+fn scalar_input_admission_keeps_map_order_and_general_capture_type_fallbacks() {
+    for (source, planned) in [
+        (
+            "$x='outer';$dest=[$x for $x in ['a'=>null,'b'=>true,'c'=>7]];",
+            true,
+        ),
+        (
+            "function f($xs){return [$x+1 for $x in $xs];}$dest=f([1,2,3]);",
+            true,
+        ),
+        ("$dest=[$x*2.0 for $x in [1.0,2.0]];", false),
+        ("$dest=[$x for $x in ['é',1,[]]];", false),
+        ("$outside=3;$dest=[$x+$outside for $x in [1,2]];", false),
+        (
+            "$dest=[function(){return $x;} for $x in [1,2]];$seen=[$dest[0](),$dest[1]()];",
+            false,
+        ),
+        ("$dest=[$x for $x in []];", false),
+    ] {
+        let (mut a, mut b) = scalar_input_pair();
+        crate::test_support::compare_source(&mut a, &mut b, source).unwrap();
+        assert_eq!(a.scalar_comprehension_inputs_executed, usize::from(planned));
+        assert_eq!(b.scalar_comprehension_inputs_executed, 0);
+        assert_eq!(a.environments.scope_entries, b.environments.scope_entries);
+    }
+}

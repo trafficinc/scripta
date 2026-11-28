@@ -276,6 +276,8 @@ impl Runtime {
                 #[cfg(test)]
                 {
                     self.comprehension_plans_executed += 1;
+                    self.scalar_comprehension_inputs_executed +=
+                        usize::from(!self.disable_scalar_comprehension_inputs);
                 }
                 let mut values = Vec::new();
                 let mut bytes = std::mem::size_of::<Value>();
@@ -283,13 +285,32 @@ impl Runtime {
                     self.checkpoint(span)?;
                     let previous = self.enter_empty_scope(self.environments.current, span)?;
                     let result = (|| {
+                        #[cfg(test)]
+                        if self.disable_scalar_comprehension_inputs {
+                            // Exact previous planned path for differential tests.
+                            if let Some(plan) = &condition_plan {
+                                let allowed = plan.evaluate(self, &item)?;
+                                if !self
+                                    .operation(ops::boolean(allowed), condition.unwrap().span)?
+                                {
+                                    return Ok(());
+                                }
+                            }
+                            let value = value.evaluate(self, &item)?;
+                            return self.push_array_value(&mut values, value, &mut bytes, span);
+                        }
+                        // Admission already proved null/bool/int inputs. Keep
+                        // operands scalar until publishing the output value.
+                        let item = crate::compact_call::Scalar::from_value(&item)
+                            .expect("guarded scalar comprehension input");
+                        let inputs = std::slice::from_ref(&item);
                         if let Some(plan) = &condition_plan {
-                            let allowed = plan.evaluate(self, &item)?;
-                            if !self.operation(ops::boolean(allowed), condition.unwrap().span)? {
+                            let allowed = plan.evaluate_scalars(self, inputs)?;
+                            if !self.operation(allowed.boolean(), condition.unwrap().span)? {
                                 return Ok(());
                             }
                         }
-                        let value = value.evaluate(self, &item)?;
+                        let value = value.evaluate_scalars(self, inputs)?.value();
                         self.push_array_value(&mut values, value, &mut bytes, span)
                     })();
                     self.environments.leave_empty(previous);

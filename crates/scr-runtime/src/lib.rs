@@ -171,6 +171,10 @@ pub struct Runtime {
     #[cfg(test)]
     disable_comprehension_plans: bool,
     #[cfg(test)]
+    disable_scalar_comprehension_inputs: bool,
+    #[cfg(test)]
+    scalar_comprehension_inputs_executed: usize,
+    #[cfg(test)]
     comprehension_plans_executed: usize,
     #[cfg(test)]
     disable_compact_calls: bool,
